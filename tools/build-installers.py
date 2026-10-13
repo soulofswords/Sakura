@@ -67,6 +67,14 @@ def windows():
         def add(path,name):
             output.write(path,name);manifest.append(hashlib.sha256(path.read_bytes()).hexdigest()+'\t'+name)
         for path,name in app_files(): add(path,name)
+        # The Windows native comparison editor includes its companion DLLs,
+        # plugins and original documentation. Never include character files.
+        editor_root=BASE/'tools/pmx-editor'
+        if not (editor_root/'PmxEditor.exe').is_file():
+            raise FileNotFoundError('Restore tools/pmx-editor/PmxEditor.exe before packaging Windows.')
+        for path in editor_root.rglob('*'):
+            if path.is_file() and path.suffix.lower() not in ('.pmx','.pmd','.vrm','.vmd','.vpd','.log'):
+                add(path,'Sakura/tools/pmx-editor/'+path.relative_to(editor_root).as_posix())
         for path,name in bytecode_files: add(path,name)
         add(BUILD/LAUNCHER_FILE,LAUNCHER_FILE)
         add(BUILD/'Uninstall.exe','Sakura/Uninstall.exe')

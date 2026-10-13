@@ -442,6 +442,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             await window.pywebview.api.open_pmx_editor(selectedPmxPath);
         } catch (error) {
             addMessage(`PMX Editor: ${error.message || error}`, 'sakura');
+            if (trackingOnly) alert(`PMX Editor: ${error.message || error}`);
         }
     });
     document.getElementById('pmx-texture-compare').addEventListener('click', () => editorButton.click());

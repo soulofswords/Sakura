@@ -66,8 +66,26 @@ class DesktopApi:
             win.destroy()
 
     def open_pmx_editor(self, model_path):
-        from pmx_editor import open_model
-        return open_model(model_path)
+        from pmx_editor import open_model, find_editor, model_file
+        model_file(model_path)
+        if sys.platform != 'win32':
+            return open_model(model_path)
+        configured = get_settings().get('pmx_editor_path')
+        editor = find_editor(configured)
+        if editor is None:
+            win = self.holder.get('window')
+            if not win:
+                raise RuntimeError('Open Sakura’s desktop window to select PMX Editor.')
+            selected = win.create_file_dialog(webview.FileDialog.OPEN,
+                allow_multiple=False, file_types=('PMX Editor (PmxEditor.exe)',))
+            if not selected:
+                return {'cancelled': True}
+            editor = find_editor(selected[0])
+            if editor is None:
+                raise ValueError('Choose PmxEditor.exe from its complete installation folder.')
+            from app import save_settings
+            save_settings({'pmx_editor_path': str(editor)})
+        return open_model(model_path, str(editor))
 
     def platform_capabilities(self):
         return {'platform': sys.platform, 'pmx_editor': sys.platform == 'win32'}

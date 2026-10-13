@@ -27,6 +27,9 @@ def main():
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target)
             shutil.copy2(stage/'index.html',destination/'static/index.html')
             shutil.copy2(stage/'product.json',destination/'product.json')
+            editor_source=BASE/'tools/pmx-editor'
+            if editor_source.is_dir():
+                shutil.copytree(editor_source,destination/'tools/pmx-editor',dirs_exist_ok=True)
             if edition=='vtuber':
                 source=(BASE/'static/js/app.js').read_text(encoding='utf-8')
                 for old,new in [('Chat Reader off · AI remains paused','Chat Reader off · tracking is available'),('Unloading chat AI and speech models…','Preparing camera tracking…'),('Tracking off · AI remains paused','Tracking off'),('AI paused · choose your camera and start face, shoulder and arm tracking','Choose your camera and start face, shoulder and arm tracking')]:

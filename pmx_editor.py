@@ -15,12 +15,19 @@ def model_file(relative_path):
         raise ValueError('Choose an existing PMX file inside Sakura’s models folder.')
     return file
 
-def open_model(relative_path):
+def find_editor(configured_path=None):
+    for candidate in ([Path(configured_path)] if configured_path else []) + [EDITOR]:
+        if candidate.name.lower() == 'pmxeditor.exe' and candidate.is_file():
+            return candidate.resolve()
+    return None
+
+def open_model(relative_path, editor_path=None):
     file = model_file(relative_path)
     if os.name != 'nt':
         raise RuntimeError('PMX Editor is Windows-only. PMX models still render here; edit them on Windows and reload the model.')
-    if not EDITOR.is_file():
-        raise RuntimeError('PMX Editor is missing from Sakura/tools/pmx-editor.')
-    subprocess.Popen([str(EDITOR), str(file)], cwd=str(EDITOR.parent),
+    editor = find_editor(editor_path)
+    if editor is None:
+        raise RuntimeError('PMX Editor is missing. Select your PmxEditor.exe installation.')
+    subprocess.Popen([str(editor), str(file)], cwd=str(editor.parent),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     return {'opened': True, 'model': relative_path}

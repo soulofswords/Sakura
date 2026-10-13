@@ -17,6 +17,8 @@ static class EditionInstallerCheck {
   var extract=type.GetMethod("Extract",BindingFlags.Static|BindingFlags.NonPublic);
   extract.Invoke(null,new object[]{args[1],null});
   Require(File.Exists(Path.Combine(args[1],display+".exe")),"Branded launcher missing");
+  Require(File.Exists(Path.Combine(args[1],"Sakura","tools","pmx-editor","PmxEditor.exe")),"PMX Editor integration missing");
+  Require(Directory.Exists(Path.Combine(args[1],"Sakura","tools","pmx-editor","Lib")),"PMX Editor libraries missing");
   Require(File.ReadAllText(Path.Combine(args[1],".sakura-installation"))==display+" installation v1","Wrong installation marker");
   var parser=new JavaScriptSerializer();string settings=Path.Combine(args[1],"Sakura","settings.json");var cfg=parser.Deserialize<Dictionary<string,object>>(File.ReadAllText(settings));cfg["model_quality"]="high";cfg["custom_test_setting"]="kept";File.WriteAllText(settings,parser.Serialize(cfg));
   var artwork=Path.Combine(args[1],"Sakura","models","pmx","personal.txt");Directory.CreateDirectory(Path.GetDirectoryName(artwork));File.WriteAllText(artwork,"user artwork");

@@ -138,7 +138,7 @@ def main():
     root=BASE/'tools/edition-work';root.mkdir(exist_ok=True)
     try:
         subprocess.run([sys.executable,'-m','unittest','tests.test_product_editions','tests.test_startup_modes','tests.test_tracking_mode',
-            'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_voice_catalog','tests.test_dance_commands','tests.test_nvidia_ar_setup',
+            'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_pmx_editor','tests.test_voice_catalog','tests.test_dance_commands','tests.test_nvidia_ar_setup',
             'tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
         for script in sorted((BASE/'static/js').glob('*.js')):subprocess.run(['node','--check',str(script)],check=True)
         for name in ['game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-physics.cjs','physics-collisions.cjs',
