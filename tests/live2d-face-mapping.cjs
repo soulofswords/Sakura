@@ -1,0 +1,12 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const ctx={};vm.runInNewContext(fs.readFileSync('static/js/live2d-face-mapping.js','utf8').replace(/export /g,'')+'\nthis.auto=autoFaceMapping;this.apply=applyFaceMappings;',ctx);
+const ids=['ParamCheek','ParamCheekPuff','ParamMouthOpenY','ParamMouthPucker'],values={},active=new Map();
+const live={owner:{manualExpressions:new Map()},avatar:{internalModel:{coreModel:{_model:{parameters:{ids}},getParameterIndex:id=>ids.indexOf(id),getParameterMinimumValue:()=>0,getParameterMaximumValue:()=>1,getParameterDefaultValue:()=>0,setParameterValueById:(id,value)=>values[id]=value}}},expressions:new Map([['鼓腮',{Parameters:[]}]]),setExpression:(name,value)=>active.set(name,value),removeExpression:name=>active.delete(name)};
+const mapping=ctx.auto(live);assert.equal(mapping.cheekPuff,'ParamCheekPuff');assert.equal(mapping.jawOpen,'ParamMouthOpenY');assert.ok(!Object.values(mapping).includes('ParamCheek'),'Never use blush for puff');
+const custom={...live,parameterLabels:{Param21:'鼓腮 CheeckPuff'},avatar:{internalModel:{coreModel:{_model:{parameters:{ids:['Param21','ParamCheek']}}}}}};assert.equal(ctx.auto(custom).cheekPuff,'Param21','Authored display labels identify generic parameter IDs');
+for(let i=0;i<25;i++)ctx.apply(live,{cheekPuff:.9,jawOpen:.3},mapping,true);assert.ok(values.ParamCheekPuff>.89);assert.ok(values.ParamMouthOpenY>.29);
+for(let i=0;i<30;i++)ctx.apply(live,{},mapping,false);assert.ok(values.ParamCheekPuff<.001,'Face loss resets puff');
+const expressionMapping={cheekPuff:'expression:鼓腮'};for(let i=0;i<15;i++)ctx.apply(live,{cheekPuff:1},expressionMapping,true);assert.ok(active.get('鼓腮')>.99);
+live.owner.manualExpressions.set('鼓腮',1);active.set('鼓腮',1);ctx.apply(live,{},expressionMapping,false);assert.equal(active.get('鼓腮'),1,'User expression owns its weight');
+assert.doesNotThrow(()=>ctx.apply(live,{cheekPuff:NaN},{cheekPuff:'missing'},true));
+console.log('PASS: parameter/expression mapping, true puff channel, safe defaults, finite bounded values, face loss and manual ownership');

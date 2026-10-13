@@ -1,0 +1,7 @@
+const assert=require('assert/strict'),fs=require('fs'),vm=require('vm');
+const controls=Object.fromEntries(['tracking-broadcast-camera','tracking-broadcast-open'].map(id=>[id,{}]));
+let devices=[],refreshed=0,selected=0,opened=0;const ctx={document:{getElementById:id=>controls[id]},navigator:{mediaDevices:{enumerateDevices:async()=>devices}},Event:class{}};
+vm.runInNewContext(fs.readFileSync('static/js/broadcast-camera.js','utf8').replace(/export /g,'')+'\nthis.find=findBroadcastCamera;this.install=installBroadcastCamera;',ctx);
+(async()=>{assert.equal(ctx.find([{kind:'audioinput',label:'Microphone (NVIDIA Broadcast)'}]),null);const camera={kind:'videoinput',label:'Camera (NVIDIA Broadcast)',deviceId:'broadcast'};assert.equal(ctx.find([camera]),camera);
+const status={},select={dispatchEvent(){selected++;}};ctx.install({status,select,refresh:async()=>refreshed++,open:async()=>{opened++;return{ok:true};}});
+await controls['tracking-broadcast-camera'].onclick();assert.equal(refreshed,0);assert.match(status.textContent,/not found/);devices=[camera];await controls['tracking-broadcast-camera'].onclick();assert.equal(select.value,'broadcast');assert.equal(selected,1);assert.equal(refreshed,1);assert.match(status.textContent,/Eye Contact off/);assert.equal(controls['tracking-broadcast-camera'].disabled,false);await controls['tracking-broadcast-open'].onclick();assert.equal(opened,1);console.log('PASS: virtual video camera detection, missing device guidance, explicit selection, refresh, and open action');})().catch(e=>{console.error(e);process.exitCode=1;});

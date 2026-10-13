@@ -1,0 +1,23 @@
+# Isolated Python 3.12 runtime; GPU torch/torchaudio are reused from ComfyUI.
+# Install the inference wrapper without dependency resolution (its metadata pins
+# legacy versions), then install the dependencies below into rvc-gpu-runtime.
+rvc-python==0.1.5
+numpy==1.26.4
+https://github.com/BlueAmulet/fairseq-win-whl/releases/download/ci_build/fairseq-0.13.2-cp312-cp312-win_amd64.whl
+hydra-core==1.3.2
+omegaconf==2.3.0
+librosa
+faiss-cpu
+ffmpeg-python
+loguru
+praat-parselmouth
+pyworld
+resampy
+soundfile
+torchcrepe
+sacrebleu
+bitarray
+av
+fastapi
+uvicorn
+python-multipart

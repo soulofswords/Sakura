@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const tick = () => new Promise(resolve => setImmediate(resolve));
+(async () => {
+    const source = fs.readFileSync('static/js/speech-pipeline.js', 'utf8');
+    const { splitSpeech, speakPhrases } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+    const parts = splitSpeech('Hello! How are you? I am here to help.');
+    assert.deepEqual(parts, ['Hello! How are you? I am here to help.']);
+    assert.equal(splitSpeech('word '.repeat(200)).join(' '), 'word '.repeat(200).trim());
+    const releases = new Map();
+    const played = [];
+    let releasePlayback;
+    const firstPhrase = 'First ' + 'word '.repeat(26).trim() + '.';
+    const secondPhrase = 'Second ' + 'word '.repeat(26).trim() + '.';
+    const thirdPhrase = 'Third ' + 'word '.repeat(26).trim() + '.';
+    const speech = speakPhrases([firstPhrase, secondPhrase, thirdPhrase].join(' '), text => new Promise(resolve => releases.set(text, resolve)), async (audio, first) => {
+        played.push([audio, first]);
+        if (first) await new Promise(resolve => { releasePlayback = resolve; });
+    }, () => true);
+    await tick();
+    releases.get(firstPhrase)('audio1');
+    await tick();
+    assert.deepEqual(played, [['audio1', true]], 'First phrase starts while later speech is still preparing');
+    assert.ok(releases.has(thirdPhrase), 'Prepare the next phrase during playback');
+    releases.get(thirdPhrase)('audio3');
+    releases.get(secondPhrase)('audio2');
+    releasePlayback();
+    await speech;
+    assert.deepEqual(played, [['audio1', true], ['audio2', false], ['audio3', false]]);
+    let current = true;
+    const finishing = [];
+    const cancelled = speakPhrases('One. Two.', () => new Promise(resolve => { finishing.push(resolve); }), () => assert.fail('Cancelled response must not play'), () => current);
+    await tick();
+    current = false;
+    finishing.forEach(finish => finish('unused'));
+    await cancelled;
+    console.log('PASS: phrase splitting, early playback, ordered prefetch, stale response cancellation');
+})().catch(error => { console.error(error); process.exitCode = 1; });

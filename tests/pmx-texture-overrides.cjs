@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const source=fs.readFileSync('static/js/model-viewer.js','utf8').replace(/\r\n/g,'\n');
+const apply=new Function('data','materialTextures',source.match(/_applyPmxTextureOverrides\(data, materialTextures\) \{([\s\S]*?)\n    \}\n\n    _preparePmxMaterials/)[1]);
+const data={textures:['skin.png'],materials:[0,1].map(i=>({name:'body'+i,textureIndex:0,envTextureIndex:-1,envFlag:0,toonFlag:1,toonIndex:2}))};
+const slots=apply(data,{1:{diffuse:'new-skin.png',toon:'ramp.bmp',sphere:'shine.sph'}});
+assert.equal(data.materials[0].textureIndex,0,'Shared original image does not change other material');
+assert.equal(data.textures[data.materials[1].textureIndex],'new-skin.png');
+assert.equal(data.textures[data.materials[1].toonIndex],'ramp.bmp');
+assert.equal(data.materials[1].toonFlag,0,'Custom toon switches from shared to chosen file');
+assert.equal(data.materials[1].envFlag,1);
+assert.equal(slots.find(s=>s.material===1 && s.slot==='diffuse').original,'skin.png');
+const bad={textures:['skin.png'],materials:[{textureIndex:0}]};
+apply(bad,{0:{diffuse:'../../outside.png'}});
+assert.equal(bad.materials[0].textureIndex,0);
+console.log('PASS: per-material diffuse/sphere/toon override isolation, original reference and path checks');

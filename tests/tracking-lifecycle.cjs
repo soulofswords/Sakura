@@ -1,0 +1,30 @@
+const fs=require('fs'),assert=require('node:assert/strict');
+const load=(file,name)=>new Function(fs.readFileSync(file,'utf8').replace('export default class '+name,'class '+name)+';return '+name)();
+const ChatReader=load('static/js/chat-reader.js','ChatReader');
+(async()=>{
+ let lines=[],plays=[],stops=0,pending;
+ const reader=new ChatReader({speak:async text=>{lines.push(text);return text},play:async audio=>plays.push(audio),stopAudio:()=>stops++,status:()=>{}});
+ reader.start();reader.enqueue([{id:'1',author:'A',text:'hello',timestamp:Date.now()},{id:'1',author:'A',text:'hello',timestamp:Date.now()},{id:'old',text:'old',timestamp:0}]);
+ await new Promise(r=>setTimeout(r,10));assert.equal(lines.length,1);assert.equal(plays.length,1);
+ reader.speak=()=>new Promise(r=>pending=r);reader.enqueue([{id:'2',text:'cancel me',timestamp:Date.now()}]);reader.stop();pending('old audio');await new Promise(r=>setTimeout(r,10));assert.equal(plays.length,1);
+ const AvatarTracking=load('static/js/avatar-tracking.js','AvatarTracking');
+ let waiting=[],streams=[],lastWorker;
+ Object.defineProperty(globalThis,'navigator',{value:{mediaDevices:{getUserMedia:()=>new Promise(r=>waiting.push(r))}},configurable:true});
+ globalThis.document={createElement:()=>({play:async()=>{},pause(){},readyState:2,currentTime:1})};
+ globalThis.Worker=class{constructor(){lastWorker=this;this.messages=[];}terminate(){this.terminated=true;}postMessage(data){this.messages.push(data);if(data.type==='init')queueMicrotask(()=>this.onmessage?.({data:{type:'ready'}}));}};
+ const tracking=new AvatarTracking({setUserTracking:()=>{},calibrateUserTracking:()=>{},userTrackingSample:null,updateUserTracking(sample){this.userTrackingSample=sample;}},()=>{});
+ const stream=()=>{const track={stopped:false,stop(){this.stopped=true;}};return {track,getTracks:()=>[track]};};
+ let first=tracking.start(),second=tracking.start();const a=stream(),b=stream();waiting[1](b);await second;waiting[0](a);await first;
+ assert(a.track.stopped);assert(!b.track.stopped);assert.equal(tracking.stream,b);assert(tracking.enabled);
+ tracking.viewer.userTrackingSample={face:{landmarks:[{}]},hands:[{landmarks:[{}]}],pose:{landmarks:[{}]}};
+ tracking.setHandTracking(false);assert.equal(lastWorker.messages.at(-1).type,'hands-enabled');assert.equal(lastWorker.messages.at(-1).enabled,false);
+ assert.equal(tracking.viewer.userTrackingSample.handTrackingEnabled,false);assert.deepEqual(tracking.viewer.userTrackingSample.hands,[]);assert.equal(tracking.viewer.userTrackingSample.pose,null);
+ lastWorker.onmessage({data:{type:'result',face:{landmarks:[{}]},hands:[{landmarks:[{}]}],pose:{landmarks:[{}]},timestamp:1}});
+ assert.equal(tracking.viewer.userTrackingSample.handTrackingEnabled,false);assert.deepEqual(tracking.viewer.userTrackingSample.hands,[]);assert.equal(tracking.viewer.userTrackingSample.pose,null,'an in-flight frame must not restore body tracking after the switch is turned off');
+ tracking.setHandTracking(true);assert.equal(lastWorker.messages.at(-1).enabled,true);assert.equal(tracking.viewer.userTrackingSample.handTrackingEnabled,true);
+ tracking.stop();assert(b.track.stopped);assert(lastWorker.terminated);
+ // Cancellation during worker initialization resolves the pending start.
+ globalThis.Worker=class{terminate(){}postMessage(){}};
+ const third=tracking.start();const c=stream();waiting[2](c);await new Promise(r=>setTimeout(r,0));tracking.stop();await third;assert(c.track.stopped);assert.equal(tracking.stream,null);
+ console.log('PASS: reader deduplication, stale-message expiry, cancellation; overlapping camera starts, hand-tracking toggle, stop/restart and initialization cancellation');
+})().catch(e=>{console.error(e);process.exitCode=1;});

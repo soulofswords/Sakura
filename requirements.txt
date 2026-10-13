@@ -1,0 +1,27 @@
+# ── Core ───────────────────────
+faster-whisper
+onnxruntime
+sounddevice
+soundfile
+numpy
+requests
+edge-tts
+pygame
+rich
+
+# ── GUI Mode ───────────────────
+fastapi
+uvicorn[standard]
+python-multipart
+pywebview
+PySide6==6.8.3
+qtpy
+Pillow
+pytchat==0.5.5
+
+# ── Optional (wake word) ──────
+# openwakeword
+# onnxruntime
+
+# Optional Windows-only frame sharing (inactive until user enables it)
+SpoutGL==0.1.1; sys_platform == "win32"

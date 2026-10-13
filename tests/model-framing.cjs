@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {pathToFileURL}=require('node:url');
+const path=require('node:path');
+(async()=>{
+    const THREE=await import(pathToFileURL(path.resolve('static/vendor/three/build/three.module.js')));
+    const source=fs.readFileSync('static/js/model-viewer.js','utf8').replace(/\r\n/g,'\n');
+    const body=source.match(/_visibleModelBounds\(object\) \{([\s\S]*?)\n    \}\n\n    _autoFrame/)[1];
+    const frame=new Function('THREE','object',body);
+    const group=new THREE.Group();
+    const visible=new THREE.Mesh(new THREE.BoxGeometry(2,4,2),new THREE.MeshBasicMaterial());
+    const helper=new THREE.Mesh(new THREE.BoxGeometry(2,2,2),new THREE.MeshBasicMaterial({opacity:0}));
+    helper.position.set(3500,0,-500);
+    group.add(visible,helper);
+    const box=frame(THREE,group);
+    assert.deepEqual(box.min.toArray(),[-1,-2,-1]);
+    assert.deepEqual(box.max.toArray(),[1,2,1]);
+    helper.material.opacity=.5;
+    assert.ok(frame(THREE,group).max.x>3500,'Visible translucent parts still included');
+    helper.visible=false;
+    assert.equal(frame(THREE,group).max.x,1,'Invisible meshes excluded');
+    console.log('PASS: hidden distant helper surfaces excluded from framing; translucent visible geometry preserved');
+})().catch(error=>{console.error(error);process.exitCode=1});

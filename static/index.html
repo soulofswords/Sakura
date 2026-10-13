@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sakura — Anime AI Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=left-settings8">
+
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "/static/vendor/three/build/three.module.js",
+            "three/addons/": "/static/vendor/three/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <script>
+        if (new URLSearchParams(location.search).has('desktop')) {
+            document.body.classList.add('desktop-companion');
+            if (localStorage.getItem('sakura_transparency') !== 'false') {
+                document.documentElement.classList.add('transparent-mode');
+                document.body.classList.add('transparent-mode');
+            }
+        }
+    </script>
+    <section id="model-upload-splash" class="hidden" aria-label="Model upload">
+        <img src="/static/assets/model-upload.png" alt="Sakura model and voice upload">
+        <div class="model-upload-splash-copy">
+            <strong>Model Upload</strong>
+            <span>PMX, VRM, Live2D and custom voices</span>
+        </div>
+        <button type="button" id="skip-upload-splash">Open model library</button>
+    </section>
+    <section id="desktop-companion-splash" class="hidden" aria-label="Desktop Companion">
+        <img src="/static/assets/desktop-companion.png" alt="Sakura Desktop Companion">
+        <div class="desktop-companion-splash-copy">
+            <strong>Desktop Companion</strong>
+            <span>Sakura is getting ready</span>
+        </div>
+        <button type="button" id="skip-companion-splash">Open companion</button>
+    </section>
+    <div id="viewer" title="Desktop: left-drag to position, scroll to resize, right-drag to rotate, double-click to reset. Drag the top bar to move the window."></div>
+
+    <!-- Draggable Header / Top Bar -->
+    <header id="top-bar">
+        <div class="brand">
+            <span class="logo">🌸</span>
+            <span class="title" id="brand-title">Sakura</span>
+            <span class="badge">Companion</span>
+        </div>
+        <div id="win-controls" class="win-controls no-drag" style="display: none;">
+            <button id="win-min-btn" class="win-btn" title="Minimize" aria-label="Minimize">—</button>
+            <button id="win-max-btn" class="win-btn" title="Maximize" aria-label="Maximize">□</button>
+            <button id="win-close-btn" class="win-btn close" title="Close" aria-label="Close">✕</button>
+        </div>
+        <div class="controls no-drag">
+            <button id="expression-editor-btn" class="expression-editor-btn" type="button">Model Settings</button>
+            <!-- 3D Model Selector (Custom Dropdown) -->
+            <div class="custom-dropdown no-drag" id="model-dropdown">
+                <button type="button" class="dropdown-trigger" id="model-dropdown-trigger" title="Select PMX Character Model">
+                    <span class="dropdown-label" id="model-dropdown-label">PMX</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu hidden" id="model-dropdown-menu"></div>
+                <select id="model-select" style="display: none;">
+                    <option value="">No model loaded</option>
+                </select>
+            </div>
+            <div class="custom-dropdown no-drag" id="vrm-dropdown">
+                <button type="button" class="dropdown-trigger" title="Select VRM Character Model">
+                    <span class="dropdown-label">VRM</span><span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu hidden"></div>
+                <select id="vrm-select" style="display:none;"><option value="">VRM</option></select>
+            </div>
+            <div class="custom-dropdown no-drag" id="live2d-dropdown">
+                <button type="button" class="dropdown-trigger" title="Select Live2D model">
+                    <span class="dropdown-label">Live2D</span><span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu hidden"></div>
+                <select id="live2d-select" style="display:none;"><option value="">Live2D</option></select>
+            </div>
+            <div class="web-model-import toolbar-model-imports">
+                <button type="button" id="upload-pmx-toolbar">Upload PMX</button>
+                <button type="button" id="upload-vrm-toolbar">Upload VRM</button>
+                <button type="button" id="upload-live2d-toolbar">Upload Live2D</button>
+            </div>
+            <button id="refresh-models" title="Scan models folder">🔄</button>
+            <button id="load-file-btn" class="accent-btn" title="Open PMX file">📂</button>
+            <input type="file" id="pmx-file-input" accept=".pmx,.vrm,.zip" style="display: none;">
+            <input type="file" id="pmx-folder-input" data-model-format="pmx" webkitdirectory multiple style="display:none;">
+            <input type="file" id="vrm-file-input" accept=".vrm" data-model-format="vrm" style="display:none;">
+            <input type="file" id="live2d-folder-input" webkitdirectory multiple data-model-format="live2d" style="display:none;">
+
+            <!-- Voice Selector (Custom Dropdown) -->
+            <div class="custom-dropdown no-drag" id="voice-dropdown">
+                <button type="button" class="dropdown-trigger" id="voice-dropdown-trigger" title="Select Character Voice">
+                    <span class="dropdown-label" id="voice-dropdown-label">🎵 Voice...</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="dropdown-menu hidden" id="voice-dropdown-menu"></div>
+                <select id="voice-quick-select" style="display: none;">
+                    <option value="">🎵 Voice...</option>
+                </select>
+            </div>
+
+            <button id="theme-btn" title="Environment Color Wheel &amp; Aura">🎨</button>
+            <button id="quality-btn" title="Cycle model quality: Low, Balanced, High">Balanced</button>
+            <button id="full-model-btn" type="button" aria-pressed="false">Full model</button>
+            <select id="dance-style" aria-label="Dance routine" class="no-drag"><option value="groove">Groove</option><option value="step">Side step</option><option value="wave">Arm wave</option></select>
+            <button id="dance-btn" type="button">Dance</button>
+            <button id="dance-stop-btn" type="button">Stop dance</button>
+            <button id="pmx-editor-btn" type="button" class="hidden" title="Open the selected PMX in its native editor">PMX Editor</button>
+            <label class="model-size-control no-drag" for="model-size">Size <input id="model-size" type="range" min="40" max="180" step="5" value="100" aria-label="Model display size"><output id="model-size-value">100%</output></label>
+            <button id="interrupt-btn" type="button" title="Interrupt the current reply">⏹ Stop speaking</button>
+            <button id="clear-memory-desktop" type="button" title="Forget saved conversations and memory">🧹 Clear memory</button>
+            <button id="eye-tracking-btn" type="button" aria-pressed="false" title="Make Sakura's eyes follow your mouse cursor">👀 Eyes off</button>
+            <button id="auto-game-btn" type="button" aria-pressed="false" title="Detect games, use Qwen 2B and enable occasional screen reactions">🎮 Auto game off</button>
+            <button id="tracking-mode-btn" type="button" title="Webcam face and hand tracking with chat AI unloaded">VTuber</button>
+            <button id="vtuber-mode-btn" type="button" title="AI YouTube chat and screen co-hosting">AI VTuber</button>
+            <button id="chat-reader-mode-btn" type="button" hidden title="Read YouTube chat aloud with camera tracking off">Chat Reader</button>
+            <button id="settings-btn" title="Settings">⚙️</button>
+            <button id="screen-view-btn" type="button" aria-pressed="false" title="Let Sakura see your screen">🖥️ Screen off</button>
+            <button id="screen-react-btn" type="button" aria-pressed="false" title="Occasional spoken screen reactions while you are quiet">💬 Reactions off</button>
+            <span id="transparency-shortcut-label" class="transparency-shortcut-label">Ctrl+Shift+T</span>
+            <button id="bg-toggle-btn" title="Toggle streaming transparency (Ctrl+Shift+T)" aria-pressed="false">🔮</button>
+            <button id="overlay-ui-btn" aria-pressed="false" title="Hide controls for streaming. Ctrl+Shift+H or double-click the view to restore.">👁️</button>
+            <button id="continuous-mic-btn" type="button" title="Toggle desktop listening" style="display:none" aria-pressed="false">🎤 Listen</button>
+            <div id="status-indicator" class="status-dot offline" title="Ollama Status"></div>
+
+        </div>
+    </header>
+    <div id="listening-status" role="status"></div>
+    <div id="rvc-loading-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="rvc-loading-title">
+        <div class="modal-card rvc-loading-card">
+            <div class="modal-header"><h3 id="rvc-loading-title">Loading RVC voice</h3></div>
+            <div class="modal-body">
+                <p id="rvc-loading-message" role="status">Starting the local voice service…</p>
+                <div class="rvc-loading-bar" aria-hidden="true"><span></span></div>
+                <p id="rvc-loading-error" class="error-text" role="alert"></p>
+                <button id="rvc-loading-close" type="button" class="hidden">Close</button>
+            </div>
+        </div>
+    </div>
+    <div id="expression-modal" class="modal-backdrop hidden">
+        <div class="modal-card" style="max-width:620px">
+            <div class="modal-header"><h3>Model Settings</h3><button id="close-expression-modal" type="button" class="close-btn">✕</button></div>
+            <div class="settings-tabs" role="tablist" aria-label="Model settings sections">
+                <button type="button" class="tab-btn" data-model-tab="remapping" role="tab">Texture remapping</button>
+                <button type="button" class="tab-btn" data-model-tab="coloring" role="tab">Texture coloring</button>
+                <button type="button" class="tab-btn" data-model-tab="expression" role="tab">Expressions</button>
+                <button type="button" class="tab-btn" data-model-tab="mouth" role="tab">Mouth</button>
+            </div>
+            <div class="modal-body">
+              <section id="model-remapping-panel" data-model-panel="remapping" hidden>
+                <label for="model-remap-part">Texture / material</label><select id="model-remap-part"></select>
+                <p id="model-remap-hint" class="modal-hint"></p>
+                <input type="file" id="model-remap-file" accept="image/png,image/jpeg,image/webp">
+                <div class="save-actions"><button id="model-remap-apply" data-material-action type="button">Apply replacement</button><button id="model-remap-reset" data-material-action type="button">Restore original texture</button></div>
+              </section>
+              <section data-model-panel="coloring">
+                <label for="model-color-part">Hair, clothing or model part</label><select id="model-color-part"></select>
+                <button id="model-pick-part" type="button">Pick part on model</button>
+                <p id="model-color-hint" class="modal-hint"></p>
+                <label for="model-color">Color</label><input type="color" id="model-color" value="#ffffff">
+                <div id="model-color-dial"></div>
+                <label for="model-color-strength">Color strength <output id="model-color-strength-value">100%</output></label><input type="range" id="model-color-strength" min="0" max="100" value="100">
+                <label for="model-color-opacity">Transparency <output id="model-color-opacity-value">0%</output></label><input type="range" id="model-color-opacity" min="0" max="100" value="0">
+                <div class="save-actions"><button id="model-color-apply" data-material-action type="button">Apply color</button><button id="model-color-reset" data-material-action type="button">Restore original color</button></div>
+              </section>
+              <section data-model-panel="expression" hidden>
+                <p id="model-expression-hint" class="modal-hint"></p>
+                <button id="custom-expression-new" type="button">Create custom expression</button>
+                <section id="custom-expression-editor" class="hidden">
+                    <label>Expression name<input id="custom-expression-name" type="text" maxlength="100" placeholder="My expression"></label>
+                    <input id="custom-expression-search" type="search" placeholder="Filter model parameters">
+                    <p class="modal-hint">Enable the parameters you want to include, adjust their values, then preview and save. Other parameters remain controlled by tracking and active expressions.</p>
+                    <div id="custom-expression-parameters"></div>
+                    <div class="save-actions"><button id="custom-expression-preview" type="button">Preview</button><button id="custom-expression-save" type="button">Save expression</button><button id="custom-expression-cancel" type="button">Cancel</button></div>
+                </section>
+                <p>Expressions stay active together until you turn them off. Use Turn off on an individual expression, or press its shortcut again. If two expressions control the same parameter, the latest enabled expression is applied last.</p>
+                <div id="expression-list" class="expression-list" aria-label="Imported expressions"></div>
+                <button id="expression-neutral" type="button">Turn off all expressions</button>
+                <p id="expression-status" role="status"></p>
+              </section>
+              <p id="model-material-status" role="status" aria-live="polite"></p>
+              <section data-model-panel="mouth" hidden>
+                <div class="mouth-input-toggles"><label><input id="mouth-combined-enabled" type="checkbox"> Camera + microphone mouth tracking</label></div>
+                <label>Mouth input<select id="mouth-source"><option value="webcam">Webcam tracking</option><option value="microphone">Microphone lip sync</option><option value="both">Camera + microphone</option><option value="playback">Speech / voice changer playback</option><option value="off">Off</option></select></label>
+                <p class="modal-hint">One tick enables camera mouth tracking and local microphone lip sync together. Untick to stop microphone capture and disable both mouth inputs. Face and hand tracking remain available.</p>
+                <label>Lip-sync method<select id="mouth-method"><option value="simple">Simple — volume based</option><option value="spectral">Frequency based — approximate mouth shapes</option></select></label>
+                <p class="modal-hint">Microphone mode uses the input selected in Camera and Audio. It animates the mouth without speaking or loading AI. Frequency mode estimates shapes; it does not recognize phonemes.</p>
+                <label>Sensitivity<input id="mouth-gain" type="range" min="0.1" max="5" step="0.1" value="1"></label>
+                <label>Silence cutoff<input id="mouth-cutoff" type="range" min="0" max="0.1" step="0.001" value="0.01"></label>
+                <label>Smoothing<input id="mouth-smoothing" type="range" min="0.01" max="0.4" step="0.01" value="0.08"></label>
+                <div id="mouth-mapping"></div>
+                <section id="live2d-face-mappings" hidden>
+                    <h4>Live2D facial expression mappings</h4>
+                    <p id="live2d-face-mapping-status" class="modal-hint"></p>
+                    <div id="live2d-face-mapping-list"></div>
+                    <label>Cheek-puff preview<input id="live2d-puff-preview" type="range" min="0" max="100" value="0"></label>
+                    <button id="live2d-puff-preview-stop" type="button">Stop puff preview</button>
+                    <button id="live2d-face-mapping-reset" type="button">Detect matching parameters again</button>
+                </section>
+                <div class="save-actions"><button id="mouth-mic-start" type="button">Start microphone lip sync</button><button id="mouth-mic-stop" type="button">Stop microphone</button><button id="mouth-reset" type="button">Reset mouth settings</button></div>
+                <p id="mouth-status" role="status"></p>
+              </section>
+            </div>
+        </div>
+    </div>
+    <div id="tracking-modal" class="modal-backdrop hidden">
+        <div class="modal-card">
+            <div class="modal-header"><h3>VTuber · Webcam tracking</h3><button id="close-tracking-modal" type="button" class="close-btn">✕</button></div>
+            <div class="tracking-options">
+                <p>Use your expressions, gaze and head to animate the character. The body-tracking switch also controls shoulders, arms, hands and fingers. Chat AI, speech and screen reactions are paused and the local language model is unloaded.</p>
+                <label for="tracking-camera">Camera</label>
+                <select id="tracking-camera"><option value="">Default camera</option></select>
+                <label><input id="tracking-mirror" type="checkbox" checked> Mirror movement</label>
+                <label><input id="tracking-hands-enabled" type="checkbox" checked> Track shoulders, arms, hands and fingers</label>
+                <p class="modal-hint">Show each full hand inside the camera frame to move its arm. When a hand leaves the frame, that arm and its fingers return to rest. Shoulders alone do not activate arm tracking.</p>
+                <div class="save-actions"><button id="tracking-start" type="button">Start tracking</button><button id="tracking-calibrate" type="button">Calibrate neutral face</button><button id="tracking-stop" type="button">Stop tracking</button><button id="tracking-restore-ai" type="button">Return to assistant</button></div>
+                <label for="reader-chat-link">YouTube livestream / chat link</label>
+                <input id="reader-chat-link" type="url" placeholder="https://www.youtube.com/watch?v=…">
+                <div class="save-actions"><button id="chat-reader-start" type="button">Chat Reader on</button><button id="chat-reader-stop" type="button">Chat Reader off</button></div>
+                <p class="modal-hint">Chat Reader reads messages aloud with a built-in voice. It turns off face and hand tracking. No AI replies. Internet is required for YouTube and speech.</p>
+                <p id="tracking-status" role="status">Off</p>
+                <p class="modal-hint">Camera frames stay on this device. Keep your face and hands inside the camera view. Expressions and finger movement depend on the selected model's rig; Live2D tracking uses parameters exported with the model.</p>
+            </div>
+        </div>
+    </div>
+    <button id="restore-companion-controls" type="button" title="Show companion controls (Ctrl+Shift+H)" aria-label="Show companion controls">⚙</button>
+
+    <!-- 🎨 Environment Color Wheel & Aura Popover -->
+    <div id="theme-popover" class="hidden">
+        <div class="popover-header">
+            <span>🎨 Environment &amp; Color Wheel</span>
+            <button id="close-theme-popover" class="popover-close">✕</button>
+        </div>
+        <div class="popover-body">
+            <!-- Real-time Color Wheel -->
+            <div class="color-wheel-section">
+                <label>Color Wheel / Custom Hue:</label>
+                <div class="color-wheel-row">
+                    <input type="color" id="env-color-picker" value="#ff6ea7" title="Click to open Color Wheel">
+                    <span id="env-color-hex">#ff6ea7</span>
+                </div>
+            </div>
+
+            <!-- Environment Aura Presets -->
+            <div class="palette-section">
+                <label>Aura Presets:</label>
+                <div class="aura-presets" id="aura-presets-grid">
+                    <button class="aura-chip active" data-color="#ff6ea7" style="--chip-color:#ff6ea7">🌸 Sakura</button>
+                    <button class="aura-chip" data-color="#00f0ff" style="--chip-color:#00f0ff">⚡ Cyan</button>
+                    <button class="aura-chip" data-color="#a855f7" style="--chip-color:#a855f7">💜 Violet</button>
+                    <button class="aura-chip" data-color="#10b981" style="--chip-color:#10b981">🍃 Emerald</button>
+                    <button class="aura-chip" data-color="#f97316" style="--chip-color:#f97316">🌅 Sunset</button>
+                    <button class="aura-chip" data-color="#3b82f6" style="--chip-color:#3b82f6">🌊 Ocean</button>
+                    <button class="aura-chip" data-color="#eab308" style="--chip-color:#eab308">✨ Amber</button>
+                    <button class="aura-chip" data-color="#ef4444" style="--chip-color:#ef4444">🩸 Crimson</button>
+                </div>
+            </div>
+
+            <!-- Lighting Intensity Slider -->
+            <div class="slider-group">
+                <div class="slider-label-row">
+                    <span>Aura Intensity:</span>
+                    <span id="env-intensity-val">100%</span>
+                </div>
+                <input type="range" id="env-intensity-slider" min="20" max="150" value="100" step="5">
+            </div>
+            <div class="slider-group">
+                <div class="slider-label-row"><span>Character Bloom:</span><span id="character-glow-value">0%</span></div>
+                <input type="range" id="character-glow-slider" min="0" max="100" value="0" step="5" aria-label="Character glow strength">
+                <span class="modal-hint">Soft glow around bright highlights. Set to 0 to turn off.</span>
+            </div>
+            <div class="slider-group"><label for="light-angle-slider">Light angle: <span id="light-angle-value">35°</span></label><input id="light-angle-slider" type="range" min="-180" max="180" value="35" step="5"></div>
+            <div class="slider-group"><label for="light-elevation-slider">Light height: <span id="light-elevation-value">30°</span></label><input id="light-elevation-slider" type="range" min="-10" max="90" value="30" step="5"></div>
+            <div class="slider-group"><label for="gloss-boost-slider">Gloss boost: <span id="gloss-boost-value">0%</span></label><input id="gloss-boost-slider" type="range" min="0" max="100" value="0" step="5"><span class="modal-hint">Boosts supported materials' highlights. 0 preserves the model's original finish.</span></div>
+
+            <!-- RGB Rainbow Breathing Toggle -->
+            <div class="rgb-toggle-row">
+                <label class="toggle-label">
+                    <input type="checkbox" id="env-rgb-toggle">
+                    <span>🌈 RGB Rainbow Aura (Breathing)</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Speech Bubble (when chat panel is minimized) -->
+    <div id="floating-speech-bubble" class="hidden">
+        <div id="speech-bubble-text"></div>
+    </div>
+
+    <!-- Chat & Interaction Panel -->
+    <section id="chat-panel">
+        <div class="panel-header">
+            <div class="panel-title pywebview-drag-region" title="Drag chat panel">
+                <span id="panel-title-text">💬 Chat with Sakura</span>
+            </div>
+            <div class="panel-actions no-drag">
+                <button id="refresh-memory-btn" title="Reload saved memory and repair old address names">🔄</button>
+                <button id="toggle-chat-panel" title="Minimize Chat Panel">—</button>
+                <button id="clear-btn" title="Clear conversation memory">🗑️</button>
+            </div>
+        </div>
+        <div id="screen-view-status" role="status">Screen off · No snapshots sent</div>
+        <div id="messages"></div>
+        <div class="input-area no-drag">
+            <input type="text" id="chat-input" placeholder="Type a message or use your mic..." autocomplete="off">
+            <button id="mic-btn" title="Hold/Click to speak">🎤</button>
+            <button id="send-btn" title="Send message">➤</button>
+        </div>
+    </section>
+
+    <!-- Floating Chat Restore Button -->
+    <button id="chat-bubble-btn" class="floating-bubble-btn hidden" title="Open Chat">💬</button>
+
+    <!-- ══════════════ SETTINGS MODAL (Tabbed) ══════════════ -->
+    <div id="settings-modal" class="modal-backdrop hidden">
+        <div class="modal-card wide-modal">
+            <div class="modal-header">
+                <h3>⚙️ Settings</h3>
+                <button id="close-settings-btn" class="close-btn">✕</button>
+            </div>
+
+            <!-- Tab Bar -->
+            <div class="settings-tabs">
+                <button class="tab-btn active" data-tab="voice">🎭 Voice</button>
+                <button class="tab-btn" data-tab="general">General</button>
+                <button class="tab-btn" data-tab="models">🎎 Models</button>
+                <button class="tab-btn" data-tab="theme">🎨 Theme</button>
+                <button class="tab-btn" data-tab="audio">📷 Camera &amp; Audio</button>
+                <button class="tab-btn" data-tab="ai">🧠 AI</button>
+                <button class="tab-btn" data-tab="assistant">🌸 Assistant</button>
+            </div>
+
+            <!-- ── TAB: Voice ── -->
+            <div class="tab-content" id="tab-general">
+                <div class="setting-group checkbox-group">
+                    <label><input id="preserve-configuration" type="checkbox" checked> Preserve configuration on reinstall</label>
+                    <p class="modal-hint">Keep your settings when updating or reinstalling. Turning this off resets configuration on the next reinstall; imported models, voices and artwork remain intact. A configuration backup is kept.</p>
+                    <fieldset class="setting-group"><legend>Spout2 · OBS output</legend>
+                        <label><input id="spout-enabled" type="checkbox"> Enable Spout2 output</label>
+                        <label for="spout-name">Spout sender name</label><input id="spout-name" value="Sakura" maxlength="64">
+                        <label for="spout-resolution">Output size (long edge)</label><select id="spout-resolution"><option value="480">480 px</option><option value="720" selected>720 px</option><option value="1080">1080 px</option></select>
+                        <label for="spout-fps">Frame rate limit</label><select id="spout-fps"><option value="15" selected>15 FPS</option><option value="30">30 FPS</option><option value="60">60 FPS</option></select>
+                        <p id="spout-status" role="status">Spout output is off.</p>
+                        <p class="modal-hint">Windows: add Spout2 Capture in OBS and select Sakura. Outputs the character with alpha, without controls or background. Works in Gemini, Local LLM and VTuber modes. Off by default. The browser bridge copies frames through memory; lower size/FPS reduces overhead. Glow post-processing is not included.</p>
+                    </fieldset>
+                    <label for="transparency-hotkey">Transparency hotkey (AI companion)</label>
+                    <input id="transparency-hotkey" readonly placeholder="Ctrl+Shift+T (default)" aria-label="Click then press your transparency shortcut">
+                    <button id="reset-transparency-hotkey" type="button">Use default Ctrl+Shift+T</button>
+                    <p class="modal-hint">Click the field and press a shortcut with Ctrl, Alt or Meta. Leave it empty to use the default. Save to apply.</p>
+                    <button id="save-general-settings" type="button" class="accent-btn save-btn">Save General settings</button>
+                    <p id="general-save-status" role="status" class="modal-hint"></p>
+                </div>
+            </div>
+            <div class="tab-content active" id="tab-voice">
+                <div class="setting-group">
+                    <label>Character voice · 10 Male / 10 Female:</label>
+                    <p class="modal-hint">English voices keep replies in English. Choose the separate Hindi or Hinglish voice for those languages. Change voice and language between replies.</p>
+                    <div class="voice-grid" id="voice-preset-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <div class="setting-divider"></div>
+
+                <!-- RVC Custom Voice Upload -->
+                <div class="setting-group">
+                    <label>🎤 Custom RVC Voice (.pth + .index):</label>
+                    <div class="rvc-upload-section">
+                        <div class="rvc-models-list" id="rvc-models-list">
+                            <div class="rvc-empty">No custom voice models found in <code>voices/</code> folder</div>
+                        </div>
+                        <div class="rvc-upload-form">
+                            <input type="text" id="rvc-char-name" placeholder="Character name (e.g. Miku, HuTao)">
+                            <div class="rvc-file-row">
+                                <label class="file-pick-btn" for="rvc-pth-input">
+                                    📦 .pth model
+                                    <input type="file" id="rvc-pth-input" accept=".pth" style="display:none">
+                                </label>
+                                <span id="rvc-pth-label" class="file-label-text">No file</span>
+                            </div>
+                            <div class="rvc-file-row">
+                                <label class="file-pick-btn" for="rvc-index-input">
+                                    🗂️ .index file
+                                    <input type="file" id="rvc-index-input" accept=".index" style="display:none">
+                                </label>
+                                <span id="rvc-index-label" class="file-label-text">Optional</span>
+                            </div>
+                            <button id="rvc-upload-btn" class="accent-btn upload-btn">⬆️ Upload &amp; Activate</button>
+                            <span id="rvc-upload-status" class="save-status-msg"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-divider"></div>
+
+                <!-- RVC Pitch / Index Rate controls -->
+                <div class="setting-group" id="rvc-controls" style="display:none">
+                    <label>🎛️ RVC Voice Settings:</label>
+                    <div class="rvc-sliders">
+                        <div class="slider-row">
+                            <span>Pitch Shift:</span>
+                            <input type="range" id="rvc-pitch-slider" min="-12" max="12" step="1" value="0">
+                            <span id="rvc-pitch-val">0 st</span>
+                        </div>
+                        <div class="slider-row">
+                            <span>Retrieval Strength:</span>
+                            <input type="range" id="rvc-index-rate-slider" min="0" max="1" step="0.05" value="0.75">
+                            <span id="rvc-index-rate-val">0.75</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="voice-test-row">
+                    <button id="test-voice-btn" class="accent-btn">▶️ Test Voice Preview</button>
+                    <span id="voice-test-status" class="save-status-msg"></span>
+                </div>
+
+                <div class="save-actions">
+                    <button id="save-voice-btn" class="accent-btn save-btn">💾 Apply Voice Settings</button>
+                    <span id="voice-save-msg" class="save-status-msg"></span>
+                </div>
+            </div>
+
+            <!-- ── TAB: Models ── -->
+            <div class="tab-content" id="tab-models">
+                <div class="setting-group web-model-import">
+                    <label>Import a character:</label>
+                    <div class="model-import-buttons">
+            <button type="button" id="import-model-folder" title="Import a complete PMX folder with its textures">Upload PMX folder</button>
+            <button type="button" id="import-vrm" class="web-model-import" title="Upload a VRM avatar">Upload VRM</button>
+            <button type="button" id="import-live2d" class="web-model-import" title="Import a complete exported Live2D model folder">Upload Live2D folder</button>
+                    </div>
+                    <div class="modal-hint">Import the complete folder containing .model3.json, .moc3, textures, physics and expressions.</div>
+                </div>
+                <div class="setting-group">
+                    <label>Model quality:</label>
+                    <div class="quality-options">
+                        <button type="button" data-quality="low">Low</button>
+                        <button type="button" data-quality="balanced">Balanced</button>
+                        <button type="button" data-quality="high">High</button>
+                    </div>
+                    <div class="modal-hint">Low uses less GPU power. Balanced adds sharper textures. High gives smoother edges and richer lighting. Changes apply immediately.</div>
+                </div>
+                <div class="setting-group">
+                    <label><input type="checkbox" id="physics-enabled" checked> Enable character physics</label>
+                    <label for="physics-strength">Extra physics movement: <output id="physics-strength-value">Natural (0%)</output></label>
+                    <input id="physics-strength" type="range" min="0" max="150" step="5" value="0" style="width:100%">
+                    <div class="modal-hint">0% keeps natural hair and clothing physics. Increase for extra movement. Wind is controlled separately.</div>
+                    <label for="physics-wind">Wind strength: <output id="physics-wind-value">0%</output></label>
+                    <input id="physics-wind" type="range" min="0" max="100" step="1" value="0" style="width:100%">
+                    <div class="modal-hint" id="physics-status" role="status" aria-live="polite">Physics is detected automatically when a model loads. Mode and active chain/bone counts appear here.</div>
+                    <div class="modal-hint" id="rig-analysis-status" role="status">PMX physics is checked for eight seconds after loading. Diagnostic images stay on this device.</div>
+                    <button id="rig-analysis-reset" type="button">Reset bone diagnosis and recheck</button>
+                    <button id="rig-analysis-image" type="button">Save diagnostic model image</button>
+                    <div class="save-actions" style="margin-top:8px">
+                        <button id="physics-repair-btn" type="button" title="Reset PMX physics to the safe spring solver and recheck duplicate pivots. Works in Gemini, Local LLM and VTuber modes.">🔧 Fix physics</button>
+                        <button id="glitch-fix-btn" type="button" title="Exclude only same-name physics pivots with the same parent and position. Repeated skirt-chain names with distinct pivots are kept.">🧩 Exclude duplicate pivots</button>
+                        <button id="glitch-restore-btn" type="button" class="hidden" title="Disable automatic exclusion and simulate every authored physics chain for this model">↩ Restore all physics</button>
+                    </div>
+                    <div class="modal-hint" id="glitch-fix-status" role="status" aria-live="polite"></div>
+                </div>
+                <div class="setting-group">
+                    <label><input type="checkbox" id="pmx-reference-mode"> Preserve authored PMX materials</label>
+                    <button type="button" id="pmx-texture-compare" class="hidden">Check textures in PMX Editor</button>
+                    <div class="modal-hint" id="pmx-texture-status" role="status">Texture references are checked when a PMX model loads.</div>
+                    <div class="setting-group" id="pmx-texture-selector">
+                        <label for="pmx-material-slot">PMX material texture:</label>
+                        <select id="pmx-material-slot" aria-label="Material and texture type"></select>
+                        <div class="modal-hint" id="pmx-original-texture"></div>
+                        <label for="pmx-texture-choice">Replacement image:</label>
+                        <select id="pmx-texture-choice" aria-label="Replacement texture file"></select>
+                        <div class="save-actions">
+                            <button type="button" id="pmx-texture-apply">Apply texture</button>
+                            <button type="button" id="pmx-texture-reset">Restore original</button>
+                            <button type="button" id="pmx-texture-refresh">Refresh files</button>
+                        </div>
+                        <div class="modal-hint" id="pmx-texture-selector-status" role="status">Choose a loaded PMX model. To use a new image, copy it into that model's folder and refresh files. Changes apply only to the selected material; the original PMX stays intact.</div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label>🎎 3D Character Models (PMX / VRM):</label>
+                    <div class="model-grid" id="model-card-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div class="model-actions-row">
+                        <button id="refresh-models-modal" class="accent-btn">🔄 Scan models/ Folder</button>
+                        <button id="load-file-modal" class="accent-btn">📂 Open PMX File</button>
+                    </div>
+                    <div class="modal-hint">
+                        Drop <code>.pmx</code> model folders into <code>anime-assistant/models/pmx/</code>.<br>
+                        Each folder needs: <code>model.pmx</code>, <code>textures/</code>, and optionally <code>textures.json</code>.
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── TAB: Theme & Environment ── -->
+            <div class="tab-content" id="tab-theme">
+                <div class="setting-group">
+                    <label>🎨 Environment Color &amp; Atmosphere:</label>
+                    <div class="color-wheel-section">
+                        <label>Color Wheel / Custom Hue:</label>
+                        <div class="color-wheel-row">
+                            <input type="color" id="env-color-picker-modal" value="#ff6ea7">
+                            <span id="env-color-hex-modal">#ff6ea7</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label>Aura Atmosphere Presets:</label>
+                    <div class="aura-presets" id="aura-presets-modal">
+                        <button class="aura-chip active" data-color="#ff6ea7" style="--chip-color:#ff6ea7">🌸 Sakura Pink</button>
+                        <button class="aura-chip" data-color="#00f0ff" style="--chip-color:#00f0ff">⚡ Cyber Cyan</button>
+                        <button class="aura-chip" data-color="#a855f7" style="--chip-color:#a855f7">💜 Neon Violet</button>
+                        <button class="aura-chip" data-color="#10b981" style="--chip-color:#10b981">🍃 Emerald Sage</button>
+                        <button class="aura-chip" data-color="#f97316" style="--chip-color:#f97316">🌅 Sunset Ember</button>
+                        <button class="aura-chip" data-color="#3b82f6" style="--chip-color:#3b82f6">🌊 Deep Ocean</button>
+                        <button class="aura-chip" data-color="#eab308" style="--chip-color:#eab308">✨ Golden Sun</button>
+                        <button class="aura-chip" data-color="#ef4444" style="--chip-color:#ef4444">🩸 Crimson Moon</button>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label>3D Lighting &amp; Atmosphere Intensity:</label>
+                    <div class="slider-group">
+                        <div class="slider-label-row">
+                            <span>Aura Glow:</span>
+                            <span id="env-intensity-val-modal">100%</span>
+                        </div>
+                        <input type="range" id="env-intensity-slider-modal" min="20" max="150" value="100" step="5">
+                    </div>
+                </div>
+
+                <div class="setting-group checkbox-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="env-rgb-toggle-modal">
+                        <span>🌈 RGB Rainbow Aura Breathing Mode (cycles smoothly)</span>
+                    </label>
+                </div>
+
+                <div class="save-actions">
+                    <button id="save-theme-btn" class="accent-btn save-btn">💾 Save Theme</button>
+                    <span id="theme-save-msg" class="save-status-msg"></span>
+                </div>
+            </div>
+
+            <!-- ── TAB: Audio ── -->
+            <div class="tab-content" id="tab-audio">
+                <div class="setting-group vtuber-camera-settings">
+                    <label for="settings-tracking-camera">VTuber camera:</label>
+                    <select id="settings-tracking-camera"><option value="">Default camera</option></select>
+                    <p class="modal-hint">Distance assist is automatic. HD camera input and face/hand close-ups help at farther distances. Good lighting and a clearly visible face and hands are still required.</p>
+                    <button id="settings-refresh-cameras" type="button">Refresh cameras</button>
+                    <div class="save-actions"><button id="tracking-broadcast-camera" type="button">Use NVIDIA Broadcast camera</button><button id="tracking-broadcast-open" type="button">Open NVIDIA Broadcast</button></div>
+                    <p class="modal-hint">Optional Windows camera input; requires a supported RTX GPU (RTX 2060 or newer). Broadcast improves the video feed, not facial-expression detection directly. Keep Eye Contact off for your real gaze. Cheek puff requires a compatible tracking source and an expression authored in the model.</p>
+                    <a href="https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-app/" target="_blank" rel="noopener noreferrer">NVIDIA Broadcast download and requirements</a>
+                    <details id="nvidia-sdk-setup"><summary>Optional NVIDIA RTX facial expressions setup</summary>
+                        <p class="modal-hint">Not bundled or downloaded automatically. Live SDK tracking is not connected yet. Install SDK Core and nvARFaceExpressions, nvARLandmarkDetection, and nvARFaceBoxDetection through your own NGC account. Never paste your NGC key into chat.</p>
+                        <a href="https://catalog.ngc.nvidia.com/orgs/nvidia/teams/maxine/collections/maxine_ar_sdk" target="_blank" rel="noopener noreferrer">Choose to download NVIDIA AR SDK</a>
+                        <label>Installed SDK folder<input id="nvidia-sdk-folder" type="text" placeholder="Your NVIDIA AR SDK folder"></label>
+                        <button id="nvidia-sdk-browse" type="button">Browse SDK folder</button><button id="nvidia-sdk-check" type="button">Save folder and check SDK</button>
+                        <p id="nvidia-sdk-status" class="modal-hint" role="status">Optional. Nothing downloads until you choose NVIDIA’s download link.</p>
+                    </details>
+                    <div class="save-actions"><button id="settings-start-tracking" type="button">Start tracking</button><button id="settings-stop-tracking" type="button">Stop tracking</button><button id="settings-calibrate-tracking" type="button">Calibrate face</button></div>
+                    <p id="settings-camera-status" class="modal-hint" role="status"></p>
+                    <label for="tracking-smoothing">Movement smoothing</label>
+                    <input id="tracking-smoothing" type="range" min="0" max="100" value="25">
+                    <label for="tracking-range">Head movement range</label>
+                    <input id="tracking-range" type="range" min="0" max="200" value="100">
+                    <label for="tracking-hand-range">Hand movement range <output id="tracking-hand-range-value">130%</output></label>
+                    <input id="tracking-hand-range" type="range" min="50" max="200" value="130">
+                    <p class="modal-hint">Increase if your hands look too close to the avatar's face. Arm reach remains limited by the model's proportions.</p>
+                    <label for="tracking-blink-gain">Blink sensitivity</label>
+                    <input id="tracking-blink-gain" type="range" min="50" max="200" value="100">
+                    <label><input id="tracking-link-blinks" type="checkbox"> Link left and right blinks</label>
+                    <label><input id="tracking-glasses" type="checkbox"> Glasses-friendly eye tracking</label>
+                    <p class="modal-hint">With glasses on, enable this and calibrate while looking forward with both eyes open. This reduces false blinks from lens reflections. Avoid bright glare across your lenses.</p>
+                    <label for="tracking-gaze-strength">Gaze strength</label>
+                    <input id="tracking-gaze-strength" type="range" min="0" max="200" value="100">
+                    <label for="tracking-fps">Tracking frame rate</label>
+                    <select id="tracking-fps"><option value="15">15 FPS · lower CPU usage</option><option value="24">24 FPS</option><option value="30">30 FPS</option></select>
+                    <button id="tracking-reset-options" type="button">Reset tracking settings</button>
+                </div>
+                <div class="setting-group">
+                    <label><input id="obs-background-enabled" type="checkbox"> Solid background for OBS</label>
+                    <label for="obs-background-color">Background color:</label>
+                    <input id="obs-background-color" type="color" value="#00ff00">
+                    <output id="obs-background-value">#00ff00</output>
+                    <button id="obs-green-screen" type="button">Green screen</button>
+                    <p class="modal-hint">Choose a color that isn't on your character. Add Chroma Key to your OBS capture and match this color. Hide controls with Ctrl+Shift+H for a clean capture.</p>
+                </div>
+                <div class="setting-group">
+                    <label for="mic-select">🎙️ Microphone (Input Device):</label>
+                    <div class="custom-dropdown no-drag" id="mic-dropdown">
+                        <button type="button" class="dropdown-trigger" id="mic-dropdown-trigger">
+                            <span class="dropdown-label" id="mic-dropdown-label">Default Microphone</span>
+                            <span class="dropdown-arrow">▾</span>
+                        </button>
+                        <div class="dropdown-menu hidden" id="mic-dropdown-menu"></div>
+                        <select id="mic-select" style="display: none;">
+                            <option value="">Default Microphone</option>
+                        </select>
+                    </div>
+                    <div class="meter-wrapper">
+                        <span>Mic Level:</span>
+                        <div class="meter-bar"><div id="mic-meter-fill"></div></div>
+                    </div>
+                    <button id="refresh-audio-devices-btn" type="button">🔄 Refresh audio devices</button>
+                </div>
+
+                <div class="setting-group" id="vtuber-rvc-changer-group">
+                    <label class="toggle-label"><input id="vtuber-rvc-changer-toggle" type="checkbox"> 🎙 Microphone voice mode</label>
+                    <p class="modal-hint">Off by default. Enable it with any built-in or [RVC] voice selected. Built-in voices use local speech recognition, then speak the transcript with your configured speech engine; internet may be required. [RVC] voices convert your microphone audio through the local RVC service and load before capture. Playback drives the model’s mouth movement.</p>
+                    <p id="vtuber-rvc-changer-status" class="modal-hint" role="status">Off</p>
+                </div>
+
+                <div class="setting-group">
+                    <label for="speaker-select">🔊 Speaker / Headphones (Output Device):</label>
+                    <div class="custom-dropdown no-drag" id="speaker-dropdown">
+                        <button type="button" class="dropdown-trigger" id="speaker-dropdown-trigger">
+                            <span class="dropdown-label" id="speaker-dropdown-label">Default Audio Output</span>
+                            <span class="dropdown-arrow">▾</span>
+                        </button>
+                        <div class="dropdown-menu hidden" id="speaker-dropdown-menu"></div>
+                        <select id="speaker-select" style="display: none;">
+                            <option value="">Default Audio Output</option>
+                        </select>
+                    </div>
+                    <div class="device-actions">
+                        <button id="test-audio-btn">🔔 Test Speaker</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-ai">
+                <div class="setting-group">
+                    <label for="llm-provider">AI provider:</label>
+                    <select id="llm-provider"><option value="ollama">Local Ollama</option><option value="gemini">Google Gemini</option></select>
+                </div>
+                <div id="local-llm-settings">
+                    <div class="setting-group">
+                        <label for="ollama-models-folder">Local Ollama model folder:</label>
+                        <input id="ollama-models-folder" type="text" autocomplete="off" placeholder="Leave blank to use your running Ollama">
+                        <div class="device-actions">
+                            <button id="browse-ollama-folder" type="button">Browse folder</button>
+                            <button id="scan-ollama-models" type="button">Scan local models</button>
+                        </div>
+                        <span class="modal-hint">Choose the models folder containing blobs and manifests, usually C:\Users\your-name\.ollama\models. Model files are used in place.</span>
+                    </div>
+                    <div class="setting-group">
+                        <label for="ollama-model">Local model name:</label>
+                        <input id="ollama-model" type="text" list="ollama-model-options" value="qwen3-vl:2b-instruct" placeholder="Choose an installed model">
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+                            <button type="button" id="qwen-2b-btn">Qwen 2B · Laptop</button>
+                            <button type="button" id="qwen-4b-btn">Qwen 4B · Higher quality</button>
+                        </div>
+                        <datalist id="ollama-model-options"></datalist>
+                        <span id="ollama-scan-status" class="modal-hint" role="status"></span>
+                    </div>
+                    <div class="setting-group">
+                        <label for="ollama-context">Local context size:</label>
+                        <input id="ollama-context" type="number" min="1024" max="8192" step="1024" value="4096">
+                        <span class="modal-hint">Try 2048 for a 4 GB GPU. Larger values use more memory.</span>
+                    </div>
+                    <div class="setting-group">
+                        <label class="toggle-label"><input id="gemini-fallback" type="checkbox">Use Gemini if the local model fails or takes too long</label>
+                        <label for="local-timeout">Wait for local reply (seconds):</label>
+                        <input id="local-timeout" type="number" min="5" max="120" value="20">
+                        <span class="modal-hint">Fallback uses your saved key and sends this conversation to Gemini when needed.</span>
+                    </div>
+                </div>
+                <div id="gemini-settings" class="hidden">
+                    <div class="setting-group">
+                        <label for="gemini-model">Gemini model:</label>
+                        <input id="gemini-model" type="text" value="gemini-flash-latest" autocomplete="off" placeholder="gemini-flash-latest">
+                    </div>
+                    <div class="setting-group">
+                        <label for="gemini-api-key">Gemini API key:</label>
+                        <input id="gemini-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter your Google AI Studio key">
+                        <span id="gemini-key-status" class="modal-hint"></span>
+                        <button id="remove-gemini-key" type="button">Remove saved key</button>
+                    </div>
+                    <div class="modal-hint">Gemini sends your messages, conversation context, and shared screen snapshots to Google. Screen access still follows the Screen toggle.</div>
+                    <div class="modal-hint">Your saved key uses Windows encryption or macOS Keychain. Leave the key field blank to keep it.</div>
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get a Gemini API key in Google AI Studio</a>
+                </div>
+                <div class="save-actions">
+                    <button id="save-ai-settings" type="button" class="accent-btn save-btn">Save AI settings</button>
+                    <button id="test-ai-connection" type="button">Test saved connection</button>
+                    <span id="ai-save-status" class="save-status-msg" role="status"></span>
+                </div>
+            </div>
+
+            <!-- ── TAB: Assistant ── -->
+            <div class="tab-content" id="tab-assistant">
+                <div class="setting-group">
+                    <label for="youtube-chat-link">VTuber mode · YouTube livestream/chat link:</label>
+                    <input id="youtube-chat-link" type="text" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+                    <label class="toggle-label"><input id="vtuber-chat-enabled" type="checkbox" checked>Answer selected viewers aloud</label>
+                    <label class="toggle-label"><input id="vtuber-screen-enabled" type="checkbox" checked>Include occasional screen reactions</label>
+                    <div class="save-actions"><button id="vtuber-start-btn" type="button">Start AI VTuber mode</button><button id="vtuber-stop-btn" type="button">Stop AI VTuber</button></div>
+                    <span id="vtuber-status" role="status" class="modal-hint">Off · voice replies only, no messages posted to YouTube</span>
+                    <span class="modal-hint">Uses public live chat. Answers are paced; old messages and repeated spam are skipped. Screen access follows the Screen toggle.</span>
+                </div>
+                <div class="setting-group">
+                    <label for="assistant-name-input">🌸 Assistant Name:</label>
+                    <input type="text" id="assistant-name-input" placeholder="e.g. Sakura, Jarvis, Friday, Miku" autocomplete="off">
+                </div>
+
+                <div class="setting-group">
+                    <label for="wake-word-input">🗣️ Wake Word Phrase:</label>
+                    <input type="text" id="wake-word-input" placeholder="e.g. hey sakura, hey jarvis" autocomplete="off">
+                </div>
+
+                <div class="setting-group checkbox-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="wake-word-toggle">
+                        <span>Require wake word before answering</span>
+                    </label>
+                </div>
+
+                <div class="setting-group checkbox-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="computer-control-toggle">
+                        <span>Allow safe computer actions (open approved websites)</span>
+                    </label>
+                </div>
+                <div class="modal-hint">When enabled, saying “open YouTube” opens YouTube in your browser. Only approved websites are supported.</div>
+
+                <div class="save-actions">
+                    <button id="save-settings-btn" class="accent-btn save-btn">💾 Save &amp; Apply</button>
+                    <span id="save-status-msg" class="save-status-msg"></span>
+                </div>
+
+                <div class="modal-hint">
+                    💡 Settings are automatically saved and remembered for future sessions.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Morph / Lip Sync Debug & Tuning Overlay -->
+    <div id="morph-overlay" class="collapsed">
+        <button id="morph-toggle-btn">👄 Lip Sync</button>
+        <div id="morph-content">
+            <div class="morph-sliders">
+                <div><span>A (あ):</span><div class="bar"><div id="bar-a" class="bar-fill"></div></div></div>
+                <div><span>I (い):</span><div class="bar"><div id="bar-i" class="bar-fill"></div></div></div>
+                <div><span>U (う):</span><div class="bar"><div id="bar-u" class="bar-fill"></div></div></div>
+                <div><span>E (え):</span><div class="bar"><div id="bar-e" class="bar-fill"></div></div></div>
+                <div><span>O (お):</span><div class="bar"><div id="bar-o" class="bar-fill"></div></div></div>
+            </div>
+            <div id="detected-morphs" class="morph-tags">No model morphs detected</div>
+        </div>
+    </div>
+
+    <script type="module" src="/static/js/app.js?v=face-mapping15"></script>
+</body>
+</html>
+
+

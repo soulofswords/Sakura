@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Tracking runtime check</title></head><body style="background:#17121f;color:#fff;font:20px system-ui;padding:30px"><h1>Tracking runtime check</h1><p id="status">Loading local WASM and face/hand models…</p><script>
+const status=document.getElementById('status');
+const worker=new Worker('/static/js/avatar-tracking-worker.js');
+worker.onerror=error=>status.textContent='FAIL: '+error.message;
+worker.onmessage=async({data})=>{
+ if(data.type==='error') {status.textContent='FAIL: '+data.error;worker.terminate();}
+ if(data.type==='ready') {
+  status.textContent='Local trackers ready. Running a blank-frame detection…';
+  const surface=new OffscreenCanvas(640,480);surface.getContext('2d').fillRect(0,0,640,480);
+  const image=await createImageBitmap(surface);
+  worker.postMessage({type:'frame',image,timestamp:performance.now()},[image]);
+ }
+ if(data.type==='result') {status.textContent='PASS: worker, WASM, face detector and two-hand detector ran locally. Blank frame: '+data.face.landmarks.length+' face points, '+data.hands.length+' hands. No camera was opened.';worker.terminate();}
+};
+worker.postMessage({type:'init'});
+</script></body></html>

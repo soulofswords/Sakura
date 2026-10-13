@@ -1,0 +1,6 @@
+# Native Apple Silicon environment; never copy the Windows venv to a Mac.
+-r requirements.txt
+keyring
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+pynput

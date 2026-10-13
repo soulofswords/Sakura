@@ -1,0 +1,26 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const source = fs.readFileSync('static/js/model-viewer.js', 'utf8').replace(/\r\n/g, '\n');
+const body = source.match(/_fixPairedSurfaceMaterials\(root\) \{([\s\S]*?)\n    \}/)[1];
+const fix = new Function('root', 'THREE', body);
+const texture = {};
+const front = {name:'右胸黑丝',map:texture,side:2};
+const back = {name:'右胸黑丝+',map:texture,side:2};
+const single = {name:'ordinary cloth',map:texture,side:2};
+const unrelated = {name:'ordinary cloth+',map:{},side:2};
+const coords=[[0,0,0],[1,0,0],[0,1,0]];
+const index=[0,1,2,0,2,1];
+const geometry={attributes:{position:{getX:i=>coords[i][0],getY:i=>coords[i][1],getZ:i=>coords[i][2]}},index:{getX:i=>index[i]},groups:[{materialIndex:0,start:0,count:3},{materialIndex:1,start:3,count:3}]};
+fix({traverse: callback => callback({geometry,material:[front,back,single,unrelated]})}, {FrontSide:0});
+assert.equal(front.side,0);
+assert.equal(back.side,0);
+assert.equal(front.needsUpdate,true);
+assert.equal(back.needsUpdate,true);
+assert.equal(single.side,2);
+assert.equal(unrelated.side,2);
+console.log('PASS: paired reverse surfaces use front-face culling; unrelated materials preserved');
+
+front.side=2;back.side=2;index.splice(3,3,0,1,2);
+fix({traverse:callback=>callback({geometry,material:[front,back]})},{FrontSide:0});
+assert.equal(front.side,2);assert.equal(back.side,2);
+console.log("PASS: same-winding surfaces retain authored culling; names alone cannot remove faces");

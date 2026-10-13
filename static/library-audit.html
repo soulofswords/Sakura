@@ -1,0 +1,60 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Private model audit</title>
+<style>html,body{margin:0;width:100%;height:100%;background:#18232d}#viewer{position:fixed;inset:0}</style>
+<script type="importmap">{"imports":{"three":"/static/vendor/three/build/three.module.js","three/addons/":"/static/vendor/three/examples/jsm/"}}</script></head>
+<body><div id="viewer"></div><script type="module">
+import ModelViewer from '/static/js/model-viewer.js?v=boneguard1';
+import * as THREE from 'three';
+const viewer = new ModelViewer('viewer');
+window.auditViewer = viewer;
+viewer.desktopMode = false;
+viewer.setQuality('balanced');
+viewer.setEnvironmentColor('#ffffff', 0);
+viewer.setCharacterGlow(0);
+viewer.setGlossBoost(0);
+let errors = [];
+window.addEventListener('sakura-model-render-error', e => errors.push(String(e.detail)));
+window.auditModel = async path => {
+    errors = [];
+    const start = performance.now();
+    const loaded = await viewer.loadModel('/models/' + path.split('/').map(encodeURIComponent).join('/'));
+    for (let i = 0; i < 8; i++) {
+        viewer._renderFrame();
+        await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    const materials = [];
+    let vertices = 0;
+    viewer.model?.traverse(mesh => {
+        vertices += mesh.geometry?.attributes?.position?.count || 0;
+        for (const mat of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
+            if (mat) materials.push({name: mat.name, opacity: mat.opacity,
+                texture: !!mat.map, width: mat.map?.image?.width, height: mat.map?.image?.height});
+        }
+    });
+    const gl = viewer.renderer.getContext();
+    const contextLost = gl.isContextLost();
+    viewer._renderFrame();
+    const pixels = new Uint8Array(gl.drawingBufferWidth*gl.drawingBufferHeight*4);
+    gl.readPixels(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    let visiblePixels=0;
+    for(let i=3;i<pixels.length;i+=4) if(pixels[i]>20) visiblePixels++;
+    const box=new THREE.Box3().setFromObject(viewer.model);
+    const portraitCamera=viewer.camera.position.toArray();
+    viewer.desktopMode=true;
+    viewer._autoFrame(viewer.model);
+    viewer._renderFrame();
+    gl.readPixels(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    let desktopVisiblePixels=0;
+    for(let i=3;i<pixels.length;i+=4) if(pixels[i]>20) desktopVisiblePixels++;
+    const desktopPreview=new URLSearchParams(location.search).has('no-capture') ? null : viewer.captureAvatar();
+    viewer.desktopMode=false;
+    viewer._autoFrame(viewer.model);
+    viewer._renderFrame();
+    return {auditVersion:'final3',ok: !!loaded && !!viewer.model && vertices > 0 && !contextLost && !errors.length,
+        seconds: +( (performance.now()-start)/1000 ).toFixed(2), vertices,
+        materials, physics: loaded?.physics || null, notice: loaded?.notice || null, errors, contextLost,
+        visiblePixels, desktopVisiblePixels, desktopPreview, camera:portraitCamera,
+        bounds:{min:box.min.toArray(),max:box.max.toArray()},
+        renderer: viewer.renderer.info.render};
+};
+window.auditReady = true;
+</script></body></html>

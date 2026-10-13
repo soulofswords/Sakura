@@ -1,0 +1,51 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+let time = 0, amplitude = 0, timer, submitted = 0, release;
+const recordings = [], track = { stopped: false, stop() { this.stopped = true; } };
+class Recorder {
+    mimeType = 'audio/webm'; state = 'inactive';
+    constructor() { recordings.push(this); }
+    start() { this.state = 'recording'; }
+    stop() {
+        this.state = 'inactive';
+        this.ondataavailable({ data: new Blob(['recording']) });
+        this.onstop();
+    }
+}
+class Context {
+    async resume() {} async close() {}
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createAnalyser() { return { fftSize: 1024, getFloatTimeDomainData(a) { a.fill(amplitude); } }; }
+}
+const context = { Blob, MediaRecorder: Recorder, Float32Array, performance: { now: () => time },
+    window: { AudioContext: Context }, navigator: { mediaDevices: {
+        async getUserMedia() { return { getTracks: () => [track] }; } } },
+    setInterval(fn) { timer = fn; return 1; }, clearInterval() { timer = null; } };
+vm.runInNewContext(fs.readFileSync('static/js/continuous-mic.js', 'utf8').replace(
+    'export default class ContinuousMic', 'class ContinuousMic') + '\nthis.ContinuousMic = ContinuousMic;', context);
+const tick = async () => { time += 50; timer?.(); await new Promise(r => setImmediate(r)); };
+(async () => {
+    const mic = new context.ContinuousMic(async () => {
+        submitted++;
+        await new Promise(r => { release = r; });
+    }, () => {});
+    await mic.start();
+    for (let i = 0; i < 20; i++) await tick();
+    assert.equal(submitted, 0, 'Silence cannot submit a request');
+    amplitude = 0.03;
+    for (let i = 0; i < 10; i++) await tick();
+    assert.equal(submitted, 0, 'Do not interrupt active speech');
+    amplitude = 0;
+    for (let i = 0; i < 10; i++) await tick();
+    assert.equal(submitted, 0, 'Short pauses between words do not submit');
+    for (let i = 0; i < 15; i++) await tick();
+    assert.equal(submitted, 1, 'A completed phrase submits once');
+    assert.equal(recordings[0].state, 'inactive', 'No recording during assistant reply');
+    release(); await new Promise(r => setImmediate(r));
+    assert.equal(recordings.at(-1).state, 'recording', 'Listening resumes after speech ends');
+    mic.stop(); await new Promise(r => setImmediate(r));
+    assert.equal(track.stopped, true);
+    assert.equal(submitted, 1, 'Pause discards unfinished recording');
+    console.log('PASS: silence, phrase boundaries, pause timing, reply isolation, resume and mute');
+})().catch(e => { console.error(e); process.exitCode = 1; });

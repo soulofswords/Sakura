@@ -1,0 +1,66 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Model physics checks</title><style>body{margin:0;background:#17232b;color:white;font:14px sans-serif}#viewer{position:fixed;inset:0}#tools{position:fixed;z-index:2;left:8px;bottom:8px;background:#10151ee8;padding:8px;border-radius:8px;max-width:640px}input{width:320px}textarea{width:620px;height:140px}button{margin:4px}#status{max-width:620px}</style><script type="importmap">{"imports":{"three":"/static/vendor/three/build/three.module.js","three/addons/":"/static/vendor/three/examples/jsm/"}}</script></head><body><div id="viewer"></div><div id="tools"><input id="filter" value="barbara"><button id="load">Load first match</button><button id="wiggle">Wiggle test</button><button id="stability">Stability test</button><div id="status">Ready</div><textarea id="results" readonly aria-label="Physics results"></textarea></div><script type="module">
+import * as THREE from 'three';
+import ModelViewer from '/static/js/model-viewer.js?v=boneguard1';
+const viewer=new ModelViewer('viewer');
+window.viewer=viewer; // element id would otherwise shadow the instance for evaluate()
+viewer.setEnvironmentColor('#ffffff',0);
+const status=document.getElementById('status'),results=document.getElementById('results');
+const set=(name,value)=>{window[name]=value;results.value=JSON.stringify({physicsReport:window.physicsReport,wiggleResult:window.wiggleResult,stabilityResult:window.stabilityResult},null,1);};
+window.physicsReport=null;window.wiggleResult=null;window.stabilityResult=null;
+document.getElementById('load').onclick=async()=>{
+  try{
+    const models=(await(await fetch('/api/models')).json()).models.filter(m=>m.path.toLowerCase().endsWith('.pmx'));
+    const term=document.getElementById('filter').value.toLowerCase();
+    const m=models.find(m=>m.path.toLowerCase().includes(term));
+    if(!m){status.textContent='No matching model';return;}
+    status.textContent='Loading '+m.path;
+    const result=await viewer.loadModel('/models/'+m.path.split('/').map(encodeURIComponent).join('/'));
+    await new Promise(r=>setTimeout(r,400));
+    window.physicsReport={path:m.path,physics:result?.physics??null,deepest:watchBone()?.name??null};
+    set('physicsReport',window.physicsReport);
+    status.textContent='Loaded '+m.path;
+  }catch(e){status.textContent=String(e);}
+};
+function watchBone(){
+  const nodes=viewer.physics?.nodes;
+  return nodes?.length?nodes[nodes.length-1].bone:null;
+}
+function sample(bone){return bone.getWorldPosition(new THREE.Vector3());}
+document.getElementById('wiggle').onclick=async()=>{
+  const bone=watchBone();
+  if(!viewer.model||!bone){window.wiggleResult={error:'no model or physics bones'};set('wiggleResult',window.wiggleResult);return;}
+  viewer.setPhysicsMode('lively');
+  const rest=sample(bone).clone();
+  let min=Infinity,max=-Infinity;
+  const start=performance.now();
+  while(performance.now()-start<1200){
+    viewer.model.position.x=Math.sin((performance.now()-start)/100)*0.8;
+    await new Promise(r=>requestAnimationFrame(r));
+    const x=sample(bone).x;
+    min=Math.min(min,x);max=Math.max(max,x);
+  }
+  viewer.model.position.x=0;
+  await new Promise(r=>setTimeout(r,1500));
+  const final=sample(bone);
+  window.wiggleResult={amplitude:+(max-min).toFixed(4),moved:max-min>0.01,settledOffset:+final.distanceTo(rest).toFixed(4),finite:[final.x,final.y,final.z].every(Number.isFinite)};
+  set('wiggleResult',window.wiggleResult);
+  status.textContent='Wiggle done';
+};
+document.getElementById('stability').onclick=async()=>{
+  const bone=watchBone();
+  if(!viewer.model||!bone){window.stabilityResult={error:'no model or physics bones'};set('stabilityResult',window.stabilityResult);return;}
+  viewer.setPhysicsMode('lively');
+  const rest=sample(bone).clone();
+  let worstOffset=0,finite=true;
+  const start=performance.now();
+  while(performance.now()-start<3000){
+    await new Promise(r=>requestAnimationFrame(r));
+    const p=sample(bone);
+    finite=finite&&[p.x,p.y,p.z].every(Number.isFinite);
+    worstOffset=Math.max(worstOffset,p.distanceTo(rest));
+  }
+  window.stabilityResult={finite,worstDrift:+worstOffset.toFixed(4),stable:finite&&worstOffset<2};
+  set('stabilityResult',window.stabilityResult);
+  status.textContent='Stability done';
+};
+</script></body></html>

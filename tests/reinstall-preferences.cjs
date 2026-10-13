@@ -1,0 +1,24 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const source=fs.readFileSync('static/js/app.js','utf8');
+const start=source.indexOf('function restoreRenderingPreferences(');
+const end=source.indexOf('\nfunction updatePhysicsUI(',start);
+assert(start>=0&&end>start);
+const storage=new Map();let migrated;
+const context={localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v)},
+ document:{getElementById:()=>null},save_setting_silent:value=>migrated=value,viewer:null};
+vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+storage.set('sakura_render_quality','high');storage.set('sakura_physics_boost','85');storage.set('sakura_pmx_reference','true');
+context.restoreRenderingPreferences({});
+assert.equal(migrated.model_quality,'high');assert.equal(migrated.physics_boost,85);assert.equal(migrated.pmx_texture_reference,true);
+migrated=null;
+context.restoreRenderingPreferences({model_quality:'balanced',physics_boost:0,pmx_texture_reference:false});
+assert.equal(storage.get('sakura_render_quality'),'balanced');assert.equal(storage.get('sakura_physics_boost'),'0');assert.equal(storage.get('sakura_pmx_reference'),'false');
+assert.equal(migrated,null);
+let boost,wind;
+context.viewer={physics:{mode:'custom'},setQuality(q){this.quality=q;},setWindStrength(v){wind=v;}};
+context.updateQualityUI=()=>{};context.updatePhysicsUI=()=>{};context.applyPhysicsStrength=v=>boost=v;
+context.restoreRenderingPreferences({model_quality:'high',physics_boost:85,physics_wind:40,physics_enabled:false});
+assert.equal(context.viewer.quality,'high');assert.equal(boost,85);assert.equal(wind,40);assert.equal(context.viewer.physicsEnabled,false);
+console.log('PASS: rendering preference migration, saved configuration precedence and viewer restore');

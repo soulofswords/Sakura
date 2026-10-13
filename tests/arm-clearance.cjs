@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+(async()=>{
+ const THREE=await import('../static/vendor/three/build/three.module.js');
+ const source=fs.readFileSync('static/js/arm-clearance.js','utf8').replace(/import \* as THREE from 'three';/,'').replace('export default class ArmClearance','class ArmClearance');
+ const ArmClearance=new Function('THREE',source+';return ArmClearance;')(THREE);
+ const root=new THREE.Group(),torso=new THREE.Bone(),head=new THREE.Bone(),upper=new THREE.Bone(),lower=new THREE.Bone(),hand=new THREE.Bone();
+ torso.position.y=2;head.position.y=3;upper.position.set(.8,2.3,0);lower.position.set(.25,-.8,0);hand.position.set(-.65,-.65,0);
+ root.add(torso,head,upper);upper.add(lower);lower.add(hand);
+ const viewer={model:root,animationBones:{torso:{bone:torso},head:{bone:head},leftArm:{bone:upper},leftElbow:{bone:lower},leftWrist:{bone:hand}}};
+ const rig=new ArmClearance(viewer);root.updateMatrixWorld(true);
+ const before=rig.penetration(rig.arms[0]);assert.ok(before>.1,'Fixture starts inside clothing');
+ const positions=[upper,lower,hand].map(b=>b.position.toArray());
+ rig.update();const after=rig.penetration(rig.arms[0]);
+ assert.ok(after<before*.5,'Bounded joint correction reduces penetration');
+ assert.deepEqual([upper,lower,hand].map(b=>b.position.toArray()),positions,'No limb translations or stretching');
+ assert.ok([upper,lower,hand].every(b=>b.quaternion.toArray().every(Number.isFinite)));
+ const p=new THREE.Vector3(3,1,0),copy=p.clone();assert.equal(rig.project(p,rig.arms[0]),0);assert.ok(p.equals(copy),'Clear positions untouched');
+ const reversed={...rig.arms[0],sign:-1},mid=new THREE.Vector3(0,1,0);rig.project(mid,reversed);assert.ok(mid.x<0,'Opposite side supported');
+ const empty=new ArmClearance({model:root,animationBones:{}});empty.update();assert.equal(empty.bands,undefined,'Incomplete rigs safely skipped');
+ console.log(JSON.stringify({before,after}));console.log('PASS: clothing clearance, bounded IK, unchanged bone lengths, mirrored sides and missing rigs');
+})().catch(e=>{console.error(e);process.exitCode=1;});
