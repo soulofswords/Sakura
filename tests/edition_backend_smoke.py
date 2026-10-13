@@ -15,7 +15,7 @@ import app
 from product import EDITION, DISPLAY_NAME, LAUNCHER_NAME
 assert EDITION==edition
 root=Path(__file__).resolve().parent
-for line in (root/'installed-files.tsv').read_text().splitlines():
+for line in (root/'installed-files.tsv').read_text(encoding='utf-8').splitlines():
  digest,name=line.split('\t');assert hashlib.sha256((root.parent/name).read_bytes()).hexdigest()==digest,name
 assert subprocess.run([str(root.parent/LAUNCHER_NAME),'--check']).returncode==0
 
