@@ -394,14 +394,17 @@ async def speak_chat_reader(payload: dict):
     text = payload.get('text', '')
     if not isinstance(text, str) or not text.strip() or len(text) > 600:
         return JSONResponse({'error': 'Invalid chat message.'}, 400)
-    # Read verbatim through a built-in voice. No LLM, STT or RVC is started.
+    # Read verbatim using the selected voice; never invoke an LLM or STT.
+    import copy
     from tts import TextToSpeech
-    voice = TextToSpeech()
-    voice.backend = 'edge-tts'
-    voice.set_voice_preset('sakura_ava')
+    voice = copy.copy(tts) if tts else TextToSpeech()
+    if not tts:
+        voice.set_voice_preset(get_settings().get('selected_voice','sakura_ava'))
     try:
         path = await voice.speak_to_file_async(text)
-        return {'audio': f'/audio/{os.path.basename(path)}' if path else None}
+        if not path:
+            return JSONResponse({'error': 'The selected voice did not produce audio.'}, 503)
+        return {'audio': f'/audio/{os.path.basename(path)}'}
     except Exception as exc:
         return JSONResponse({'error': str(exc)}, 503)
 
@@ -1007,11 +1010,17 @@ async def chat(payload: dict):
     avatar_image = payload.get("avatar_image")
     from dance_commands import dance_action, dance_reply
     motion=dance_action(text) if not payload.get('screen_reaction') and not payload.get('ai_vtuber') else None
+    if not motion and getattr(app.state,'last_avatar_action',None)=='dance' and not payload.get('screen_reaction'):
+        import re
+        if re.search(r'\b(?:just do|show me|want to see|do what (?:you|u) have)\b',text,re.I):motion='groove'
     if motion and not getattr(app.state,'tracking_only',False):
         from config import voice_language
         supported=payload.get('avatar_can_dance') is True
         reply=dance_reply(motion,voice_language(cfg.get('selected_voice','sakura_ava')),supported)
+        app.state.last_avatar_action='dance' if supported and motion!='stop' else None
+        if llm:await run_in_threadpool(llm.remember_exchange,text,reply)
         return {'reply':reply,'audio':None,'voice_error':None,'avatar_motion':motion if supported else None}
+    if not payload.get('screen_reaction'):app.state.last_avatar_action=None
     from assistant_commands import run_command
     command_reply = await run_in_threadpool(run_command, text, cfg.get('computer_control_enabled', False), cfg.get('assistant_name', 'Sakura')) if not payload.get('screen_reaction') else None
     if command_reply:

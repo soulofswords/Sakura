@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {applyFaceMappings} from './live2d-face-mapping.js?v=1';
+import {chatReaderLean} from './chat-reader-motion.js?v=1';
 let runtime;
 function script(src){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(Error('Live2D runtime could not load: '+src));document.head.append(s);});}
 async function ensureRuntime(){
@@ -43,7 +44,17 @@ export default class Live2DViewer {
             }
             v.physicsInfo ||= {source:'none',engine:'Cubism Physics',chains:0,bones:0};
             v.eyeBlink=v.avatar.internalModel.eyeBlink;
-            v.avatar.internalModel.on('beforeModelUpdate',()=>v.applyParameters());
+            const internal=v.avatar.internalModel,natural=internal.updateNaturalMovements,focus=internal.updateFocus;
+            internal.updateNaturalMovements=function(...args){
+                if(!owner.userTracking&&!owner.vtuberTrackingMode)return natural.apply(this,args);
+            };
+            internal.updateFocus=function(...args){
+                if(!owner.userTracking)return focus.apply(this,args);
+            };
+            // Authored Cubism physics often routes tracking inputs into a
+            // second visible parameter (e.g. ParamAngleX -> ParamAngleX_M).
+            // Supply inputs before physics, not after it has already run.
+            v.avatar.internalModel.on('afterMotionUpdate',()=>v.applyParameters());
             v.avatar.internalModel.on('beforeModelUpdate',()=>v.applyManualExpressions());
             v.app.view.style.visibility='visible';return v;
         }catch(error){v.destroy();throw error;}
@@ -119,7 +130,14 @@ export default class Live2DViewer {
         const native=fresh&&sample.face?.nativeExpressions;
         const ordinary=fresh?Object.fromEntries((sample.face?.blendshapes||[]).map(b=>[b.categoryName,b.score])):{};
         if(this.faceSignalMapping||this.faceSignalPreview)applyFaceMappings(this,this.faceSignalPreview||native||ordinary,this.faceSignalMapping,!!this.faceSignalPreview||!!(fresh&&this.owner.userTracking&&this.owner.trackingMouthEnabled!==false));
+        // Inactive camera mappings can reset jawOpen to zero. Audible output
+        // owns the mouth after those mappings, before user expressions.
+        this.applyAudioMouth();
         const core=this.avatar.internalModel.coreModel;
+        if(this.chatReaderPose&&!this.owner.userTracking){
+            const ids=Array.from(core._model?.parameters?.ids||[]);
+            for(const [id,value]of Object.entries(this.chatReaderPose))if(ids.includes(id))core.setParameterValueById(id,value);
+        }
         for(const [name,amount]of this.activeExpressions||[]) {
             for(const p of this.expressions.get(name)?.Parameters||[]) {
                 // Cubism creates virtual indices for unknown IDs. Those have
@@ -135,19 +153,33 @@ export default class Live2DViewer {
         }
     }
     clearExpression(){this.activeExpressions?.clear();this.avatar?.internalModel?.motionManager?.expressionManager?.stopAllExpressions();}
+    applyAudioMouth(){
+        if(!this.owner?.audioPlaybackActive)return;
+        const core=this.avatar.internalModel.coreModel,ids=Array.from(core._model?.parameters?.ids||[]);
+        const set=(id,value)=>{if(ids.includes(id)&&Number.isFinite(value))core.setParameterValueById(id,value);};
+        const opening=Math.max(...['A','I','U','E','O'].map(k=>Number(this.values[k])||0),0);
+        set('ParamMouthOpenY',opening);set('ParamMouthForm',0);
+        for(const name of Object.values(this.owner.mouthOptions?.mapping||{}))if(name&&name!=='none'&&Object.hasOwn(this.values,name))set(name,this.values[name]);
+    }
     applyParameters(){
         const core=this.avatar.internalModel.coreModel,o=this.owner;
         const set=(id,value)=>{if(core.getParameterIndex(id)>=0)core.setParameterValueById(id,value);};
-        const smooth=(id,value)=>{this.filtered[id]=(this.filtered[id]??value)+(value-(this.filtered[id]??value))*.35;set(id,this.filtered[id]);};
+        const dt=this.renderDelta??1/60;
+        // Use elapsed time rather than a fixed fraction per rendered frame.
+        // Mouth/blinks need a shorter response than the already filtered head.
+        const smooth=(id,value)=>{const tau=/^Param(?:Eye|Mouth)/.test(id)?.018:.035,alpha=1-Math.exp(-dt/tau);this.filtered[id]=(this.filtered[id]??value)+(value-(this.filtered[id]??value))*alpha;set(id,this.filtered[id]);};
         if(o.userTracking){
-            const sample=o.userTrackingSample,fresh=sample&&performance.now()-sample.receivedAt<600,face=fresh?sample.face:null;
+            const sample=o.userTrackingSample,fresh=sample&&performance.now()-sample.receivedAt<600;
+            const face=fresh&&sample.face?.landmarks?.length?sample.face:null;
             const scores=Object.fromEntries((face?.blendshapes||[]).map(b=>[b.categoryName,b.score]));
-            let rotation=new THREE.Euler();if(face?.matrix){rotation.setFromRotationMatrix(new THREE.Matrix4().fromArray(face.matrix),'XYZ');this.neutral ||= rotation.clone();}
+            const hasPose=face?.matrix?.length===16&&Array.from(face.matrix).every(Number.isFinite);
+            let rotation=new THREE.Euler();if(hasPose){rotation.setFromRotationMatrix(new THREE.Matrix4().extractRotation(new THREE.Matrix4().fromArray(face.matrix)),'XYZ');this.neutral ||= rotation.clone();}
+            const headReady=hasPose&&this.neutral;
             const sign=o.userTrackingMirror===false?-1:1,range=o.trackingOptions?.range??1;
             const clamp=x=>Math.max(0,Math.min(1,x));
-            smooth('ParamAngleX',face?(rotation.y-this.neutral.y)*sign*57.3*range:0);
-            smooth('ParamAngleY',face?-(rotation.x-this.neutral.x)*57.3*range:0);
-            smooth('ParamAngleZ',face?-(rotation.z-this.neutral.z)*sign*57.3*range:0);
+            smooth('ParamAngleX',headReady?(rotation.y-this.neutral.y)*sign*57.3*range:0);
+            smooth('ParamAngleY',headReady?-(rotation.x-this.neutral.x)*57.3*range:0);
+            smooth('ParamAngleZ',headReady?-(rotation.z-this.neutral.z)*sign*57.3*range:0);
             const aperture=(a,b,c,d)=>{const p=face?.landmarks;if(!p?.[d])return null;return Math.hypot(p[c].x-p[d].x,p[c].y-p[d].y)/Math.max(.001,Math.hypot(p[a].x-p[b].x,p[a].y-p[b].y));};
             for(const [side,ids] of [['L',[33,133,159,145]],['R',[362,263,386,374]]]){
                 const ratio=aperture(...ids),blink=scores[side==='L'?'eyeBlinkLeft':'eyeBlinkRight']||0;
@@ -159,7 +191,7 @@ export default class Live2DViewer {
                 }
                 smooth('ParamEye'+side+'Open',face?1-closure:1);
             }
-            if(o.trackingMouthEnabled!==false){
+            if(o.trackingMouthEnabled!==false&&!o.audioPlaybackActive){
                 const mouth=aperture(61,291,13,14);
                 smooth('ParamMouthOpenY',Math.max(clamp((scores.jawOpen||0)*1.5),mouth===null?0:clamp((mouth-.035)*5)));
                 smooth('ParamMouthForm',Math.max(scores.mouthSmileLeft||0,scores.mouthSmileRight||0));
@@ -191,11 +223,17 @@ export default class Live2DViewer {
             }
         }
         // Direct parameter remaps allow models with custom Cubism mouth IDs.
+        this.chatReaderPose=null;
+        if(o.vtuberTrackingMode&&(o.chatReaderActive||o.chatReaderMotion)){
+            const lean=chatReaderLean(o,this.renderDelta??1/60);
+            if(lean!==null){this.chatReaderPose={ParamBodyAngleZ:lean*57.3,ParamAngleZ:-lean*57.3*.25};for(const [id,value]of Object.entries(this.chatReaderPose))set(id,value);}
+        }
         for(const name of Object.values(o.mouthOptions?.mapping||{}))if(name&&name!=='none'&&Object.hasOwn(this.values,name))set(name,this.values[name]);
-        if(o.mouthOptions?.source==='off'){set('ParamMouthOpenY',0);set('ParamMouthForm',0);}
+        if(o.mouthOptions?.source==='off'&&!o.audioPlaybackActive){set('ParamMouthOpenY',0);set('ParamMouthForm',0);}
         if(o.mouthOptions?.source==='both'&&o.microphoneMouthWeights){const i=core.getParameterIndex('ParamMouthOpenY');if(i>=0)set('ParamMouthOpenY',Math.max(core.getParameterValueByIndex(i),...Object.values(o.microphoneMouthWeights)));}
     }
     render(delta){
+        this.renderDelta=Math.max(0,Math.min(delta,.1));
         const internal=this.avatar.internalModel;
         if(this.gazeTarget){
             const alpha=1-Math.exp(-Math.min(delta,.1)/.055);

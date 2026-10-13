@@ -24,3 +24,13 @@ const p=new ctx.Physics(),root=new THREE.Group(),b=new THREE.Bone();b.name='brea
 assert.ok(p.nodes[0].tailLocal.length()<.5,'chest leaf uses short local lever');
 const prev=p.nodes[0].prev.clone();p.applyCharacterDrag(new THREE.Vector3(.4,0,0));assert.ok(p.nodes[0].prev.distanceTo(prev)>.02);
 console.log('PASS: sphere, box and capsule hair collisions; finite bounded strands; short chest lever and drag response');
+// Even an incompatible imported collider cannot rotate a local hair segment
+// past the configured cone. Track the conflict for automatic diagnosis.
+{
+ const physics=new ctx.Physics(),model=new THREE.Group(),hair=new THREE.Bone(),tail=new THREE.Bone();hair.name='Hair';tail.position.y=1;hair.add(tail);model.add(hair);physics.attach(model);physics.setMode('normal');
+ physics._collideHair=(node,anchor)=>node.pos.copy(anchor).add(new THREE.Vector3(0,-1,0));
+ for(let i=0;i<120;i++)physics.update(1/60);
+ for(const node of physics.nodes)assert.ok(node.bone.quaternion.angleTo(node.restQuat)<=node.params.maxAngle*THREE.MathUtils.DEG2RAD+1e-6,'Final local rotation respects the limit after collision');
+ assert.ok(physics.nodes.some(n=>n.collisionConflict),'Unsatisfiable collider is recorded');
+}
+console.log('PASS: post-collision local cone cap and incompatible-collider diagnosis');

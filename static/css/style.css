@@ -37,6 +37,7 @@ body {
 #chat-reader-mode-btn[hidden], #vtuber-mode-btn[hidden], #tracking-restore-ai[hidden] { display: none !important; }
 body.tracking-only #chat-panel,
 body.tracking-only #screen-view-btn,
+body.tracking-only #auto-game-btn,
 body.tracking-only #screen-react-btn,
 body.tracking-only #clear-memory-desktop,
 body.tracking-only #interrupt-btn,
@@ -463,6 +464,7 @@ button.accent-btn {
     z-index: 100; animation: fadeIn 0.2s ease-out;
 }
 .modal-backdrop.hidden { display: none; }
+.modal-backdrop:has(#tab-theme.active) {background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;}
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .modal-card {
@@ -949,6 +951,9 @@ body.tracking-only .modal-backdrop {
 }
 #expression-modal {
     justify-content: flex-start;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     padding: 16px;
     box-sizing: border-box;
 }
@@ -1071,6 +1076,13 @@ body.tracking-only #dance-btn,body.tracking-only #dance-style,body.tracking-only
 body.model-part-picking #expression-modal { pointer-events:none;backdrop-filter:none;background:transparent; }
 body.model-part-picking #expression-modal .modal-card { pointer-events:auto; }
 body.model-part-picking #viewer canvas { cursor:crosshair; }
+body.picking-model-part #expression-modal { pointer-events:none;backdrop-filter:none;background:transparent; }
+body.picking-model-part #expression-modal .modal-card { pointer-events:auto; }
+body.picking-model-part #viewer canvas { cursor:crosshair; }
+.model-settings-zoom {display:flex;align-items:center;gap:8px;padding:8px 16px;flex-wrap:wrap;}
+.model-settings-zoom input {width:84px;}
+.bone-diagnostic-images {display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+.bone-diagnostic-images img {max-width:48%;max-height:200px;object-fit:contain;border:1px solid var(--panel-border);border-radius:8px;}
 
 .transparency-shortcut-label {font-size:11px;color:var(--text-muted);white-space:nowrap;}
 body.tracking-only .transparency-shortcut-label {display:none;}

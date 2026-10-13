@@ -1,0 +1,16 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict'),THREE=require('../static/vendor/three/build/three.cjs');
+const ctx={THREE};vm.runInNewContext(fs.readFileSync('static/js/model-materials.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+'\nthis.Materials=ModelMaterials;',ctx);
+let color={R:1,G:1,B:1,A:1},mask=null,seen;
+const indices=new Uint16Array([0,1,2]),renderer={drawMesh(...args){seen={opacity:args[6],color:{...color}};},getModelColor(){return {...color};},setModelColor(R,G,B,A){color={R,G,B,A};},getClippingContextBufferForMask(){return mask;}};
+const live={avatar:{internalModel:{renderer,coreModel:{getDrawableIds(){return ['Hair_Front'];},getDrawableVertexIndices(){return indices;}}},textures:[]}};
+const controller=new ctx.Materials({live2d:live});controller.attach('model');
+const draw=opacity=>renderer.drawMesh(0,3,3,indices,[],[],opacity,0,false);
+controller.setColor('art:0',{color:'#ffffff',strength:0,opacity:2});draw(.4);assert.equal(seen.opacity,1,'Negative transparency makes translucent hair opaque');assert.equal(seen.color.A,1);assert.equal(controller.colors['art:0'].opacity,2,'Saved negative setting retained');
+draw(0);assert.equal(seen.opacity,0,'Hidden artwork stays hidden');mask={};draw(.4);assert.equal(seen.opacity,.4,'Masks retain original opacity');mask=null;
+controller.setColor('art:0',{color:'#ffffff',strength:0,opacity:.5});draw(.4);assert.equal(seen.opacity,.4);assert.equal(seen.color.A,.5,'Positive transparency still fades');
+controller.setColor('art:0',null);draw(.4);assert.equal(seen.opacity,.4);controller.restore();
+const material=new THREE.MeshBasicMaterial({color:0xffffff,opacity:.4,transparent:true}),viewer={model:{traverse(fn){fn({material});}}},three=new ctx.Materials(viewer);three.attach('pmx');
+three.setColor('mat:0',{color:'#ffffff',strength:0,opacity:2});assert.equal(material.opacity,1);
+three.setColor('mat:0',null);assert.equal(material.opacity,.4,'Original PMX/VRM opacity restored');
+assert.match(fs.readFileSync('static/index.html','utf8'),/id="model-color-opacity" min="-100" max="100"/);
+console.log('PASS: negative Live2D/3D transparency, saved boost, masks, hidden art, fade and restoration');

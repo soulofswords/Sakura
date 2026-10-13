@@ -16,3 +16,11 @@ class DanceCommandTests(unittest.IsolatedAsyncioTestCase):
             result=await app.chat({'text':'stop dancing','avatar_can_dance':True,'defer_audio':True})
             self.assertEqual(result['avatar_motion'],'stop')
         self.assertIn('Haan',dance_reply('groove','Hinglish'))
+
+    async def test_dance_followup_and_action_memory(self):
+        with patch.object(app,'get_settings',return_value={'selected_voice':'sakura_ava'}),patch.object(app,'llm',Mock()),patch.object(app.app.state,'tracking_only',False,create=True):
+            result=await app.chat({'text':'make u dance','avatar_can_dance':True,'defer_audio':True})
+            self.assertEqual(result['avatar_motion'],'groove');app.llm.remember_exchange.assert_called_once_with('make u dance',result['reply'])
+            followup=await app.chat({'text':'just do what u have. i want to see that','avatar_can_dance':True,'defer_audio':True})
+            self.assertEqual(followup['avatar_motion'],'groove');app.llm.chat.assert_not_called()
+            app.app.state.last_avatar_action=None

@@ -1,0 +1,33 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const THREE=require('../static/vendor/three/build/three.cjs');
+const context={THREE,performance};
+vm.runInNewContext(fs.readFileSync('static/js/live2d-face-mapping.js','utf8').replace(/export /g,''),context);
+const viewerSource=fs.readFileSync('static/js/model-viewer.js','utf8');
+const weightsMethod=viewerSource.slice(viewerSource.indexOf('    setVowelWeights(weights) {'),viewerSource.indexOf('    resetMouth() {'));
+vm.runInNewContext(`this.View=class {${weightsMethod}}`,context);
+for(const format of ['PMX','VRM']){
+    const applied={},viewer=new context.View();
+    Object.assign(viewer,{mouthOptions:{source:'off',mapping:{A:'customMouth'}},setMorph:(name,value)=>applied[name]=value});
+    viewer.setVowelWeights({A:.3});assert.equal(applied.customMouth,0,format+' input off remains off');
+    viewer.audioPlaybackActive=true;viewer.setVowelWeights({A:.3});
+    assert.equal(applied.customMouth,.3,format+' Chat Reader audio animates custom mouth');
+    viewer.audioPlaybackActive=false;viewer.setVowelWeights({A:.3});assert.equal(applied.customMouth,0);
+}
+const liveSource=fs.readFileSync('static/js/live2d-viewer.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export default class Live2DViewer','class Live2DViewer');
+vm.runInNewContext(liveSource+'\nthis.Live=Live2DViewer;',context);
+const values={},core={_model:{parameters:{ids:['ParamMouthOpenY','ParamMouthForm']}},getParameterIndex(id){return this._model.parameters.ids.indexOf(id);},setParameterValueById(id,value){values[id]=value;},getParameterValueByIndex(i){return values[this._model.parameters.ids[i]]||0;},setParameterValueByIndex(i,value){values[this._model.parameters.ids[i]]=value;}};
+const live=Object.create(context.Live.prototype);
+Object.assign(live,{filtered:{},values:{A:.3},eyeNeutral:{L:.25,R:.25},motion:{time:0,talkBlend:0,settle:0},avatar:{internalModel:{coreModel:core}},owner:{userTracking:false,vtuberTrackingMode:true,mouthOptions:{source:'off'},audioPlaybackActive:true,activity:'talking'}});
+for(let i=0;i<20;i++)live.applyParameters();
+assert.ok(values.ParamMouthOpenY>.29,'Live2D Chat Reader opens mouth with camera and mic off');
+live.faceSignalMapping={jawOpen:'ParamMouthOpenY'};
+live.applyManualExpressions();
+assert.equal(values.ParamMouthOpenY,.3,'Inactive facial mappings must not close audible Chat Reader mouth');
+live.owner.manualExpressions=new Map();live.expressions=new Map([['close',{Parameters:[{Id:'ParamMouthOpenY',Value:0,Blend:'Overwrite'}]}]]);live.activeExpressions=new Map([['close',1]]);
+live.applyManualExpressions();assert.equal(values.ParamMouthOpenY,0,'Explicit user mouth expression retains priority');live.activeExpressions.clear();
+live.owner.audioPlaybackActive=false;live.applyParameters();assert.equal(values.ParamMouthOpenY,0,'Off input resumes after speech');
+const app=fs.readFileSync('static/js/app.js','utf8');
+const readerStart=app.slice(app.indexOf("document.getElementById('chat-reader-start').addEventListener"),app.indexOf("document.getElementById('chat-reader-stop').addEventListener"));
+assert.ok(readerStart.includes('await stopVtuberVoiceChanger()'),'Competing voice conversion stops before Chat Reader');
+assert.ok(readerStart.includes('viewer.setVtuberTrackingMode(true)'),'Chat Reader retains VTuber pose and suppresses AI gestures');
+console.log('PASS: Chat Reader audio mouth ownership, PMX/VRM remaps, Live2D playback with inputs off, neutral VTuber mode');

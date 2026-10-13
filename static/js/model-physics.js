@@ -515,6 +515,12 @@ export default class ModelPhysics {
         this.model.updateMatrixWorld(true);
         for (const node of this.nodes) {
             const parentWorld = this._parentWorld(node.bone.parent);
+            if(this.disabledBones?.has(node.bone)){
+                node.bone.position.copy(node.restLocal);node.bone.quaternion.copy(node.restQuat);node.bone.updateMatrix();
+                _restMatrix.compose(node.restLocal,node.restQuat,node.bone.scale).premultiply(parentWorld);
+                node.pos.copy(node.tailLocal).applyMatrix4(_restMatrix);node.prev.copy(node.pos);
+                continue;
+            }
             if(node.diagnosticStatic){
                 node.bone.position.copy(node.restLocal);node.bone.quaternion.copy(node.restQuat);node.bone.updateMatrix();
                 _target.copy(node.tailLocal).applyMatrix4(node.bone.matrix).applyMatrix4(parentWorld);
@@ -749,6 +755,21 @@ export default class ModelPhysics {
             if (node.category === 'hair') {
                 this._collideHair(node, _p, _target, worldLength);
             }
+            // Collision projection happens after the first cone constraint.
+            // Oversized imported colliders must not reverse a strand through
+            // 180 degrees and pass that corrupted pose down the hair chain.
+            _dir.subVectors(node.pos,_p);
+            node.collisionConflict=false;
+            if(_dir.lengthSq()>1e-10){
+                _dir.normalize();const angle=_dir.angleTo(_restDir),limit=node.params.maxAngle*THREE.MathUtils.DEG2RAD;
+                node.collisionConflict=node.category==='hair'&&angle>limit+15*THREE.MathUtils.DEG2RAD;
+                if(angle>limit){
+                    _qFix.setFromUnitVectors(_dir,_restDir);
+                    _qFix.slerpQuaternions(_qIdentity,_qFix,(angle-limit)/Math.max(angle,1e-5));
+                    _dir.applyQuaternion(_qFix);node.pos.copy(_p).addScaledVector(_dir,worldLength);
+                    node.prev.lerp(node.pos,.35);
+                }
+            }
 
             // A broken rig, teleport or huge spike must not fling hair into
             // orbit: any particle far from its target snaps back to rest.
@@ -766,6 +787,15 @@ export default class ModelPhysics {
             _qRest.copy(_qParent).multiply(restQuat);
             _qWorld.copy(_qRest).premultiply(_qFix);
             node.bone.quaternion.copy(_qParent).invert().multiply(_qWorld);
+            node.bone.quaternion.normalize();
+            const localAngle=node.bone.quaternion.angleTo(restQuat),localLimit=node.params.maxAngle*THREE.MathUtils.DEG2RAD;
+            if(localAngle>localLimit){
+                if(node.category==='hair'&&localAngle>localLimit+15*THREE.MathUtils.DEG2RAD)node.collisionConflict=true;
+                node.bone.quaternion.slerpQuaternions(restQuat,node.bone.quaternion,localLimit/Math.max(localAngle,1e-5)).normalize();
+                node.bone.updateMatrix();
+                _restMatrix.copy(parentWorld).multiply(node.bone.matrix);
+                node.pos.copy(node.tailLocal).applyMatrix4(_restMatrix);node.prev.lerp(node.pos,.35);
+            }
             node.bone.updateMatrix();
         }
     }

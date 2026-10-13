@@ -8,6 +8,7 @@ const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
     performance,
     window: {},
+    repairNoseSkin() { return 0; },
     fetch: (...args) => fetchImpl(...args),
     THREE: {
         Loader: class { constructor(manager) { this.manager = manager; } },

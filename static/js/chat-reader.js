@@ -1,12 +1,13 @@
 // Read-only speech queue. It never generates replies or requests camera access.
 export default class ChatReader {
-    constructor({speak, play, stopAudio, status}) {
-        Object.assign(this, {speak, play, stopAudio, status});
+    constructor({speak, play, stopAudio, status, onEnabled = () => {}}) {
+        Object.assign(this, {speak, play, stopAudio, status, onEnabled});
         this.generation = 0; this.enabled = false; this.queue = []; this.seen = new Set();
     }
-    start() { this.stop(); this.enabled = true; }
+    start() { this.stop(); this.enabled = true; this.onEnabled(true); }
     stop() {
         ++this.generation; this.enabled = false; this.queue = []; this.seen.clear();
+        this.onEnabled(false);
         this.controller?.abort(); this.controller = null; this.stopAudio();
     }
     enqueue(messages) {

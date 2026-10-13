@@ -83,18 +83,27 @@ class TrackingModeTests(unittest.TestCase):
                 self.assertEqual(TestClient(app.app).post('/api/tracking/mode',json={'enabled':True}).status_code,503)
                 self.assertFalse(app.app.state.ai_unloaded)
 
-    def test_chat_reader_uses_builtin_voice_without_llm_or_rvc(self):
+    def test_chat_reader_uses_selected_builtin_voice_without_llm(self):
         from unittest.mock import AsyncMock
         app.app.state.tracking_only=True
         voice=Mock();voice.speak_to_file_async=AsyncMock(return_value='chat.mp3')
-        with patch('tts.TextToSpeech',return_value=voice),patch.object(app,'llm') as llm,patch('youtube_chat.chat.connect',return_value='abcdefghijk'):
+        with patch('tts.TextToSpeech',return_value=voice),patch.object(app,'get_settings',return_value={'selected_voice':'guy_english'}),patch.object(app,'llm') as llm,patch('youtube_chat.chat.connect',return_value='abcdefghijk'):
             client=TestClient(app.app)
             self.assertEqual(client.post('/api/vtuber/connect',json={'link':'abcdefghijk'}).status_code,409)
             self.assertEqual(client.post('/api/chat-reader/connect',json={'link':'abcdefghijk'}).status_code,200)
             response=client.post('/api/chat-reader/speak',json={'text':'Viewer says hello'})
             self.assertEqual(response.status_code,200,response.text)
-            voice.set_voice_preset.assert_called_once_with('sakura_ava')
-            self.assertEqual(voice.backend,'edge-tts')
+            voice.set_voice_preset.assert_called_once_with('guy_english')
             llm._request.assert_not_called()
+
+    def test_chat_reader_keeps_selected_rvc_snapshot(self):
+        from unittest.mock import AsyncMock
+        app.app.state.tracking_only=True
+        voice=Mock();voice.selected_preset_id='rvc_custom';voice.rvc_model='voice.pth';voice.speak_to_file_async=AsyncMock(return_value='converted.wav')
+        with patch.object(app,'tts',voice),patch.object(app,'llm') as llm:
+            response=TestClient(app.app).post('/api/chat-reader/speak',json={'text':'Viewer says hello'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['audio'],'/audio/converted.wav')
+        voice.set_voice_preset.assert_not_called();voice.speak_to_file_async.assert_awaited_once_with('Viewer says hello');llm._request.assert_not_called()
 
 if __name__=='__main__': unittest.main()

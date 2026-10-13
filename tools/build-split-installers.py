@@ -139,11 +139,11 @@ def main():
     try:
         subprocess.run([sys.executable,'-m','unittest','tests.test_product_editions','tests.test_startup_modes','tests.test_tracking_mode',
             'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_voice_catalog','tests.test_dance_commands','tests.test_nvidia_ar_setup',
-            'tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
+            'tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
         for script in sorted((BASE/'static/js').glob('*.js')):subprocess.run(['node','--check',str(script)],check=True)
-        for name in ['model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-physics.cjs','physics-collisions.cjs',
-            'reaction-expressions.cjs','model-dance.cjs','expression-editor.cjs','expression-stacking.cjs','live2d-face-mapping.cjs','avatar-retarget.cjs','glasses-tracking.cjs','broadcast-camera.cjs','webcam-arm-rig.cjs','tracking-lifecycle.cjs','tracking-distance.cjs','tracking-distance-worker.cjs',
-            'pmx-materials.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','voice-switching.cjs','post-speech-motion.cjs']:
+        for name in ['game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-physics.cjs','physics-collisions.cjs',
+            'reaction-expressions.cjs','auto-expressions.cjs','head-pose-filter.cjs','live2d-tracking-recovery.cjs','model-dance.cjs','expression-editor.cjs','expression-stacking.cjs','live2d-face-mapping.cjs','avatar-retarget.cjs','vrm-head-pitch.cjs','glasses-tracking.cjs','broadcast-camera.cjs','webcam-arm-rig.cjs','tracking-lifecycle.cjs','tracking-distance.cjs','tracking-distance-worker.cjs',
+            'pmx-materials.cjs','pmx-nose-skin.cjs','opacity-boost.cjs','model-bones.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs']:
             subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         with tempfile.TemporaryDirectory(prefix='release-',dir=root) as temp:
             results=[]

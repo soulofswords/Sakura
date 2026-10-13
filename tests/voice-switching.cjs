@@ -7,7 +7,7 @@ const context={fetch:async(url,options)=>{sent.push(JSON.parse(options.body));aw
     chatBusy:false,reactionBusy:false,flashMsg(){},addMessage(){},voiceSaveMsg:{},lipSync:{stop(){}},
     allRvcModels:[],allVoicePresets:[{id:'one',pitch:'+3Hz',rate:'+5%'},{id:'two',pitch:'+0Hz',rate:'-5%'}],
     rvcPitchSlider:{value:'0'},rvcIndexRateSlider:{value:'0.75'}};
-vm.runInNewContext("let chatReplyGeneration=0;let currentVoiceId='one';let currentSettings={};let voiceSaveQueue=Promise.resolve();function selectVoiceCard(id){currentVoiceId=id;}"+selection+saving+'\nthis.apply=applyVoiceById;this.settings=()=>currentSettings;',context);
+vm.runInNewContext("let voiceSelectionGeneration=0;let chatReplyGeneration=0;let currentVoiceId='one';let currentSettings={};let voiceSaveQueue=Promise.resolve();function selectVoiceCard(id){currentVoiceId=id;}"+selection+saving+'\nthis.apply=applyVoiceById;this.settings=()=>currentSettings;',context);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
  const first=context.apply('one');const second=context.apply('two');await tick();

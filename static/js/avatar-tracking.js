@@ -1,3 +1,4 @@
+import HeadPoseFilter from './head-pose-filter.js?v=1';
 export default class AvatarTracking {
     constructor(viewer, status) {
         this.viewer = viewer;
@@ -17,6 +18,7 @@ export default class AvatarTracking {
     }
     async start(deviceId = '') {
         this.stop();
+        this.headPoseFilter=new HeadPoseFilter();
         const session = ++this.session;
         this.status(this.handTrackingEnabled ? 'Loading local face, shoulder, arm and hand tracking…' : 'Loading local face tracking…');
         try {
@@ -35,7 +37,7 @@ export default class AvatarTracking {
             // MediaPipe's WASM loader calls importScripts internally, so this
             // must remain a classic worker.  The cache-busted module import in
             // the worker keeps Chromium from reusing its earlier MIME failure.
-            this.worker = new Worker('/static/js/avatar-tracking-worker.js?v=distance4');
+            this.worker = new Worker('/static/js/avatar-tracking-worker.js?v=distance6');
             await new Promise((resolve, reject) => {
                 const timer = setTimeout(() => finish(new Error('Tracking initialization timed out. Retry your camera.')), 45000);
                 const finish = error => {
@@ -64,6 +66,7 @@ export default class AvatarTracking {
                     // turns body tracking off. Honor the current toggle rather
                     // than the setting captured when that frame began.
                     const sample = this.handTrackingEnabled ? data : {...data, hands: [], pose: null};
+                    sample.face=this.headPoseFilter.update(data.face,data.timestamp,data.distanceAssist);
                     sample.handTrackingEnabled = this.handTrackingEnabled;
                     this.viewer.updateUserTracking(sample);
                     const pose = sample.pose?.landmarks;
@@ -86,7 +89,11 @@ export default class AvatarTracking {
                 try {
                     const image = await createImageBitmap(this.video);
                     if (session !== this.session) { image.close(); return; }
-                    this.worker.postMessage({type: 'frame', image, timestamp: performance.now()}, [image]);
+                    // Live2D currently consumes face signals only. Keep the
+                    // user's hand preference for the next 3D model, while
+                    // avoiding body inference that cannot move this avatar.
+                    this.worker.postMessage({type: 'frame', image, timestamp: performance.now(),
+                        bodyTracking: !this.viewer.live2d && this.handTrackingEnabled}, [image]);
                 } catch (error) { this.busy = false; this.status(error.message); }
             }, Math.round(1000 / this.frameRate));
         } catch (error) {

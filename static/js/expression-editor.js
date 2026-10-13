@@ -1,10 +1,12 @@
 import {installCustomExpressions} from './custom-expressions.js?v=1';
+import {installAutoExpressions} from './auto-expressions.js?v=1';
 export function hotkeyFor(event) {
     if (!event.code || ['ControlLeft','ControlRight','ShiftLeft','ShiftRight','AltLeft','AltRight','MetaLeft','MetaRight'].includes(event.code)) return '';
     return [event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.shiftKey?'Shift':'',event.metaKey?'Meta':'',event.code].filter(Boolean).join('+');
 }
 
 export function installExpressionEditor(getViewer, getModelKey) {
+    const automatic=installAutoExpressions(getViewer,getModelKey);
     const panel=document.getElementById('expression-modal'),list=document.getElementById('expression-list');
     const status=document.getElementById('expression-status');
     let recordingName=null;
@@ -54,6 +56,7 @@ export function installExpressionEditor(getViewer, getModelKey) {
     };
     const render=()=>{
         customEditor?.register();
+        automatic.refresh();
         recordingName=null;list.replaceChildren();
         const names=getViewer()?.allMorphNames||[],data=ensureDefaults(names);
         for(const name of names){

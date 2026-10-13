@@ -1,7 +1,7 @@
 // Classic worker: MediaPipe's WASM loader uses importScripts internally.
-let face, hands, pose, HandLandmarker, PoseLandmarker, fileset, surface, context, handsEnabled = true;
+let face, detailFace, FaceLandmarker, hands, pose, HandLandmarker, PoseLandmarker, fileset, surface, context, handsEnabled = true;
 let handGeneration = 0;
-importScripts('/static/js/tracking-distance.js?v=far1');
+importScripts('/static/js/tracking-distance.js?v=far2');
 let detailSurface, detailContext, faceRegion=null, faceRegionTime=0, frameCount=0;
 function detailImage(image,roi){
     detailContext.drawImage(image,roi.x*image.width,roi.y*image.height,roi.width*image.width,roi.height*image.height,0,0,512,512);
@@ -49,6 +49,7 @@ self.onmessage = async ({data}) => {
             handsEnabled = data.handsEnabled !== false;
             const {FilesetResolver, FaceLandmarker: FaceTask, HandLandmarker: HandTask, PoseLandmarker: PoseTask} = await import('/static/vendor/tracking/vision_bundle.mjs?v=2');
             HandLandmarker = HandTask;
+            FaceLandmarker = FaceTask;
             PoseLandmarker = PoseTask;
             fileset = await FilesetResolver.forVisionTasks('/static/vendor/tracking/wasm');
             face = await FaceTask.createFromOptions(fileset, {
@@ -68,17 +69,28 @@ self.onmessage = async ({data}) => {
                 if(surface.width!==width||surface.height!==height){surface.width=width;surface.height=height;}
                 context.drawImage(data.image,0,0,width,height);
                 const aspect=data.image.width/data.image.height;
-                const p = handsEnabled && pose ? pose.detectForVideo(surface, data.timestamp) : null;
+                const bodyEnabled=handsEnabled&&data.bodyTracking!==false;
+                const p = bodyEnabled && pose ? pose.detectForVideo(surface, data.timestamp) : null;
                 let roi=faceRegion&&data.timestamp-faceRegionTime<1500?faceRegion:null;
-                let f,faceZoomed=false;
-                // Recheck the whole frame periodically so cropped tracking
-                // cannot get stuck on a departed face or an outdated region.
-                if(roi&&++frameCount%6!==0){
-                    f=face.detectForVideo(detailImage(data.image,roi),data.timestamp*2);faceZoomed=!!f.faceLandmarks[0]?.length;
-                    if(faceZoomed)f.faceLandmarks[0]=TrackingDistance.remap(f.faceLandmarks[0],roi);
-                }
-                if(!f?.faceLandmarks[0]?.length){
-                    f=face.detectForVideo(surface,data.timestamp*2+1);faceZoomed=false;
+                // A VIDEO detector has temporal state and camera intrinsics.
+                // Never switch its input between the camera frame and a crop.
+                const full=face.detectForVideo(surface,data.timestamp*2);
+                let f=full,faceZoomed=false,poseSource='full';
+                if(roi&&(!full.faceLandmarks[0]?.length||roi.width<.32)){
+                    detailFace ||= await FaceLandmarker.createFromOptions(fileset,{
+                        baseOptions:{modelAssetPath:'/static/vendor/tracking/face_landmarker.task',delegate:'CPU'},
+                        runningMode:'VIDEO',numFaces:1,outputFaceBlendshapes:true,outputFacialTransformationMatrixes:true,
+                        minFaceDetectionConfidence:.45,minFacePresenceConfidence:.45,minTrackingConfidence:.45,
+                    });
+                    const detail=detailFace.detectForVideo(detailImage(data.image,roi),data.timestamp*2+1);
+                    if(detail.faceLandmarks[0]?.length){
+                        detail.faceLandmarks[0]=TrackingDistance.remap(detail.faceLandmarks[0],roi);
+                        f=detail;faceZoomed=true;
+                        // Crop details improve eyelids/lips, while the full
+                        // frame supplies a consistent pose coordinate system.
+                        if(full.facialTransformationMatrixes?.[0]?.data)f.facialTransformationMatrixes=full.facialTransformationMatrixes;
+                        else poseSource='crop';
+                    }
                 }
                 let next=TrackingDistance.faceRegion(f.faceLandmarks[0],p?.landmarks[0],aspect);
                 if(!next&&!f.faceLandmarks[0]?.length){
@@ -88,9 +100,9 @@ self.onmessage = async ({data}) => {
                     next={x:(1-width)/2,y:Math.max(0,(1-height)*.25),width,height};
                 }
                 if(next){faceRegion=next;faceRegionTime=data.timestamp;}else if(f.faceLandmarks[0]?.length){faceRegion=null;}
-                let h=handsEnabled&&hands?hands.detectForVideo(surface,data.timestamp*2):{landmarks:[],worldLandmarks:[],handedness:[]};
+                let h=bodyEnabled&&hands?hands.detectForVideo(surface,data.timestamp*2):{landmarks:[],worldLandmarks:[],handedness:[]};
                 let handsZoomed=false;
-                if(handsEnabled&&hands&&!h.landmarks.length){
+                if(bodyEnabled&&hands&&!h.landmarks.length){
                     const handRoi=TrackingDistance.handRegion(p?.landmarks[0],aspect);
                     if(handRoi){h=hands.detectForVideo(detailImage(data.image,handRoi),data.timestamp*2+1);
                         h.landmarks=h.landmarks.map(points=>TrackingDistance.remap(points,handRoi));handsZoomed=!!h.landmarks.length;}
@@ -99,6 +111,7 @@ self.onmessage = async ({data}) => {
                     landmarks: f.faceLandmarks[0] || [],
                     blendshapes: f.faceBlendshapes[0]?.categories || [],
                     matrix: f.facialTransformationMatrixes[0]?.data || null,
+                    poseSource,
                 }, hands: h.landmarks.map((landmarks, i) => ({landmarks,
                     world: h.worldLandmarks[i], side: h.handedness[i]?.[0]?.categoryName,
                     confidence: h.handedness[i]?.[0]?.score ?? 0})),

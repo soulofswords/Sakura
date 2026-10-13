@@ -1,5 +1,5 @@
 const fs=require('fs'),assert=require('node:assert/strict');
-const load=(file,name)=>new Function(fs.readFileSync(file,'utf8').replace('export default class '+name,'class '+name)+';return '+name)();
+const load=(file,name)=>new Function(fs.readFileSync(file,'utf8').replace(/^import .*;\r?\n/gm,'').replace('export default class '+name,'class '+name)+';return '+name)();
 const ChatReader=load('static/js/chat-reader.js','ChatReader');
 (async()=>{
  let lines=[],plays=[],stops=0,pending;
@@ -7,6 +7,7 @@ const ChatReader=load('static/js/chat-reader.js','ChatReader');
  reader.start();reader.enqueue([{id:'1',author:'A',text:'hello',timestamp:Date.now()},{id:'1',author:'A',text:'hello',timestamp:Date.now()},{id:'old',text:'old',timestamp:0}]);
  await new Promise(r=>setTimeout(r,10));assert.equal(lines.length,1);assert.equal(plays.length,1);
  reader.speak=()=>new Promise(r=>pending=r);reader.enqueue([{id:'2',text:'cancel me',timestamp:Date.now()}]);reader.stop();pending('old audio');await new Promise(r=>setTimeout(r,10));assert.equal(plays.length,1);
+ globalThis.HeadPoseFilter=class {update(face){return face;}};
  const AvatarTracking=load('static/js/avatar-tracking.js','AvatarTracking');
  let waiting=[],streams=[],lastWorker;
  Object.defineProperty(globalThis,'navigator',{value:{mediaDevices:{getUserMedia:()=>new Promise(r=>waiting.push(r))}},configurable:true});

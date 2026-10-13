@@ -1,9 +1,31 @@
-import {ModelMaterials,storedRemap} from './model-materials.js?v=part-picker2';
+import {ModelMaterials,storedRemap} from './model-materials.js?v=opacity-boost3';
 import {installColorDial} from './color-dial.js?v=1';
-import {installMouthSettings} from './mouth-settings.js?v=combined-tick3';
+import {installMouthSettings} from './mouth-settings.js?v=chat-reader-mouth4';
 import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=1';
+import {installBoneSettings} from './model-bones.js?v=snapshot4';
 
 export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic) {
+    const zoom=document.getElementById('model-settings-zoom');
+    const applyZoom=value=>{getViewer()?.setDisplaySize(value);zoom.value=Math.round((getViewer()?.camera.zoom||1)*100);};
+    document.getElementById('model-settings-zoom-in').onclick=()=>applyZoom((getViewer()?.camera.zoom||1)*110);
+    document.getElementById('model-settings-zoom-out').onclick=()=>applyZoom((getViewer()?.camera.zoom||1)*100/1.1);
+    document.getElementById('model-settings-zoom-reset').onclick=()=>applyZoom(100);
+    zoom.onchange=()=>applyZoom(Number(zoom.value));
+    window.addEventListener('wheel',event=>{
+        if(!document.body.classList.contains('model-part-picking')&&!document.body.classList.contains('picking-model-part'))return;
+        if(event.target.closest?.('#expression-modal .modal-card'))return;
+        event.preventDefault();event.stopImmediatePropagation();
+        applyZoom((getViewer()?.camera.zoom||1)*100*Math.exp(-Math.max(-200,Math.min(200,event.deltaY))*.002));
+    },{capture:true,passive:false});
+    const bones=installBoneSettings(getViewer,getModelKey);
+    const lighting=document.getElementById('model-lighting-controls');
+    for(const id of ['character-glow-slider','light-angle-slider','light-elevation-slider','gloss-boost-slider']){
+        const group=document.getElementById(id)?.closest('.slider-group');if(group)lighting.append(group);
+    }
+    const envPicker=document.getElementById('env-color-picker');
+    if(envPicker)installColorDial(envPicker,document.getElementById('env-color-dial'));
+    const backgroundPicker=document.getElementById('obs-background-color');
+    if(backgroundPicker)installColorDial(backgroundPicker,document.getElementById('obs-background-dial'));
     const mouth=installMouthSettings(getViewer,getModelKey,getMic);
     const faceMapping=installLive2DFaceMapping(getViewer,getModelKey);
     const panel=document.getElementById('expression-modal'),status=document.getElementById('model-material-status');
@@ -30,6 +52,8 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic) {
     opacity.oninput=()=>document.getElementById('model-color-opacity-value').textContent=opacity.value+'%';
     const fill=(select,entries)=>{const previous=select.value;select.replaceChildren();entries.forEach(e=>select.add(new Option(e.name,e.id)));if(entries.some(e=>e.id===previous))select.value=previous;select.disabled=!entries.length;};
     const refresh=async()=>{
+        zoom.value=Math.round((getViewer()?.camera.zoom||1)*100);
+        bones.refresh();
         const viewer=getViewer(),identity=viewer?.live2d||viewer?.model,key=getModelKey();
         const tracking=!!viewer?.vtuberTrackingMode;
         faceMapping.refresh();
@@ -82,6 +106,6 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic) {
     window.addEventListener('pointermove',event=>{if(!picking||event.target.closest?.('#expression-modal .modal-card'))return;if(performance.now()-lastHover<45)return;lastHover=performance.now();const id=controller.pick(event.clientX,event.clientY);controller.setHover(id);status.textContent=id?'Highlighted: '+controller.entry(id).name:'Hover over hair, clothing or another model part.';},true);
     window.addEventListener('pointerdown',event=>{if(!picking||event.target.closest?.('#expression-modal .modal-card'))return;event.preventDefault();event.stopImmediatePropagation();const id=controller.pick(event.clientX,event.clientY);if(!id)return;part.value=id;updateColor();const name=controller.entry(id).name;stopPicking();status.textContent='Selected: '+name;},true);
     window.addEventListener('keydown',event=>{if(picking&&event.code==='Escape'){event.preventDefault();stopPicking();}},true);
-    const close=document.getElementById('close-expression-modal'),closeOriginal=close.onclick;close.onclick=()=>{stopPicking();faceMapping.stop();closeOriginal?.();};
+    const close=document.getElementById('close-expression-modal'),closeOriginal=close.onclick;close.onclick=()=>{stopPicking();bones.stop();faceMapping.stop();closeOriginal?.();};
     tab(activeTab);return {refresh,stopMicrophone:mouth.stop};
 }

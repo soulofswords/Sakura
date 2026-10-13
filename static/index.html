@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sakura — Anime AI Assistant</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=left-settings8">
+    <link rel="stylesheet" href="/static/css/style.css?v=game-visible10">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -148,10 +148,12 @@
     <div id="expression-modal" class="modal-backdrop hidden">
         <div class="modal-card" style="max-width:620px">
             <div class="modal-header"><h3>Model Settings</h3><button id="close-expression-modal" type="button" class="close-btn">✕</button></div>
+            <div class="model-settings-zoom"><span>Model zoom</span><button id="model-settings-zoom-out" type="button">−</button><input id="model-settings-zoom" type="number" min="40" step="10" value="100" aria-label="Model zoom percent"><span>%</span><button id="model-settings-zoom-in" type="button">+</button><button id="model-settings-zoom-reset" type="button">100%</button></div>
             <div class="settings-tabs" role="tablist" aria-label="Model settings sections">
                 <button type="button" class="tab-btn" data-model-tab="remapping" role="tab">Texture remapping</button>
                 <button type="button" class="tab-btn" data-model-tab="coloring" role="tab">Texture coloring</button>
                 <button type="button" class="tab-btn" data-model-tab="expression" role="tab">Expressions</button>
+                <button type="button" class="tab-btn" data-model-tab="bones" role="tab">Bones</button>
                 <button type="button" class="tab-btn" data-model-tab="mouth" role="tab">Mouth</button>
             </div>
             <div class="modal-body">
@@ -168,10 +170,30 @@
                 <label for="model-color">Color</label><input type="color" id="model-color" value="#ffffff">
                 <div id="model-color-dial"></div>
                 <label for="model-color-strength">Color strength <output id="model-color-strength-value">100%</output></label><input type="range" id="model-color-strength" min="0" max="100" value="100">
-                <label for="model-color-opacity">Transparency <output id="model-color-opacity-value">0%</output></label><input type="range" id="model-color-opacity" min="0" max="100" value="0">
+                <label for="model-color-opacity">Transparency <output id="model-color-opacity-value">0%</output></label><input type="range" id="model-color-opacity" min="-100" max="100" value="0">
+                <p class="hint">Negative values strengthen opacity. Use −100% for fully opaque material or ArtMesh opacity. Texture cutouts stay intact.</p>
                 <div class="save-actions"><button id="model-color-apply" data-material-action type="button">Apply color</button><button id="model-color-reset" data-material-action type="button">Restore original color</button></div>
+                <div id="model-lighting-controls"><h4>Character lighting</h4></div>
+              </section>
+              <section data-model-panel="bones" hidden>
+                <input id="model-bone-search" type="search" placeholder="Search hair, skirt or other bones">
+                <label for="model-bone-select">Bone</label><select id="model-bone-select"></select>
+                <button id="model-bone-pick" type="button">Pick bone on model</button>
+                <label><input id="model-bone-disabled" type="checkbox">Freeze this bone (disable motion)</label>
+                <button id="model-bone-reset" type="button">Restore all bones</button>
+                <p id="model-bone-status" class="modal-hint"></p>
+                <h4>Automatic bone check</h4>
+                <p id="model-bone-auto-status" class="modal-hint" role="status"></p>
+                <p class="modal-hint">Local model-only snapshots accompany measured bone checks. The snapshot/check button repairs confirmed hair-chain distortion immediately and saves it for later loads. Reset or unfreeze a bone to restore its motion.</p>
+                <button id="model-bone-auto-images" type="button">Show diagnostic snapshots</button>
+                <button id="model-bone-snapshot-check" type="button">Take snapshot and check model</button>
+                <button id="model-bone-auto-reset" type="button">Reset automatic freezes and recheck</button>
+                <div class="bone-diagnostic-images"><img id="model-bone-reference-image" alt="Model reference at two seconds" hidden><img id="model-bone-diagnostic-image" alt="Model diagnostic at eight seconds" hidden></div>
               </section>
               <section data-model-panel="expression" hidden>
+                <label><input id="expression-auto-enabled" type="checkbox">Auto expressions from camera</label>
+                <details><summary>Auto-expression mappings</summary><div id="expression-auto-mappings"></div></details>
+                <p id="expression-auto-status" class="modal-hint"></p>
                 <p id="model-expression-hint" class="modal-hint"></p>
                 <button id="custom-expression-new" type="button">Create custom expression</button>
                 <section id="custom-expression-editor" class="hidden">
@@ -224,6 +246,9 @@
                 <div class="save-actions"><button id="tracking-start" type="button">Start tracking</button><button id="tracking-calibrate" type="button">Calibrate neutral face</button><button id="tracking-stop" type="button">Stop tracking</button><button id="tracking-restore-ai" type="button">Return to assistant</button></div>
                 <label for="reader-chat-link">YouTube livestream / chat link</label>
                 <input id="reader-chat-link" type="url" placeholder="https://www.youtube.com/watch?v=…">
+                <label for="reader-voice">Chat Reader voice</label><select id="reader-voice"></select>
+                <label for="reader-volume">Chat Reader volume <output id="reader-volume-value">100%</output></label>
+                <input id="reader-volume" type="range" min="0" max="200" value="100">
                 <div class="save-actions"><button id="chat-reader-start" type="button">Chat Reader on</button><button id="chat-reader-stop" type="button">Chat Reader off</button></div>
                 <p class="modal-hint">Chat Reader reads messages aloud with a built-in voice. It turns off face and hand tracking. No AI replies. Internet is required for YouTube and speech.</p>
                 <p id="tracking-status" role="status">Off</p>
@@ -264,6 +289,7 @@
                 </div>
             </div>
 
+            <div id="env-color-dial"></div>
             <!-- Lighting Intensity Slider -->
             <div class="slider-group">
                 <div class="slider-label-row">
@@ -594,6 +620,7 @@
                     <label><input id="obs-background-enabled" type="checkbox"> Solid background for OBS</label>
                     <label for="obs-background-color">Background color:</label>
                     <input id="obs-background-color" type="color" value="#00ff00">
+                    <div id="obs-background-dial"></div>
                     <output id="obs-background-value">#00ff00</output>
                     <button id="obs-green-screen" type="button">Green screen</button>
                     <p class="modal-hint">Choose a color that isn't on your character. Add Chroma Key to your OBS capture and match this color. Hide controls with Ctrl+Shift+H for a clean capture.</p>
@@ -763,7 +790,7 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=face-mapping15"></script>
+    <script type="module" src="/static/js/app.js?v=live2d-speed28"></script>
 </body>
 </html>
 

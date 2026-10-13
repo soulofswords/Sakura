@@ -1,11 +1,11 @@
 import {installSpoutControls} from './spout-output.js?v=miu-expression-manager6';
-import {installExpressionEditor} from './expression-editor.js?v=custom-expression5';
-import {installModelSettings} from './model-settings.js?v=face-mapping15';
-import ModelViewer from './model-viewer.js?v=face-mapping15';
-import AvatarTracking from './avatar-tracking.js?v=distance4';
+import {installExpressionEditor} from './expression-editor.js?v=auto1-custom-expression5';
+import {installModelSettings} from './model-settings.js?v=live2d-speed28';
+import ModelViewer from './model-viewer.js?v=live2d-speed28';
+import AvatarTracking from './avatar-tracking.js?v=distance6';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
-import ChatReader from './chat-reader.js';
-import LipSync from './lip-sync.js?v=mouth-controls4';
+import ChatReader from './chat-reader.js?v=lean1';
+import LipSync from './lip-sync.js?v=reader-audio6';
 import RvcVoiceChanger from './rvc-voice-changer.js?v=mouth-controls4';
 import EyeTracking from './eye-tracking.js?v=vtuber-eyes1';
 import ScreenShare from './screen-share.js?v=capture2';
@@ -99,6 +99,7 @@ let allRvcModels = [];          // from /api/voices (rvc_models)
 let allPmxModels = [];          // from /api/models
 let currentVoiceId = 'sakura_ava';
 let voiceSaveQueue = Promise.resolve();
+let voiceSelectionGeneration = 0;
 let selectedPmxPath = '';
 let glitchModelKey = '';
 
@@ -850,7 +851,7 @@ function setupEvents() {
     });
     setInterval(pollVtuberChat, 3000);
     const gameButton = document.getElementById('auto-game-btn');
-    gameButton.style.display = document.body.classList.contains('desktop-companion') ? '' : 'none';
+    gameButton.style.display = '';
     gameButton.addEventListener('click', async () => {
         autoGameEnabled = !autoGameEnabled;
         gameButton.textContent = autoGameEnabled ? '🎮 Auto game on' : '🎮 Auto game off';
@@ -1438,6 +1439,8 @@ function populateVoiceQuickSelect() {
     });
 
     syncCustomDropdown('voice-dropdown', voiceQuickSelect);
+    const readerChoice=document.getElementById('reader-voice');
+    if(readerChoice){readerChoice.replaceChildren(...Array.from(voiceQuickSelect.options,o=>new Option(o.text,o.value)));readerChoice.value=currentVoiceId;}
 }
 
 function renderVoiceGrid() {
@@ -1655,6 +1658,7 @@ async function saveVoiceSettings() {
             });
             const data = await res.json();
             if (!res.ok || !data.ok) throw new Error(data.error || 'Voice could not be applied.');
+            ++voiceSelectionGeneration;
             if (currentVoiceId === payload.selected_voice) {
                 currentSettings = data.settings;
                 flashMsg(voiceSaveMsg, 'Voice applied ✓');
@@ -2756,10 +2760,18 @@ function setupAvatarTracking() {
     avatarTracking.setHandTracking(handsToggle.checked);
     window.addEventListener('sakura-physics-status-changed',()=>updatePhysicsUI(viewer?.physics?.mode));
     const reader = new ChatReader({
+        onEnabled: enabled => { if (viewer) viewer.chatReaderActive = enabled; },
         status: message => { status.textContent = message; },
         stopAudio: () => lipSync?.stop(),
-        play: audio => lipSync.playWithLipSync(audio),
+        play: audio => lipSync.playWithLipSync(audio, null, {volume:Number(document.getElementById('reader-volume').value)/100}),
         speak: async (text, signal) => {
+            await voiceSaveQueue;
+            const readerVoiceKey=currentVoiceId+':'+voiceSelectionGeneration;
+            if (currentVoiceId.startsWith('rvc_') && readerRvcVoice !== readerVoiceKey) {
+                await prepareVtuberRvcVoice();
+                readerRvcVoice = readerVoiceKey;
+            }
+            if (signal.aborted) return null;
             const response = await fetch('/api/chat-reader/speak', {method:'POST', signal,
                 headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});
             const data = await response.json();
@@ -2767,17 +2779,30 @@ function setupAvatarTracking() {
             return data.audio;
         },
     });
+    let readerRvcVoice = '';
+    const readerVolume=document.getElementById('reader-volume');
+    readerVolume.value=localStorage.getItem('sakura_reader_volume')??100;
+    const volumeLabel=()=>document.getElementById('reader-volume-value').textContent=readerVolume.value+'%';
+    volumeLabel();
+    readerVolume.oninput=()=>{volumeLabel();localStorage.setItem('sakura_reader_volume',readerVolume.value);if(reader.enabled)lipSync?.setPlaybackVolume(Number(readerVolume.value)/100);};
+    const readerVoice=document.getElementById('reader-voice');
+    readerVoice.onchange=async()=>{
+        await applyVoiceById(readerVoice.value);readerVoice.value=currentVoiceId;
+        if(reader.enabled&&currentVoiceId.startsWith('rvc_')){try{await prepareVtuberRvcVoice();readerRvcVoice=currentVoiceId+':'+voiceSelectionGeneration;}catch(error){status.textContent=error.message;}}
+    };
     let readerPolling = false;
     const stopReader = async () => {
         reader.stop();
+        readerRvcVoice='';
         await fetch('/api/vtuber/disconnect', {method:'POST'}).catch(()=>{});
     };
     document.getElementById('chat-reader-start').addEventListener('click', async () => {
         if (switching) return;
         switching = true;
         try {
+            await stopVtuberVoiceChanger();
             avatarTracking.stop(); await stopReader();
-            viewer.setVtuberTrackingMode(false);
+            viewer.setVtuberTrackingMode(true);
             continuousMic.stop(); setUI(true);
             ++chatReplyGeneration; replyController?.abort();
             vtuberEnabled=false; ++vtuberGeneration; vtuberQueue=[];
@@ -2862,6 +2887,8 @@ function setupAvatarTracking() {
         try { await refreshCameras(); } catch (error) { status.textContent = error.message; }
     });
     document.getElementById('chat-reader-mode-btn').addEventListener('click',()=> {
+        readerVoice.replaceChildren(...Array.from(voiceQuickSelect.options,option=>new Option(option.text,option.value)));
+        readerVoice.value=currentVoiceId;
         modal.classList.remove('hidden'); document.getElementById('reader-chat-link').focus();
     });
     document.getElementById('close-tracking-modal').addEventListener('click',()=>modal.classList.add('hidden'));

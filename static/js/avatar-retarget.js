@@ -254,7 +254,10 @@ export default class AvatarRetarget {
             entry.bone.quaternion.slerp(target,alpha);
         };
         const range = clamp(options.range ?? 1, 0, 2);
-        rotate('head',clamp((rotation.x-this.neutral.x)*range,-.7,.7),clamp((rotation.y-this.neutral.y)*sign*range,-.9,.9),clamp((rotation.z-this.neutral.z)*sign*range,-.6,.6));
+        // VRM normalized humanoid bones use the opposite local pitch axis
+        // from the PMX rigs. Mirroring affects yaw/roll, not looking up/down.
+        const pitchSign=this.viewer.vrm ? -1 : 1;
+        rotate('head',clamp((rotation.x-this.neutral.x)*range*pitchSign,-.7,.7),clamp((rotation.y-this.neutral.y)*sign*range,-.9,.9),clamp((rotation.z-this.neutral.z)*sign*range,-.6,.6));
         const gazeX=((scores.eyeLookInLeft||0)+(scores.eyeLookOutRight||0)-(scores.eyeLookOutLeft||0)-(scores.eyeLookInRight||0))*.2;
         const gazeY=((scores.eyeLookDownLeft||0)+(scores.eyeLookDownRight||0)-(scores.eyeLookUpLeft||0)-(scores.eyeLookUpRight||0))*.15;
         const gaze = clamp(options.gaze ?? 1, 0, 2);

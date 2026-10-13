@@ -61,7 +61,7 @@ export function installMouthSettings(getViewer,getKey,getMic=()=> '') {
                     weights.A=0;weights[vowel]=level;
                 }
                 const viewer=getViewer();if(viewer)viewer.microphoneMouthWeights=weights;
-                if(config.source!=='both'||!viewer?.userTracking)viewer?.setVowelWeights(weights);frame=requestAnimationFrame(loop);
+                if(!viewer?.audioPlaybackActive&&(config.source!=='both'||!viewer?.userTracking))viewer?.setVowelWeights(weights);frame=requestAnimationFrame(loop);
             };loop();
         }catch(error){await stop();status.textContent=error.message;}
     };

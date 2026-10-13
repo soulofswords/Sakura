@@ -1,4 +1,5 @@
-import Live2DViewer from './live2d-viewer.js?v=face-mapping15';
+import Live2DViewer from './live2d-viewer.js?v=live2d-speed28';
+import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
 import * as THREE from 'three';
 import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -8,10 +9,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/static/vendor/vrm/three-vrm.module.min.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import AvatarRetarget from './avatar-retarget.js?v=glasses13';
+import AvatarRetarget from './avatar-retarget.js?v=vrm-pitch14';
 import ArmClearance from './arm-clearance.js?v=clearance1';
-import ModelPhysics from './model-physics.js?v=rig-diagnostics30';
-import ModelRigMonitor from './model-rig-monitor.js?v=1';
+import ModelPhysics from './model-physics.js?v=hair-collision31';
+import ModelRigMonitor from './model-rig-monitor.js?v=4';
+import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
 import ReactionExpressions from './reaction-expressions.js?v=1';
 import ModelDance from './model-dance.js?v=1';
 
@@ -572,6 +574,14 @@ export default class ModelViewer {
     }
 
     async loadModel(url, options = {}) {
+        // The running camera worker must never retarget the disposed skeleton.
+        // Rebuild the retargeter for the new format after the load completes.
+        const resumeTracking = this.userTracking || this._resumeTrackingOnLoad;
+        this._resumeTrackingOnLoad = resumeTracking;
+        if (this.userTracking) this.setUserTracking(false, {preserveIntent:true});
+        this.boneControls=null;
+        this.physics.disabledBones=new Set();
+        this.userTrackingSample = null;
         this.dance?.stop(true);
         this.reactionExpressions?.clear();
         this._holdPresentedFrame();
@@ -593,6 +603,8 @@ export default class ModelViewer {
             if (ticket === this._displayLoadTicket) {
                 this._displayLoading = false;
                 if(this.vtuberTrackingMode)this._applyTrackingRestPose();
+                if (resumeTracking && this.model && this.userTrackingRequested!==false) this.setUserTracking(true);
+                this._resumeTrackingOnLoad = false;
                 // Present the fully framed model in this task, before the
                 // compositor can show a cleared canvas between frames.
                 this.setQuality(this.quality);
@@ -793,6 +805,7 @@ export default class ModelViewer {
                         // image decoding. Apply it to the material before shaders
                         // compile, otherwise eye highlights become opaque white.
                         this._preparePmxMaterials(mmd);
+                        repairNoseSkin(mmd);
                         this._fixPmxLayeredSurfaces(mmd);
                         await this.physics.initialize?.(mmd);
                         report('shaders');
@@ -1390,7 +1403,8 @@ export default class ModelViewer {
         if (this.activity !== 'talking') this.speechLevel = 0;
     }
 
-    setUserTracking(enabled) {
+    setUserTracking(enabled, {preserveIntent=false} = {}) {
+        if(!preserveIntent)this.userTrackingRequested=!!enabled;
         if(this.live2d){this.userTracking=!!enabled;this.live2d.neutral=null;return;}
         if (this.userTracking && !enabled) this.avatarRetarget?.reset();
         this.userTracking = !!enabled;
@@ -1542,7 +1556,7 @@ export default class ModelViewer {
                     gravityDir: settings.gravityDir?.clone?.() };
                 this._vrmJointRest.set(joint, rest);
             }
-            if (factor === 0) {
+            if (factor === 0 || this.physics.disabledBones?.has(joint.bone) || this.diagnosticFrozenBones?.has(joint.bone)) {
                 // "Off" parks every strand at its rest pose: no forces, and
                 // full drag kills the verlet inertia within a step.
                 settings.stiffness = 0;
@@ -1553,7 +1567,7 @@ export default class ModelViewer {
                 settings.gravityPower = rest.gravityPower * factor;
                 settings.dragForce = factor === 1 ? rest.dragForce : Math.min(1, Math.max(0, rest.dragForce / factor));
             }
-            if (rest.gravityDir && settings.gravityDir) {
+            if (!this.physics.disabledBones?.has(joint.bone) && !this.diagnosticFrozenBones?.has(joint.bone) && rest.gravityDir && settings.gravityDir) {
                 settings.gravityDir.copy(rest.gravityDir);
                 const wind = (this.physics.windStrength || 0) * .15 * factor;
                 if (wind > 0) {
@@ -1607,6 +1621,10 @@ export default class ModelViewer {
         if (this.userTracking) {
             if(this.physics)this.physics.allowIdleSleep = false;
             this.avatarRetarget.apply(this.userTrackingSample, delta);
+            return;
+        }
+        if (this.vtuberTrackingMode && (this.chatReaderActive || this.chatReaderMotion)) {
+            applyChatReaderLean(this, delta);
             return;
         }
         // VTuber playback animates lips only. It must never activate the AI
@@ -1859,7 +1877,7 @@ export default class ModelViewer {
     }
 
     setVowelWeights(weights) {
-        if(this.mouthOptions?.source==='off')weights={A:0,I:0,U:0,E:0,O:0};
+        if(this.mouthOptions?.source==='off'&&!this.audioPlaybackActive)weights={A:0,I:0,U:0,E:0,O:0};
         const mappedWeights={};
         // weights: { A: float, I: float, U: float, E: float, O: float }
         for (const [vowel, val] of Object.entries(weights)) {
@@ -2014,7 +2032,7 @@ export default class ModelViewer {
         if (this._displayLoading) { this.clock.getDelta(); return; }
         const delta = this.clock.getDelta();
         const elapsed = this.clock.getElapsedTime();
-        if(this.live2d){this.reactionExpressions?.update(delta);this.live2d.render(delta);return;}
+        if(this.live2d){this.reactionExpressions?.update(delta);this.autoExpressions?.update(delta);this.live2d.render(delta);return;}
 
         // RGB Aura / Breathing cycle
         if (this.rgbBreathing) {
@@ -2068,7 +2086,9 @@ export default class ModelViewer {
         }
 
         this._animateCharacter(delta, elapsed);
+        this.boneControls?.apply();
         this.reactionExpressions?.update(delta);
+        this.autoExpressions?.update(delta);
         // Apply after webcam/idle morphs so tracking cannot overwrite the
         // explicitly selected expression on the following frame.
         if(this.vtuberTrackingMode&&this.manualExpressions?.size) {
@@ -2084,9 +2104,11 @@ export default class ModelViewer {
         this.physics.updateSpeechPhysics(this.userTracking ? (this.avatarRetarget?.weights?.A || 0)
             : this.activity === 'talking' ? this.speechLevel : 0, delta);
         this.physics.update(delta);
-        this.rigMonitor?.sample();
         if (this._shouldUseCursorGaze()) this._animateEyeTracking(delta);
         if (this.vrm) this.vrm.update(delta);
+        this.rigMonitor?.enforce();
+        this.rigMonitor?.sample();
+        this.boneControls?.apply();
         this.controls.update();
         if (this.characterGlow > 0 && this.bloomPass) {
             this.renderer.setRenderTarget(this.bloomBase);

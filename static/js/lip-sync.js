@@ -52,7 +52,7 @@ export default class LipSync {
         }
     }
 
-    async playWithLipSync(audioUrl, onPlaybackStarted = null) {
+    async playWithLipSync(audioUrl, onPlaybackStarted = null, {volume = 1} = {}) {
         this.stop();
         const generation = this.playGeneration;
         const controller = new AbortController();
@@ -76,13 +76,17 @@ export default class LipSync {
             this.analyser.fftSize = 1024;
             this.analyser.smoothingTimeConstant = 0;
             source.connect(this.analyser);
-            this.analyser.connect(this.audioContext.destination);
+            this.outputGain = this.audioContext.createGain();
+            this.setPlaybackVolume(volume);
+            this.analyser.connect(this.outputGain);
+            this.outputGain.connect(this.audioContext.destination);
 
             const finished = new Promise(resolve => { this.resolvePlayback = resolve; });
             source.onended = () => {
                 if (generation === this.playGeneration && this.source === source) this.stop();
             };
             this.isPlaying = true;
+            this.modelViewer.audioPlaybackActive = true;
             this.modelViewer.setActivity?.('talking');
             this.playbackStartTime = this.audioContext.currentTime;
             source.start(this.playbackStartTime);
@@ -100,6 +104,7 @@ export default class LipSync {
     stop() {
         ++this.playGeneration;
         this.isPlaying = false;
+        this.modelViewer.audioPlaybackActive = false;
         this.modelViewer.setActivity?.('idle');
         this.modelViewer.setSpeechLevel?.(0);
         this.fetchController?.abort();
@@ -116,6 +121,8 @@ export default class LipSync {
         }
         this.analyser?.disconnect();
         this.analyser = null;
+        this.outputGain?.disconnect();
+        this.outputGain = null;
         this.envelope = null;
         const resolve = this.resolvePlayback;
         this.resolvePlayback = null;
@@ -132,6 +139,10 @@ export default class LipSync {
             const alpha = 1 - Math.exp(-delta / time);
             this.current[vowel] += (this.targets[vowel] - this.current[vowel]) * alpha;
         }
+    }
+
+    setPlaybackVolume(value) {
+        if (this.outputGain) this.outputGain.gain.value = Math.max(0, Math.min(2, Number(value) || 0));
     }
 
     _prepareEnvelope(buffer) {

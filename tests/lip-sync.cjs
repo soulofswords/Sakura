@@ -18,6 +18,7 @@ class AudioContext {
     createAnalyser() { return { fftSize: 0, frequencyBinCount: 512, connect() {}, disconnect() {},
         getByteFrequencyData(data) { data.fill(100); },
         getFloatTimeDomainData(data) { data.fill(amplitude); } }; }
+    createGain() { return {gain:{value:1},connect(){},disconnect(){}}; }
 }
 const context = { console, AbortController, window: { AudioContext },
     document: { getElementById() { return null; } },
@@ -70,6 +71,10 @@ function frame(delta) {
     await tick();
     assert.equal(started, 1, 'Reply is revealed exactly once at playback start');
     assert.equal(sync.audioContext.state, 'running');
+    assert.equal(viewer.audioPlaybackActive, true, 'Decoded playback takes audio mouth ownership');
+    sync.setPlaybackVolume(.25);assert.equal(sync.outputGain.gain.value,.25,'Reader volume changes audible gain');
+    sync.setPlaybackVolume(9);assert.equal(sync.outputGain.gain.value,2,'Volume is bounded');
+    sync.setPlaybackVolume(0);assert.equal(sync.outputGain.gain.value,0,'Reader can mute');
     frame(1 / 60);
     assert.ok(viewer.weights.A > 0, 'Quiet speech animates the mouth');
     assert.equal(viewer.weights.I, 0, 'Speech uses one mouth shape without stretching the lips');
@@ -91,6 +96,7 @@ function frame(delta) {
     assert.equal(sync.source, latestSource, 'Late audio decode cannot replace new speech');
     latestSource.onended(); await replacement;
     assert.equal(sync.isPlaying, false);
+    assert.equal(viewer.audioPlaybackActive, false, 'Audio mouth ownership ends with playback');
     assert.equal(sync.analyser, null);
     assert.equal(frames.size, 0);
     const pending = deferred(); fetchImpl = () => pending.promise;

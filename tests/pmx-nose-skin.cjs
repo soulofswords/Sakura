@@ -1,0 +1,9 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict'),THREE=require('../static/vendor/three/build/three.cjs');
+const ctx={THREE,document:{createElement(){const canvas={getContext(){return {drawImage(){},createImageData(){return {data:new Uint8ClampedArray(4)};},putImageData(pixel){canvas.data=pixel.data;},getImageData(){return {data:Uint8ClampedArray.from([240,210,200,255,240,210,200,255,240,210,200,255,240,210,200,255])};}};}};return canvas;}}};
+vm.runInNewContext(fs.readFileSync('static/js/pmx-nose-skin.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+'\nthis.repair=repairNoseSkin;',ctx);
+const root=new THREE.Group(),geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0,1,0,0,0,1,0,0,.2,.1,.2,.2,.1,0,.4,.1],3));geometry.setAttribute('uv',new THREE.Float32BufferAttribute(Array(12).fill(.5),2));geometry.setIndex([0,1,2,3,4,5]);geometry.addGroup(0,3,0);geometry.addGroup(3,3,1);
+const face=new THREE.MeshToonMaterial({color:0xffffff}),texture=new THREE.Texture({width:2,height:2});face.name='FACE';face.map=texture;
+const nose=new THREE.MeshToonMaterial({opacity:.85,transparent:true});nose.name='NOSE LIGHT';const mesh=new THREE.Mesh(geometry,[face,nose]);root.add(mesh);
+const positions=Array.from(geometry.attributes.position.array),indices=Array.from(geometry.index.array);
+assert.equal(ctx.repair(root),1);const skin=mesh.material[1];assert.equal(skin.opacity,1);assert.equal(skin.transparent,false);assert.deepEqual(Array.from(skin.map.image.data),[240,210,200,255]);assert.equal(mesh.material[0],face);assert.equal(face.map,texture);assert.deepEqual(Array.from(geometry.attributes.position.array),positions);assert.deepEqual(Array.from(geometry.index.array),indices);assert.equal(ctx.repair(root),0,'Idempotent');
+console.log('PASS: nose-only opaque face-sampled skin, intact geometry/face artwork and idempotent repair');

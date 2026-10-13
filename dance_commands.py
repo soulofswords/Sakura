@@ -5,7 +5,7 @@ def dance_action(text):
     lower=text.strip().lower()
     if not re.search(r'\bdanc(?:e|ing)\b|नाच|डांस|\bnaach|\bnach[o]?\b',lower):return None
     if re.search(r'\b(?:stop|cancel|don\x27t|do not|mat|band)\b|बंद|मत',lower):return 'stop'
-    if not re.search(r'can (?:you|u)|could (?:you|u)|will (?:you|u)|please|show|do (?:a|the)|for me|करो|कर सकती|नाचो|\b(?:karo|dikhao|sakti|sakte|naacho|nacho)\b',lower) and not re.fullmatch(r'(?:sakura[, ]+)?(?:dance|naach|nacho|डांस|नाचो)(?:[!. ]*)',lower):return None
+    if not re.search(r'can (?:you|u)|could (?:you|u)|will (?:you|u)|please|show|do (?:a|the)|make (?:you|u)|for me|करो|कर सकती|नाचो|\b(?:karo|dikhao|sakti|sakte|naacho|nacho)\b',lower) and not re.fullmatch(r'(?:sakura[, ]+)?(?:dance|naach|nacho|डांस|नाचो)(?:[!. ]*)',lower):return None
     if 'wave' in lower:return 'wave'
     if re.search(r'step|side|shuffle',lower):return 'step'
     return 'groove'

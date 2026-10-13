@@ -19,7 +19,11 @@ export class ModelMaterials {
                 if(settings&&!mask) {
                     const c=new THREE.Color(settings.color),f=settings.strength;
                     // Cubism's shader accepts colors in its existing texture space.
-                    c.convertLinearToSRGB();this.setModelColor(base.R*(1-f+f*c.r),base.G*(1-f+f*c.g),base.B*(1-f+f*c.b),base.A*(settings.opacity??1));
+                    const opacity=settings.opacity??1;
+                    // Strengthen drawable opacity while keeping atlas cutouts
+                    // and clipping masks intact.
+                    if(opacity>1&&Number.isFinite(args[6])&&args[6]>0)args[6]+=(1-args[6])*(opacity-1);
+                    c.convertLinearToSRGB();this.setModelColor(base.R*(1-f+f*c.r),base.G*(1-f+f*c.g),base.B*(1-f+f*c.b),base.A*Math.min(1,opacity));
                 }
                 if(owner.hoverId===id&&!mask)this.setModelColor(.3,1,1,base.A);
                 try{return owner.drawOriginal.apply(this,args);}finally{this.setModelColor(base.R,base.G,base.B,base.A);}
@@ -44,7 +48,7 @@ export class ModelMaterials {
         const e=this.entry(id);if(!e)throw Error('Choose a model part.');
         const previous=this.colors[id];
         if(settings&&!/^#[0-9a-f]{6}$/i.test(settings.color))throw Error('Choose a valid color.');
-        if(settings)this.colors[id]={color:settings.color,strength:Math.max(0,Math.min(1,Number(settings.strength)||0)),opacity:Math.max(0,Math.min(1,Number.isFinite(Number(settings.opacity))?Number(settings.opacity):1))};else delete this.colors[id];
+        if(settings)this.colors[id]={color:settings.color,strength:Math.max(0,Math.min(1,Number(settings.strength)||0)),opacity:Math.max(0,Math.min(2,Number.isFinite(Number(settings.opacity))?Number(settings.opacity):1))};else delete this.colors[id];
         if(e.kind==='art')return;
         try{this.applyMaterial(e);}catch(error){if(previous)this.colors[id]=previous;else delete this.colors[id];throw error;}
     }
@@ -52,11 +56,12 @@ export class ModelMaterials {
         const source=this.replacements.get(e.id)||e.base.map,setting=this.colors[e.id];
         const previous=e.generated;e.generated=null;
         e.material.color.copy(e.base.color);
-        e.material.opacity=e.base.opacity*(setting?.opacity??1);
+        const opacity=setting?.opacity??1;
+        e.material.opacity=opacity>1?e.base.opacity+(1-e.base.opacity)*(opacity-1):e.base.opacity*opacity;
         e.material.transparent=e.base.transparent||e.material.opacity<.999;
         e.material.depthWrite=e.material.opacity<.999?false:e.base.depthWrite;
         try {
-            if(!setting||setting.strength===0){e.material.map=source;return;}
+            if(!setting||(setting.strength===0&&opacity<=1)){e.material.map=source;return;}
             const target=new THREE.Color(setting.color).convertLinearToSRGB();
             if(!source){e.material.color.lerp(new THREE.Color(setting.color),setting.strength);return;}
             if(source.isCompressedTexture)throw Error('Recoloring this compressed texture needs a PNG/JPG replacement first.');
@@ -73,6 +78,7 @@ export class ModelMaterials {
             const reference=Math.max(.12,sum/Math.max(1,count));
             const channels=[target.r,target.g,target.b];
             for(let i=0;i<d.length;i+=4)if(d[i+3]>0){
+                if(opacity>1)d[i+3]=Math.min(255,Math.round(d[i+3]*opacity));
                 const light=(.2126*d[i]+.7152*d[i+1]+.0722*d[i+2])/255/reference;
                 for(let c=0;c<3;c++)d[i+c]=Math.round(d[i+c]*(1-setting.strength)+Math.min(255,255*channels[c]*light)*setting.strength);
             }
