@@ -29,6 +29,11 @@ const vrmBone=new THREE.Bone();vrmBone.name='HairVRM';const vrmViewer={vrm:{},ph
 const vrmMonitor=new context.Monitor(vrmViewer);vrmMonitor.start('/models/test.vrm');for(let i=1;i<82;i++){now+=100;vrmBone.position.set(8,0,0);vrmMonitor.sample(now);}assert.deepEqual(Array.from(vrmViewer.rigAnalysis.frozen),[0]);
 vrmBone.position.set(0,0,0);vrmMonitor.start('/models/test.vrm');vrmBone.position.set(8,0,0);vrmMonitor.enforce();assert.equal(vrmBone.position.length(),0);
 console.log('PASS: timed screenshots, sustained rotation limits, brief normal movement, stable keys, manual restoration and VRM next-load freeze');
+// Rechecking a posed VRM must retain the original bind/rest signature.
+const originalVrmSignature=vrmMonitor.signature;
+vrmBone.position.set(4,0,0);vrmBone.rotation.z=.7;vrmMonitor.start('/models/test.vrm');
+assert.equal(vrmMonitor.signature,originalVrmSignature,'Current tracking/physics pose cannot change the saved VRM rig identity');
+vrmMonitor.applyFrozen();assert.equal(vrmBone.position.length(),0);
 // User-triggered screenshots begin a fresh check without requiring a reload.
 bone.quaternion.identity();bone.position.copy(node.restLocal);monitor.start('/models/button.pmx');
 viewer.model=root;const before=captures;assert.equal(monitor.checkNow(),true);assert.equal(captures,before+1,'Button captures the model immediately');

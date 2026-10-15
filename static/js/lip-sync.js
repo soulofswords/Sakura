@@ -7,6 +7,7 @@ export default class LipSync {
         this.isPlaying = false;
         this.rafId = null;
         this.outputDeviceId = '';
+        this.appliedOutputDeviceId = '';
         this.playGeneration = 0;
         this.fetchController = null;
         this.resolvePlayback = null;
@@ -30,11 +31,17 @@ export default class LipSync {
         if (this.audioContext.state === 'suspended') {
             await this.audioContext.resume();
         }
-        if (this.outputDeviceId && typeof this.audioContext.setSinkId === 'function') {
+        if(this.outputRoutePending)await this.outputRoutePending.catch(()=>{});
+        if (this.outputDeviceId !== this.appliedOutputDeviceId && typeof this.audioContext.setSinkId === 'function') {
             try {
-                await this.audioContext.setSinkId(this.outputDeviceId);
+                const deviceId=this.outputDeviceId;
+                this.outputRoutePending=this.audioContext.setSinkId(deviceId);
+                await this.outputRoutePending;
+                this.appliedOutputDeviceId=deviceId;
             } catch (err) {
                 console.warn('Failed to set sink ID:', err);
+            } finally {
+                this.outputRoutePending=null;
             }
         }
     }
@@ -42,14 +49,6 @@ export default class LipSync {
     async setAudioOutput(deviceId) {
         this.outputDeviceId = deviceId || '';
         await this._ensureAudioContext();
-        if (typeof this.audioContext.setSinkId === 'function') {
-            try {
-                await this.audioContext.setSinkId(this.outputDeviceId);
-                console.log('Audio output route updated:', deviceId);
-            } catch (err) {
-                console.warn('Could not set output device on AudioContext:', err);
-            }
-        }
     }
 
     async playWithLipSync(audioUrl, onPlaybackStarted = null, {volume = 1} = {}) {

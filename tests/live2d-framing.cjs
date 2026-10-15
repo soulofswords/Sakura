@@ -1,0 +1,14 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const ctx={innerWidth:1200,innerHeight:800,devicePixelRatio:1};
+vm.runInNewContext(fs.readFileSync('static/js/live2d-viewer.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export default class Live2DViewer','class Live2DViewer')+'\nthis.Live=Live2DViewer;',ctx);
+const v=Object.create(ctx.Live.prototype);let scale,anchor,position;
+v.owner={camera:{zoom:1},quality:'balanced',fullModelView:true};v.pan={x:0,y:0};
+v.avatar={internalModel:{originalWidth:600,originalHeight:1800},scale:{set(x){scale=x;}},anchor:{set(x,y){anchor=[x,y];}},position:{set(x,y){position=[x,y];}}};
+v.app={screen:{width:1200,height:800},renderer:{resolution:1.25,resize(w,h){v.app.screen={width:w,height:h};}}};
+v.fit();const full=scale;assert.ok(1800*scale<=800);assert.deepEqual(anchor,[.5,.5]);
+v.owner.fullModelView=false;v.fit();assert.ok(scale>full*1.5,'Portrait must enlarge the upper body');assert.deepEqual(anchor,[.5,.3]);assert.deepEqual(position,[600,400]);
+const portrait=scale;v.pan={x:34,y:-20};v.owner.camera.zoom=2;v.fit();assert.equal(scale,portrait*2);assert.deepEqual(position,[634,380]);
+v.owner.fullModelView=true;v.fit();assert.equal(scale,full*2,'Full framing keeps user zoom');
+v.owner.camera.zoom=1;ctx.innerWidth=500;ctx.innerHeight=900;v.fit();assert.ok(600*scale<=500&&1800*scale<=900,'Full model fits after window resize');
+v.owner.fullModelView=false;v.owner.desktopMode=true;v.fit();assert.deepEqual(anchor,[.5,.5],'Desktop companion fits the entire model');
+console.log('PASS: Live2D full/portrait framing, zoom, pan, resize and desktop fit');

@@ -4,12 +4,14 @@ import webbrowser
 import os
 import subprocess
 import sys
+import json
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import quote_plus
 
 
 def run_command(text, computer_access=False, assistant_name="Sakura"):
+    from assistant_reminders import reminders
     command = re.sub(r"\s+", " ", text.lower()).strip().rstrip('.!?')
     command = re.sub(r'\bu\b', 'you', command)
     name = re.escape(str(assistant_name).lower().strip() or 'sakura')
@@ -26,6 +28,15 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
             break
     command = re.sub(r'[, ]+please$', '', command).strip().rstrip('.!?')
     command = re.sub(r'\byou tube\b', 'youtube', command)
+    # Use the same speech/name normalization for local utilities as app commands.
+    reminder_reply = reminders.command(command)
+    if reminder_reply is not None:
+        return reminder_reply
+    time_query = re.fullmatch(
+        r"(?:(?:tell|give) me (?:what )?|(?:do you know|say) )?"
+        r"(?:(?:what(?:'s| is) )?(?:the )?(?:current |local )?time(?: is it| now| right now)?|what time (?:is it|it is))", command)
+    if time_query:
+        return f"It's {datetime.now().strftime('%I:%M %p').lstrip('0')}."
     from steam_commands import run_steam_command
     steam_reply = run_steam_command(command, computer_access)
     if steam_reply is not None:
@@ -59,8 +70,6 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
             return f'Opening {label}.'
         except OSError:
             return f"I couldn't start {label}. Try opening it manually once."
-    if command in {'what time is it', "what's the time", 'tell me the time', 'time'}:
-        return f"It's {datetime.now().strftime('%I:%M %p').lstrip('0')}."
     if command in {"what's the date", 'what is the date', "what is today's date", 'what day is it', 'tell me the date'}:
         return f"Today is {datetime.now().strftime('%A, %d %B %Y')}."
     sites = {'youtube': ('YouTube', 'https://www.youtube.com'),
@@ -91,4 +100,67 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
         if not computer_access:
             return 'Enable computer access in Settings first, and I can open that for you.'
         return f'Opening {label}.' if webbrowser.open(target, new=2) else f"I couldn't open {label} in your browser."
+    app_match = re.fullmatch(r'(?:open|launch|start) (.{1,100})', command)
+    if app_match:
+        label = app_match.group(1)
+        if not computer_access:
+            return 'Enable computer access in Settings first, and I can open installed apps for you.'
+        return open_installed_app(label)
     return None
+
+
+def open_installed_app(name):
+    # Resolve installed shortcuts, not arbitrary executable paths or commands.
+    def normalized(value):
+        return re.sub(r'[^\w]', '', value.casefold())
+    requested = normalized(name)
+    aliases = {'obs':'obsstudio', 'vscode':'visualstudiocode',
+               'word':'microsoftword', 'excel':'microsoftexcel',
+               'powerpoint':'microsoftpowerpoint', 'calc':'calculator'}
+    wanted = {requested, aliases.get(requested, requested)}
+    def matching(label):
+        return normalized(label) in wanted
+    if sys.platform == 'win32':
+        system = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+        builtins = {'notepad':'notepad.exe','calculator':'calc.exe','paint':'mspaint.exe'}
+        executable = next((builtins[key] for key in wanted if key in builtins), None)
+        try:
+            if executable:
+                subprocess.Popen([str(system / executable)], shell=False)
+                return f'Opening {name}.'
+            roots = [Path(os.environ.get('APPDATA',''))/'Microsoft/Windows/Start Menu/Programs',
+                     Path(os.environ.get('PROGRAMDATA',r'C:\ProgramData'))/'Microsoft/Windows/Start Menu/Programs']
+            matches = {p.resolve() for root in roots if root.is_dir() for p in root.rglob('*.lnk')
+                       if matching(p.stem)}
+            if len(matches)==1:
+                os.startfile(str(next(iter(matches))))
+                return f'Opening {name}.'
+            if len(matches)>1:
+                return f'More than one installed shortcut matches {name}. Please use a more specific app name.'
+            # Store-packaged apps may have no .lnk. Ask Windows for registered
+            # Start-menu app IDs, then launch only an exact matching result.
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+                                     '[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress'],
+                                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                    timeout=8, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if result.returncode == 0 and result.stdout.strip():
+                entries = json.loads(result.stdout)
+                if isinstance(entries, dict): entries = [entries]
+                ids = {entry['AppID'] for entry in entries if matching(entry.get('Name',''))
+                       and isinstance(entry.get('AppID'), str) and entry['AppID']}
+                if len(ids) == 1:
+                    os.startfile('shell:AppsFolder\\' + next(iter(ids)))
+                    return f'Opening {name}.'
+                if len(ids) > 1:
+                    return f'More than one installed app matches {name}. Please use its exact Start menu name.'
+        except (subprocess.TimeoutExpired, ValueError):
+            return f'I could not check the Windows app list for {name}. Please try again.'
+        except OSError:
+            return f'I could not start {name}.'
+    elif sys.platform == 'darwin':
+        matches = [p for root in (Path('/Applications'),Path.home()/'Applications')
+                   for p in root.glob('*.app') if normalized(p.stem)==normalized(name)]
+        if len(matches)==1:
+            subprocess.Popen(['/usr/bin/open','-a',str(matches[0])],shell=False)
+            return f'Opening {name}.'
+    return f'I could not find an installed app named {name}. Try its exact Start menu name.'

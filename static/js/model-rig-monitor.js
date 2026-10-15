@@ -1,20 +1,26 @@
 // Local rig diagnostics. Screenshots are evidence for a human, not a bone
 // classifier: only sustained, measured corruption can freeze a physics bone.
+function stableSignature(value){return JSON.stringify(value,(_,number)=>typeof number==='number'&&Number.isFinite(number)?Math.round(number*100000)/100000:number);}
 export default class ModelRigMonitor {
-    constructor(viewer){this.viewer=viewer;this.run=0;this.lastSample=0;}
+    constructor(viewer){this.viewer=viewer;this.run=0;this.lastSample=0;this.vrmRest=new WeakMap();}
     key(){return 'sakura_rig_analysis:'+this.url;}
     start(url){
         this.viewer.rigAnalysis=null;this.viewer.rigDiagnosticImage=null;
-        this.run++;this.url=url.split(/[?#]/,1)[0];this.samples=new Map();this.started=performance.now();this.finished=false;
+        this.run++;this.url=this.viewer.repairStore?'/models/'+this.viewer.repairStore.key(url):url.split(/[?#]/,1)[0];this.samples=new Map();this.started=performance.now();this.finished=false;
         this.referenceCaptured=false;this.referenceImage=null;this.viewer.rigDiagnosticReference=null;this.lastSample=0;
         this.manualRepair=false;
         const physics=this.viewer.physics;
-        this.nodes=/\.vrm(?:\?|$)/i.test(url)?(physics.vrmPhysicsJoints||[]).filter(j=>j.bone).map((joint,index)=>({index,bone:joint.bone,restLocal:joint.bone.position.clone(),restQuat:joint.bone.quaternion.clone(),joint})):physics.nodes||[];
+        this.nodes=/\.vrm$/i.test(this.url)?(physics.vrmPhysicsJoints||[]).filter(j=>j.bone).map((joint,index)=>{
+            if(!this.vrmRest.has(joint.bone))this.vrmRest.set(joint.bone,{restLocal:joint.bone.position.clone(),restQuat:joint.bone.quaternion.clone()});
+            return {index,bone:joint.bone,...this.vrmRest.get(joint.bone),joint};
+        }):physics.nodes||[];
         this.viewer.diagnosticFrozenBones=new Set();
-        if(!/\.(?:pmx|vrm)(?:\?|$)/i.test(url)||!this.nodes.length){this.finished=true;return;}
-        this.signature=JSON.stringify(this.nodes.map(n=>[n.index,n.bone.name,n.restLocal.toArray(),n.restQuat.toArray()]));
-        let saved;try{saved=JSON.parse(localStorage.getItem(this.key())||'null');}catch(_){}
-        const frozen=saved?.signature===this.signature&&Array.isArray(saved.frozen)?saved.frozen:[];
+        if(!/\.(?:pmx|vrm)$/i.test(this.url)||!this.nodes.length){this.finished=true;return;}
+        this.signature=stableSignature(this.nodes.map(n=>[n.index,n.bone.name,n.restLocal.toArray(),n.restQuat.toArray()]));
+        let saved;try{saved=this.viewer.repairStore?this.viewer.repairStore.diagnostic(this.url):JSON.parse(localStorage.getItem(this.key())||'null');}catch(_){}
+        let sameRig=saved?.signature===this.signature;
+        if(saved&&!sameRig)try{sameRig=stableSignature(JSON.parse(saved.signature))===this.signature;}catch(_){}
+        const frozen=sameRig&&Array.isArray(saved.frozen)?saved.frozen:[];
         for(const node of this.nodes){node.diagnosticStatic=frozen.includes(node.index);if(node.diagnosticStatic)this.viewer.diagnosticFrozenBones.add(node.bone);}
         this.viewer._syncVrmPhysics?.();
         if(frozen.length)this.applyFrozen();
@@ -65,6 +71,7 @@ export default class ModelRigMonitor {
             this.applyFrozen();
             this.viewer.rigAnalysis.status=`${frozen.length} bones frozen now. Repair saved for future loads.`;
         }
+        this.persist(report);
         this.capture('diagnostic',report);
         window.dispatchEvent(new CustomEvent('sakura-rig-analysis',{detail:this.viewer.rigAnalysis}));
     }
@@ -86,6 +93,13 @@ export default class ModelRigMonitor {
         const url=this.url;
         const reference=this.referenceImage;
         request.onsuccess=()=>{const db=request.result,tx=db.transaction('models','readwrite');tx.objectStore('models').put({blob,reference,report},url);tx.oncomplete=()=>db.close();tx.onerror=()=>db.close();};
+    }
+    persist(report){
+        if(!this.viewer.repairStore)return;
+        const run=this.run,analysis=this.viewer.rigAnalysis;
+        const complete=status=>{if(run!==this.run||this.viewer.rigAnalysis!==analysis)return;analysis.status=status;window.dispatchEvent(new CustomEvent('sakura-rig-analysis',{detail:analysis}));};
+        complete(report.frozen.length?'Saving bone repairs…':'Saving completed bone check…');
+        void this.viewer.repairStore.saveDiagnostic(this.url,report).then(()=>complete(report.frozen.length?`${report.frozen.length} bone repairs saved for future launches.`:'Bone check saved: no sustained instability detected.'),error=>complete('Repair could not be saved: '+error.message));
     }
     enforce(){
         if(!this.viewer.vrm)return;
@@ -109,12 +123,13 @@ export default class ModelRigMonitor {
     unfreezeBone(bone){
         for(const node of this.nodes||[])if(node.bone===bone)node.diagnosticStatic=false;
         this.viewer.diagnosticFrozenBones?.delete(bone);this.viewer._syncVrmPhysics?.();
-        let saved;try{saved=JSON.parse(localStorage.getItem(this.key())||'null');}catch(_){}
+        let saved;try{saved=this.viewer.repairStore?this.viewer.repairStore.diagnostic(this.url):JSON.parse(localStorage.getItem(this.key())||'null');}catch(_){}
         const frozen=(this.nodes||[]).filter(n=>n.diagnosticStatic).map(n=>n.index);
         const report={...(saved||{}),signature:this.signature,frozen};
         try{localStorage.setItem(this.key(),JSON.stringify(report));}catch(_){}
         this.viewer.rigAnalysis={...report,status:`${frozen.length} automatically frozen bones. Selected bone restored.`};
+        this.persist(report);
         window.dispatchEvent(new CustomEvent('sakura-rig-analysis',{detail:this.viewer.rigAnalysis}));
     }
-    reset(){if(!this.url)return;try{localStorage.removeItem(this.key());}catch(_){}for(const node of this.nodes||[])node.diagnosticStatic=false;this.start(this.url);}
+    reset(){if(!this.url)return;try{localStorage.removeItem(this.key());}catch(_){}if(this.viewer.repairStore)void this.viewer.repairStore.saveDiagnostic(this.url,null).catch(error=>console.warn('Bone reset could not be saved:',error));for(const node of this.nodes||[])node.diagnosticStatic=false;this.start(this.url);}
 }

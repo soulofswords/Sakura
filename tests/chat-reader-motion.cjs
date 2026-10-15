@@ -1,5 +1,5 @@
 const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict'),THREE=require('../static/vendor/three/build/three.cjs');
-const ctx={};vm.runInNewContext(fs.readFileSync('static/js/chat-reader-motion.js','utf8').replace(/export /g,'')+'\nthis.apply=applyChatReaderLean;',ctx);
+const ctx={THREE};vm.runInNewContext(fs.readFileSync('static/js/chat-reader-motion.js','utf8').replace(/export /g,'')+'\nthis.apply=applyChatReaderLean;',ctx);
 for(const format of ['PMX','VRM']){
     const viewer={physics:{},animationBones:Object.fromEntries(['torso','chest','neck','head','leftArm'].map(key=>[key,{bone:new THREE.Bone(),rest:new THREE.Euler()}]))};
     assert.equal(ctx.apply(viewer,1/60),false,'Ordinary VTuber mode has no scripted lean');viewer.chatReaderActive=true;

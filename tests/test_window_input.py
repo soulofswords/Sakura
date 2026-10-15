@@ -1,11 +1,17 @@
 import unittest
-from window_input import set_click_through, set_topmost
+from window_input import set_click_through, set_topmost,restore_window
 class FakeUser:
  def __init__(self): self.style=0x80008;self.position=None
  def GetWindowLongPtrW(self,*args): return self.style
  def SetWindowLongPtrW(self,hwnd,index,style): self.style=style
  def SetWindowPos(self,*args): self.position=args
 class InputTests(unittest.TestCase):
+ def test_restore_clears_native_minimized_caption(self):
+  class Minimized:
+   def IsZoomed(self,h):return False
+   def IsIconic(self,h):return True
+   def ShowWindow(self,*args):self.restored=args
+  user=Minimized();restore_window(1,user);self.assertEqual(user.restored,(1,9))
  def test_z_order_preserves_layered_surface_without_frame_change(self):
   class ZOrderUser(FakeUser):
    def SetWindowPos(self,*args):

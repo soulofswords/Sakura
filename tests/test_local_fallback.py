@@ -10,6 +10,16 @@ from ollama_runtime import validate_folder, server_for_folder
 import ollama_runtime
 
 class LocalFallbackTests(unittest.TestCase):
+    def test_local_images_never_fall_back_to_cloud(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model=LLM(Path(folder)/'memory.json')
+            model.configure_provider('ollama', api_key='synthetic-key')
+            model.configure_local('qwen3-vl:2b-instruct',fallback=True)
+            with patch('llm.requests.post',side_effect=requests.ConnectionError), patch.object(model,'_request_gemini') as cloud:
+                with self.assertRaises(requests.ConnectionError):
+                    model._request_raw([{'role':'user','content':'What is here?','images':['synthetic-image']}])
+                cloud.assert_not_called()
+
     def test_timeout_falls_back_once_with_same_conversation(self):
         with tempfile.TemporaryDirectory() as folder:
             llm = LLM(Path(folder) / 'memory.json')

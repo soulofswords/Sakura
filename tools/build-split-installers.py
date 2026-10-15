@@ -80,7 +80,7 @@ def edition_sources(edition,stage):
     if edition=='vtuber':
         parser=VTuberHtml();parser.feed(html);html=''.join(parser.output)
         html=html.replace('<title>Sakura — Anime  Assistant</title>','<title>Sakura VTuber</title>')
-        rules='''#dance-btn,#dance-style,#dance-stop-btn,#chat-panel,#speech-bubble,#screen-view-btn,#screen-react-btn,#clear-memory-btn,#interrupt-btn,#vtuber-mode-btn,#auto-game-btn,#continuous-mic-btn,#tracking-restore-ai,#status-dot,[data-tab="ai"],[data-tab="assistant"],#tab-ai,#tab-assistant{display:none!important}'''
+        rules='''#dance-btn,#dance-style,#dance-stop-btn,#chat-panel,#speech-bubble,#screen-view-btn,#screen-react-btn,#clear-memory-btn,#interrupt-btn,#vtuber-mode-btn,#auto-game-btn,#continuous-mic-btn,#tracking-restore-ai,#status-dot,#screen-audio-group,[data-tab="ai"],[data-tab="assistant"],#tab-ai,#tab-assistant{display:none!important}'''
     else:
         rules=''
     html=html.replace('</head>',f'<style>{rules}</style><script>window.SAKURA_EDITION={json.dumps(edition)};</script></head>')
@@ -113,6 +113,9 @@ def build_edition(edition,output,work):
     builder.OUT=output;output.mkdir(parents=True,exist_ok=True);builder.BUILD=work/'build';builder.BUILD.mkdir()
     builder.DEFAULTS.update(vtuber_tracking_only=edition=='vtuber')
     builder.windows()
+    if builder.PROTECT_RELEASE:
+        print('Protected macOS native builds require a Mac build host; existing DMGs are unchanged.',flush=True)
+        return builder,display
     # macOS gets its own edition startup; Windows keeps source/bytecode exact.
     windows_files=builder.app_files
     def mac_files():
@@ -126,28 +129,28 @@ def build_edition(edition,output,work):
         script=script.replace('"$project/llm-models/blobs" "$project/llm-models/manifests"','')
     builder.MAC_INSTALL=script
     builder.MAC_README=(display+' — Apple Silicon bootstrap installer\n\nRequires macOS 14+, M1 or newer and internet for dependency setup.\n'
-        'No character models, voice weights or personal data are bundled.\n'
+        'Kokoro speech voices are included. No character models, imported RVC weights or personal data are bundled.\n'
         'Windows build host: native Mac installation and camera operation are not tested.\n'
         'Not signed or notarized.\n')
     builder.macos()
     return builder,display
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,default=Path('C:/AI/Installer ready'))
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,default=Path('C:/AI/Installer ready'));parser.add_argument('--edition',choices=['both','vtuber','companion'],default='both')
     args=parser.parse_args();reports=args.output/'split-build-reports';reports.mkdir(parents=True,exist_ok=True)
     root=BASE/'tools/edition-work';root.mkdir(exist_ok=True)
     try:
         subprocess.run([sys.executable,'-m','unittest','tests.test_product_editions','tests.test_startup_modes','tests.test_tracking_mode',
-            'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_pmx_editor','tests.test_voice_catalog','tests.test_dance_commands','tests.test_nvidia_ar_setup',
-            'tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
+            'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_native_clipboard','tests.test_pmx_editor','tests.test_texture_diagnostics','tests.test_model_repairs','tests.test_mobile_link','tests.test_voice_catalog','tests.test_voice','tests.test_speech_fallback','tests.test_kokoro_speech','tests.test_screen_audio','tests.test_dance_commands','tests.test_nvidia_ar_setup',
+            'tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_cloud_api','tests.test_companion_camera','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_assistant_commands','tests.test_assistant_reminders','tests.test_assistant_updates','tests.test_weather_dates','tests.test_reaction_repeats','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
         for script in sorted((BASE/'static/js').glob('*.js')):subprocess.run(['node','--check',str(script)],check=True)
-        for name in ['game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-physics.cjs','physics-collisions.cjs',
-            'reaction-expressions.cjs','auto-expressions.cjs','head-pose-filter.cjs','live2d-tracking-recovery.cjs','model-dance.cjs','expression-editor.cjs','expression-stacking.cjs','live2d-face-mapping.cjs','avatar-retarget.cjs','vrm-head-pitch.cjs','glasses-tracking.cjs','broadcast-camera.cjs','webcam-arm-rig.cjs','tracking-lifecycle.cjs','tracking-distance.cjs','tracking-distance-worker.cjs',
-            'pmx-materials.cjs','pmx-nose-skin.cjs','opacity-boost.cjs','model-bones.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs']:
+        for name in ['hand-presentation.cjs','screen-memory.cjs','avatar-preview.cjs','camera-preview.cjs','companion-camera.cjs','companion-camera-comments.cjs','assistant-reminders.cjs','mobile-link-controls.cjs','ai-vtuber-screen.cjs','game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-repair-store.cjs','model-physics.cjs','physics-collisions.cjs',
+            'reaction-expressions.cjs','auto-expressions.cjs','head-pose-filter.cjs','live2d-head-smooth.cjs','live2d-framing.cjs','vrm-framing.cjs','live2d-tracking-recovery.cjs','model-dance.cjs','expression-editor.cjs','expression-stacking.cjs','live2d-face-mapping.cjs','avatar-retarget.cjs','vrm-head-pitch.cjs','glasses-tracking.cjs','broadcast-camera.cjs','webcam-arm-rig.cjs','tracking-lifecycle.cjs','tracking-distance.cjs','tracking-distance-worker.cjs',
+            'voice-runtime.cjs','startup-presentation.cjs','live-screen.cjs','screen-mic-routing.cjs','screen-capture.cjs','screen-share.cjs','screen-audio.cjs','continuous-mic.cjs','speech-pipeline.cjs','texture-diagnostics.cjs','pmx-materials.cjs','pmx-nose-skin.cjs','vrm-gloss.cjs','opacity-boost.cjs','model-bones.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs','direct-reply-reaction-pause.cjs']:
             subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         with tempfile.TemporaryDirectory(prefix='release-',dir=root) as temp:
             results=[]
-            for edition in ['vtuber','companion']:
+            for edition in (['vtuber','companion'] if args.edition=='both' else [args.edition]):
                 display='Sakura VTuber' if edition=='vtuber' else 'Sakura Companion'
                 work=Path(temp)/edition;work.mkdir();out=work/'release'
                 builder,_=build_edition(edition,out,work)

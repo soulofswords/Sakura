@@ -1,0 +1,15 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const ctx={AbortSignal,console};vm.runInNewContext(fs.readFileSync('static/js/texture-diagnostics.js','utf8').replace(/export /g,'')+'\nthis.inspect=inspectLoadedTextures;this.check=checkPmxTextureReferences;',ctx);
+(async()=>{
+ const valid={isTexture:true,image:{width:8,height:8}},bad={isTexture:true,image:null};
+ const material={name:'Hair',map:valid,normalMap:bad,opacity:.5,transparent:true};
+ const v={model:{traverse(fn){fn({material:[material,material]});}}};
+ const report=ctx.inspect(v);assert.equal(report.checked,2);assert.equal(report.issues.length,1);assert.equal(valid.needsUpdate,true);assert.equal(material.opacity,.5);assert.equal(material.transparent,true,'Checks preserve authored alpha');
+ const live=ctx.inspect({live2d:{avatar:{textures:[{baseTexture:{width:16,height:16,valid:true}}]}}});assert.equal(live.issues.length,0);
+ const slots=[{material:0,slot:'diffuse',original:'wrong.png'},{material:0,slot:'toon',original:'Shared toon 1'},{material:1,slot:'sphere',original:'(none)'}];
+ const calls=[];const request=async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return {ok:true,json:async()=>({slots:[{material:0,slot:'diffuse',reference:'wrong.png',resolved:'textures/hair.png',status:'repairable'},{material:1,slot:'diffuse',reference:'lost.png',status:'missing',message:'Choose a replacement'}]})};};
+ const checked=await ctx.check('pmx/character/one.pmx',slots,()=>true,request);
+ assert.equal(checked.repaired,1);assert.equal(checked.issues.length,1);assert.equal(calls[0].body.slots.length,1,'Skip absent textures and built-in toon');assert.equal(calls[1].body.texture,'textures/hair.png');
+ calls.length=0;await assert.rejects(ctx.check('pmx/character/one.pmx',slots,()=>false,request),/Model changed/);assert.equal(calls.length,1,'Model switching cancels repairs before saving');
+ console.log('PASS: texture diagnosis preserves alpha, detects unloaded images, saves confirmed references and cancels on model switch');
+})().catch(error=>{console.error(error);process.exitCode=1;});

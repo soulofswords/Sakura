@@ -1,10 +1,39 @@
 """Windows DPAPI or macOS Keychain storage for the Gemini API key."""
 import ctypes
 import sys
+import json
+import hashlib
+import threading
 from ctypes import wintypes
 from config import BASE_DIR
 
 KEY_FILE = BASE_DIR / ".gemini-key.bin"
+CLOUD_KEY_FILE = BASE_DIR / '.cloud-keys.bin'
+_cloud_lock = threading.RLock()
+
+def _cloud_slot(provider,endpoint=''):
+    return provider+(':'+hashlib.sha256(endpoint.rstrip('/').encode()).hexdigest() if provider=='compatible' else '')
+
+def get_cloud_key(provider,endpoint=''):
+    slot=_cloud_slot(provider,endpoint)
+    if sys.platform=='darwin':return _mac_keyring().get_password('Sakura Companion',slot) or ''
+    with _cloud_lock:
+        if not CLOUD_KEY_FILE.exists():return ''
+        return json.loads(_crypt(CLOUD_KEY_FILE.read_bytes(),decrypt=True).decode('utf-8')).get(slot,'')
+
+def set_cloud_key(provider,key,endpoint=''):
+    slot=_cloud_slot(provider,endpoint)
+    if sys.platform=='darwin':
+        store=_mac_keyring()
+        if key:store.set_password('Sakura Companion',slot,key)
+        elif store.get_password('Sakura Companion',slot):store.delete_password('Sakura Companion',slot)
+        return
+    with _cloud_lock:
+        data=json.loads(_crypt(CLOUD_KEY_FILE.read_bytes(),decrypt=True).decode('utf-8')) if CLOUD_KEY_FILE.exists() else {}
+        if key:data[slot]=key
+        else:data.pop(slot,None)
+        temporary=CLOUD_KEY_FILE.with_suffix('.tmp')
+        temporary.write_bytes(_crypt(json.dumps(data).encode('utf-8')));temporary.replace(CLOUD_KEY_FILE)
 
 def _mac_keyring():
     # Explicit Apple Keychain backend, never a plaintext fallback backend.

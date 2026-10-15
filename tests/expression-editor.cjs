@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function element(){return {add(item){this.children.push(item);},value:'',textContent:'',children:[],dataset:{},classList:{hidden:true,add(){this.hidden=true;},remove(){this.hidden=false;},contains(){return this.hidden;}},append(...items){this.children.push(...items);},replaceChildren(){this.children=[];},setAttribute(){},querySelector(selector){return selector==='input'?this.children.find(child=>child.type==='range'):null;}};}
 const elements=new Map();function byId(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
-let handler;const store=new Map();const ctx=vm.createContext({Option:class {constructor(text,value){this.text=text;this.value=value;}},document:{getElementById:byId,createElement:element},window:{addEventListener(type,fn){handler=fn;}},localStorage:{getItem:key=>store.get(key),setItem:(key,value)=>store.set(key,value)}});
+let handler;const store=new Map();const ctx=vm.createContext({Option:class {constructor(text,value){this.text=text;this.value=value;}},document:{getElementById:byId,createElement:element},window:{addEventListener(type,fn){if(type==='keydown')handler=fn;}},localStorage:{getItem:key=>store.get(key),setItem:(key,value)=>store.set(key,value)}});
 vm.runInContext(fs.readFileSync('static/js/auto-expressions.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/custom-expressions.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/expression-editor.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,''),ctx);
 let model='pmx/test.pmx';const v={vtuberTrackingMode:true,allMorphNames:['笑い','happyCustom'],clearManualExpression(){this.manualExpression=null;},live2d:null};
 const editor=ctx.installExpressionEditor(()=>v,()=>model),list=byId('expression-list');editor.refresh();
@@ -20,6 +20,8 @@ assert.deepEqual(liveApplied,{name:'笑い',weight:.65});assert.equal(v.manualEx
 strength.value='35';strength.oninput();assert.deepEqual(liveApplied,{name:'笑い',weight:.35});
 byId('expression-neutral').onclick();assert.equal(v.manualExpression,null);
 byId('close-expression-modal').onclick();handler(event('Digit1',false,true));assert.equal(v.manualExpression.name,'笑い','Live2D expression responds to its automatic Ctrl+1 shortcut');
-model='pmx/test.pmx';v.clearManualExpression();v.vtuberTrackingMode=false;handler(event('KeyF',true));assert.equal(v.manualExpression,null,'expression shortcuts are disabled outside VTuber mode');
+model='pmx/test.pmx';v.clearManualExpression();v.vtuberTrackingMode=false;v.areAiExpressionsAutomatic=()=>false;handler(event('KeyF',true));assert.equal(v.manualExpression.name,'happyCustom','AI manual expressions work with Reactions off');
+v.clearManualExpression();v.areAiExpressionsAutomatic=()=>true;handler(event('KeyF',true));assert.equal(v.manualExpression,null,'AI expression hotkeys are blocked with Reactions on');
+editor.refresh();assert.equal(list.children[0].children[3].children[0].disabled,true,'Manual preview is visibly disabled in automatic mode');
 assert.equal(ctx.hotkeyFor(event('ShiftLeft')),'');
-console.log('PASS: individual expression cards, automatic and custom hotkeys, Live2D preview/strength, model isolation, and VTuber-mode restriction');
+console.log('PASS: individual expression cards, automatic and custom hotkeys, Live2D preview/strength, model isolation, and AI Reactions/manual ownership');

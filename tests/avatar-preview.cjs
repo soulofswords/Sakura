@@ -1,0 +1,11 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+let visibleRenders=0,copies=0,pixels=0;
+const src=fs.readFileSync('static/js/model-viewer.js','utf8');
+const method=src.match(/    captureAvatar\(\) \{([\s\S]*?)\n    \}/)[1];
+const document={createElement(){return{getContext(){return{putImageData(){pixels++;},fillRect(){},drawImage(){copies++;}};},toDataURL(){return 'data:image/jpeg;base64,test';}};}};
+const capture=new Function('document','ImageData','return function(){'+method+'}')(document,class{constructor(data,w,h){this.data=data;}});
+const viewer={model:{},_renderFrame(){visibleRenders++;},captureSpoutFrame(size){assert.equal(size,768);return{width:2,height:2,pixels:new Uint8Array(16)};}};
+for(let i=0;i<10;i++)assert.equal(capture.call(viewer),'test');
+assert.equal(visibleRenders,0,'Preview timers must not repaint the visible canvas');assert.equal(pixels,10);assert.equal(copies,10);
+viewer.captureSpoutFrame=()=>null;assert.equal(capture.call(viewer),null);
+console.log('PASS: repeated avatar previews remain offscreen and skip unavailable/loading frames');

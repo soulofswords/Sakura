@@ -35,10 +35,21 @@ if sys.platform == 'win32':
     # Keep the transparent Qt/Chromium surface, backed by Direct3D 11.
     # ANGLE compiles the viewer's shaders for D3D; this is not SlimDX.
     _graphics_flags = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '')
+    if EDITION != 'vtuber' and '--ui-disable-partial-swap' not in _graphics_flags:
+        _graphics_flags += ' --ui-disable-partial-swap'
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = _graphics_flags.strip()
+    if EDITION != 'vtuber' and '--disable-direct-composition' not in _graphics_flags:
+        # Qt already presents the WebEngine texture into its layered window.
+        # Avoid a second Windows surface presenter for that alpha texture;
+        # ANGLE/D3D11 still renders models on the GPU.
+        _graphics_flags += ' --disable-direct-composition'
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = _graphics_flags.strip()
     if '--use-angle=' not in _graphics_flags:
         os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = (_graphics_flags + ' --use-gl=angle --use-angle=d3d11').strip()
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    if EDITION != 'vtuber':
+        print('  Companion compositor: full swaps, DirectComposition disabled; GPU rendering retained.', flush=True)
 
 # Configure UTF-8 encoding safely on Windows consoles
 if hasattr(sys.stdout, 'reconfigure'):
@@ -90,6 +101,10 @@ class DesktopApi:
     def platform_capabilities(self):
         return {'platform': sys.platform, 'pmx_editor': sys.platform == 'win32'}
 
+    def copy_text(self,text):
+        from native_clipboard import copy_text
+        return copy_text(text)
+
     def open_nvidia_broadcast(self):
         if sys.platform!='win32':return {'error':'NVIDIA Broadcast is available on supported Windows RTX systems.'}
         import subprocess
@@ -111,6 +126,8 @@ class DesktopApi:
 
     def minimize(self):
         """Minimize the companion."""
+        if EDITION!='vtuber' and not getattr(app.state,'tracking_only',False):
+            return self.set_library_mode(False)
         win = self.holder.get("window")
         if win:
             win.minimize()
@@ -168,6 +185,12 @@ class DesktopApi:
         if bridge:
             bridge.input_request.emit(enabled)
         return enabled
+
+    def set_surface_transparency(self, enabled: bool):
+        bridge = self.holder.get('resize_bridge')
+        if bridge and EDITION != 'vtuber':
+            bridge.surface_request.emit(bool(enabled))
+        return True
 
     def set_transparency_hotkey(self, value):
         from companion_hotkey import parse_hotkey
@@ -295,7 +318,12 @@ class DesktopApi:
         import base64
         import io
         from PIL import ImageGrab
-        image = ImageGrab.grab().convert('RGB')
+        try:
+            image = ImageGrab.grab().convert('RGB')
+        except OSError:
+            # Lock-screen/display transitions can temporarily deny capture.
+            # Report no frame; never reuse a stale image or spam tracebacks.
+            return None
         # Screen access shares the visible desktop, including Sakura when it
         # is on screen. Masking our whole window hid the entire capture when
         # maximized and also hid content behind a transparent companion.
@@ -370,6 +398,10 @@ def main():
     # Holder to pass window reference to Api
     library_mode = os.environ.get('SAKURA_UPLOAD_UI') == '1' or bool(getattr(app.state, 'tracking_only', False))
     holder = {'library_mode': library_mode}
+    from window_placement import read_placement
+    placement_file=Path(__file__).parent/'desktop-profile'/'companion-placement.json'
+    saved_placement=read_placement(placement_file)
+    if saved_placement:holder['companion_bounds']=saved_placement
     api = DesktopApi(holder)
 
     # Detect screen size or use default companion dimensions
@@ -408,9 +440,28 @@ def main():
 
     def setup_native_resizing():
         from PySide6.QtCore import QObject, Signal, Slot, Qt, QTimer
-        from PySide6.QtGui import QIcon
+        from PySide6.QtGui import QIcon, QColor
         from PySide6.QtWidgets import QApplication
         native = window.native
+        if EDITION != 'vtuber':
+            # WA_TranslucentBackground also enables WA_NoSystemBackground.
+            # Re-enable background clearing: otherwise WebEngine's changed
+            # alpha tiles are painted over stale menus and old avatar frames.
+            native.setAttribute(Qt.WA_NoSystemBackground, False)
+            native.setAttribute(Qt.WA_OpaquePaintEvent, False)
+            # Preserve pywebview's alpha-capable child surface. Turning off
+            # WA_TranslucentBackground makes character-only mode opaque even
+            # when both the document and WebEngine page are transparent.
+            native.webview.setAttribute(Qt.WA_NoSystemBackground, False)
+            native.webview.setAttribute(Qt.WA_OpaquePaintEvent, False)
+            # Chromium invalidates only damaged tiles. On a layered Windows
+            # window, Qt must also clear the complete backing store before
+            # blending that frame or dismissed controls remain underneath.
+            native.webview.page().setBackgroundColor(QColor('#090713'))
+            surface_timer = QTimer(native)
+            surface_timer.setInterval(33)
+            surface_timer.timeout.connect(native.update)
+            holder['surface_timer'] = surface_timer
         application = QApplication.instance()
         application.setApplicationName(APP_DISPLAY_NAME)
         application.setApplicationDisplayName(APP_DISPLAY_NAME)
@@ -426,15 +477,29 @@ def main():
                 APP_LAUNCHER_PATH, APP_ICON_PATH)
         class ResizeBridge(QObject):
             request = Signal(str)
+            focus_request = Signal()
             input_request = Signal(bool)
+            surface_request = Signal(bool)
             mode_request = Signal(bool)
             maximize_request = Signal()
             def __init__(self):
                 super().__init__()
+                self.focus_request.connect(self.focus_window)
                 self.request.connect(self.resize_window)
                 self.input_request.connect(self.set_input_transparency)
+                self.surface_request.connect(self.set_surface_transparency)
                 self.mode_request.connect(self.set_mode)
                 self.maximize_request.connect(self.toggle_maximize)
+
+            @Slot()
+            def focus_window(self):
+                if native.isMinimized():native.showNormal()
+                native.raise_()
+                native.activateWindow()
+                if sys.platform=='win32':
+                    import ctypes
+                    ctypes.windll.user32.SetForegroundWindow.argtypes=[ctypes.c_void_p]
+                    ctypes.windll.user32.SetForegroundWindow(int(native.winId()))
 
             @Slot()
             def toggle_maximize(self):
@@ -471,6 +536,7 @@ def main():
 
             @Slot(bool)
             def set_mode(self, library):
+                holder['geometry_transition_until']=time.monotonic()+.5
                 # Keep the same native window and WebEngine compositor surface.
                 # setWindowFlag recreates a translucent Qt window on Windows,
                 # causing flashing and stale alpha after changing modes.
@@ -489,7 +555,14 @@ def main():
                     if sys.platform == 'win32':
                         from window_input import restore_window
                         restore_window(int(native.winId()))
-                    bounds = holder.get('companion_bounds', {'width': 460, 'height': 760, 'x': 80, 'y': 80})
+                    from window_placement import compact_geometry
+                    saved=holder.get('companion_bounds')
+                    display=QApplication.screenAt(native.pos()) or QApplication.primaryScreen()
+                    if saved:
+                        from PySide6.QtCore import QPoint
+                        display=QApplication.screenAt(QPoint(int(saved['x']+saved['width']/2),int(saved['y']+saved['height']/2))) or display
+                    area=display.availableGeometry()
+                    bounds=compact_geometry({'x':area.x(),'y':area.y(),'width':area.width(),'height':area.height()},saved)
                     def restore_companion_geometry():
                         if not holder.get('library_mode'):
                             native.setGeometry(int(bounds['x']), int(bounds['y']), int(bounds['width']), int(bounds['height']))
@@ -504,6 +577,15 @@ def main():
                 print('  Window mode: ' + ('model library' if library else 'desktop companion'), flush=True)
                 holder['library_maximized'] = library
                 self.update_maximize_control(library)
+
+            @Slot(bool)
+            def set_surface_transparency(self, enabled):
+                native.webview.page().setBackgroundColor(
+                    QColor(Qt.transparent) if enabled else QColor('#090713'))
+                timer = holder.get('surface_timer')
+                if timer:
+                    timer.start() if enabled else timer.stop()
+                native.update()
 
             @Slot(bool)
             def set_input_transparency(self, enabled):
@@ -533,6 +615,16 @@ def main():
         bridge = ResizeBridge()
         bridge.moveToThread(native.thread())
         holder['resize_bridge'] = bridge
+        if not holder.get('library_mode'):
+            from window_placement import compact_geometry
+            from PySide6.QtCore import QPoint
+            saved=holder.get('companion_bounds')
+            display=QApplication.screenAt(native.pos()) or QApplication.primaryScreen()
+            if saved:
+                display=QApplication.screenAt(QPoint(saved['x']+saved['width']//2,saved['y']+saved['height']//2)) or display
+            area=display.availableGeometry()
+            initial=compact_geometry({'x':area.x(),'y':area.y(),'width':area.width(),'height':area.height()},saved)
+            native.setGeometry(initial['x'],initial['y'],initial['width'],initial['height'])
         # Sample native title/flower dragging on Qt's thread. JavaScript cannot
         # see mouse movement while the OS owns a system window drag. Async page
         # dispatch avoids blocking the compositor or spawning per-move workers.
@@ -542,9 +634,20 @@ def main():
             x, y = native.x(), native.y()
             dx, dy = x - drag_position[0], y - drag_position[1]
             drag_position[:] = [x, y]
+            pressed=bool(QApplication.mouseButtons() & Qt.MouseButton.LeftButton)
+            if not holder.get('library_mode') and time.monotonic()>holder.get('geometry_transition_until',0):
+                geometry={'x':x,'y':y,'width':native.width(),'height':native.height()}
+                previous=holder.get('last_compact_geometry')
+                holder['last_compact_geometry']=geometry
+                if pressed and previous and previous!=geometry:
+                    holder['placement_pending']=geometry
+                elif not pressed and holder.pop('placement_pending',None):
+                    from window_placement import save_placement
+                    holder['companion_bounds']=geometry
+                    try:save_placement(placement_file,geometry)
+                    except OSError as error:print(f'  Could not save Companion position: {error}',flush=True)
             if not (dx or dy):
                 return
-            from PySide6.QtWidgets import QApplication
             if not QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
                 return
             # Ignore geometry jumps from restore/mode changes.
@@ -564,6 +667,9 @@ def main():
     window.events.before_show += setup_native_resizing
     window.events.loaded += lambda: window.evaluate_js(
         'window.updateMaximizeControl?.(' + ('true' if holder.get('library_mode') else 'false') + '); void 0;')
+    # loaded callbacks run outside Qt's GUI thread. Use the existing QObject
+    # bridge so activation follows normal UI-thread window handling.
+    window.events.loaded += lambda: holder['resize_bridge'].focus_request.emit()
 
     overlay_stopped = threading.Event()
     window.events.closed += overlay_stopped.set

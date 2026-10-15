@@ -33,6 +33,8 @@
 !/tests/*.cs
 !/static/
 !/static/**
+!/android/
+!/android/**
 
 # Never commit secrets, generated files or imported model/voice weights.
 **/__pycache__/
@@ -58,4 +60,6 @@
 **/settings.json
 **/conversation-memory.json
 **/steam-shortcuts.json
+**/reminders.json
+**/reminders.tmp
 **/.DS_Store

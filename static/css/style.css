@@ -50,6 +50,10 @@ body.tracking-only .vtuber-camera-settings { display: block; }
 body.tracking-only #vtuber-rvc-changer-group { display: flex; }
 #vtuber-rvc-changer-group > .toggle-label { display: flex; align-items: center; }
 #settings-tracking-camera { max-width: 100%; width: 100%; }
+.camera-phone-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.camera-phone-row select { flex:1 1 180px; min-width:0; }
+.camera-phone-row button { flex:0 0 auto; white-space:nowrap; }
+.camera-phone-row #settings-tracking-camera { width:auto; }
 .vtuber-camera-settings label { display: block; margin-top: 10px; }
 .vtuber-camera-settings input[type="range"] { display: block; width: 100%; margin: 6px 0 10px; }
 .vtuber-camera-settings select { width: 100%; }
@@ -153,6 +157,7 @@ input, textarea, .message, #messages {
 }
 
 #viewer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+#viewer.model-frame-held > canvas:not(.model-held-frame) { visibility:hidden!important; }
 
 /* ──────────────── Top Bar ──────────────── */
 #top-bar {
@@ -934,6 +939,21 @@ body.native-renderer #theme-popover {
     -webkit-backdrop-filter: none !important;
 }
 body.native-renderer .modal-backdrop { animation: none; }
+body.tracking-only #companion-camera-group { display:none!important; }
+#companion-camera-group { border:1px solid #294052; border-radius:12px; padding:14px; }
+#companion-camera-group legend { color:var(--accent-cyan,#00e5ff); padding:0 6px; font-weight:600; }
+#reminder-alert { position:fixed;left:20px;bottom:30px;z-index:100000;max-width:min(380px,calc(100vw - 40px));padding:18px;background:#100b19;color:#fff;border:1px solid #00d5df;border-radius:14px;box-shadow:0 4px 24px #0008; }
+#reminder-alert[hidden] { display:none!important; }
+#reminder-alert p { margin:12px 0; }
+#local-llm-settings.hidden, #gemini-settings.hidden, #tab-ai [hidden] { display:none!important; }
+#cloud-endpoint { width:100%;box-sizing:border-box;border:1px solid #294052;background:#1c1429;color:#fff;padding:8px 12px;border-radius:10px; }
+/* Native alpha surfaces can repaint while speech initialization delays WebGL.
+   Keep the loading indicator static rather than promoting an animated layer. */
+body.native-renderer #kokoro-loading-modal .rvc-loading-bar span {
+    animation: none;
+    transform: none;
+    width: 100%;
+}
 
 /* Keep settings on one opaque surface above the animated avatar. Layered
    translucent cards over a live webcam/WebGL scene can flash in Qt. */
@@ -1086,3 +1106,38 @@ body.picking-model-part #viewer canvas { cursor:crosshair; }
 
 .transparency-shortcut-label {font-size:11px;color:var(--text-muted);white-space:nowrap;}
 body.tracking-only .transparency-shortcut-label {display:none;}
+
+body.tracking-only #screen-audio-group { display:none!important; }
+
+/* A minimized companion keeps the avatar clear; expand controls on demand. */
+.companion-toolbar-toggle { display:none; }
+body.desktop-companion #top-bar {
+    grid-template-rows: auto;
+    min-height: 44px;
+    height: auto;
+    gap: 0;
+    background: #120b18 !important;
+}
+body.desktop-companion #top-bar .brand { flex:initial; overflow:hidden; }
+body.desktop-companion #top-bar .title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+body.desktop-companion .companion-toolbar-toggle { display:inline-flex; flex-shrink:0; padding:5px 9px; }
+body.desktop-companion #top-bar .controls { display:none; }
+body.desktop-companion.companion-toolbar-open #top-bar .controls {
+    display:flex;
+    max-height: min(240px, 35vh);
+    overflow:auto;
+    padding:10px;
+    background:#120b18;
+    border-top:1px solid var(--panel-border);
+    overscroll-behavior:contain;
+}
+body.desktop-companion #top-bar * { text-shadow:none!important; box-shadow:none!important; }
+body.desktop-companion #top-bar .brand .badge { flex-shrink:0; }
+@media (max-width:380px) { body.desktop-companion #top-bar .brand .badge {display:none;} }
+
+body.desktop-companion.companion-toolbar-open #top-bar .controls {
+    position:fixed; top:48px; left:8px; right:8px;
+    width:auto; max-height:calc(100vh - 110px); z-index:60;
+    border:1px solid var(--panel-border); border-radius:12px;
+}
+body.desktop-companion #companion-toolbar .dropdown-menu { animation:none; }

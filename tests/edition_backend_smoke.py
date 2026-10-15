@@ -15,6 +15,9 @@ import app
 from product import EDITION, DISPLAY_NAME, LAUNCHER_NAME
 assert EDITION==edition
 root=Path(__file__).resolve().parent
+assert list(root.glob('sakura_core*.pyd')), 'Compiled application core missing'
+assert not (root/'app.py').exists() and not (root/'llm.py').exists(), 'Original application sources shipped'
+assert not list((root/'__pycache__').glob('app.*.pyc')), 'Original application bytecode shipped'
 for line in (root/'installed-files.tsv').read_text(encoding='utf-8').splitlines():
  digest,name=line.split('\t');assert hashlib.sha256((root.parent/name).read_bytes()).hexdigest()==digest,name
 assert subprocess.run([str(root.parent/LAUNCHER_NAME),'--check']).returncode==0
@@ -27,6 +30,13 @@ async def check():
    for path in ['/','/api/models','/api/voices','/api/settings','/api/identity']:
     response=await client.get(path);assert response.status_code==200,(path,response.text)
    settings=(await client.get('/api/settings')).json();assert settings['product_edition']==edition
+   voices=(await client.get('/api/voices')).json()['presets']
+   assert sum(p.get('backend')=='kokoro' for p in voices)==22
+   from config import TTS_BACKEND
+   assert TTS_BACKEND=='kokoro'
+   from kokoro_speech import ASSETS, ASSETS_DIR, _hash
+   for name,(size,digest) in ASSETS.items():
+    asset=ASSETS_DIR/name;assert asset.stat().st_size==size and _hash(asset)==digest
    assert settings['vtuber_tracking_only']==(edition=='vtuber')
    model_list=(await client.get('/api/models')).json();assert model_list=={'models':[],'live2d_models':[]}
    if edition=='vtuber':

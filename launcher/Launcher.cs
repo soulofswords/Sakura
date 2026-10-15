@@ -14,6 +14,33 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("SoulOfSwords")]
 [assembly: AssemblyVersion("1.0.0.0")]
 static class Launcher {
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr FindWindow(string className,string title);
+ [DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
+ [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr window,int command);
+ [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint processId);
+ [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint processId);
+ static bool FocusExisting(string title) {
+  IntPtr handle=FindWindow(null,title);
+  if(handle==IntPtr.Zero)handle=FindWindow(null,title+" — Choose startup mode");
+  if(handle==IntPtr.Zero)return false;
+  uint owner;GetWindowThreadProcessId(handle,out owner);AllowSetForegroundWindow(owner);
+  if(IsIconic(handle))ShowWindowAsync(handle,9); // Restore only a genuinely minimized window.
+  SetForegroundWindow(handle);return true;
+ }
+ static void FocusStartedWindow(Process process,string title) {
+  uint id=(uint)process.Id;
+  AllowSetForegroundWindow(id);
+  var focus=new Thread(()=>{
+   for(int attempt=0;attempt<180;attempt++) {
+    try{if(process.HasExited)return;}catch(InvalidOperationException){return;}
+    IntPtr handle=FindWindow(null,title);uint owner=0;
+    if(handle!=IntPtr.Zero)GetWindowThreadProcessId(handle,out owner);
+    if(owner==id){if(IsIconic(handle))ShowWindowAsync(handle,9);SetForegroundWindow(handle);return;}
+    Thread.Sleep(250);
+   }
+  });focus.IsBackground=true;focus.Start();
+ }
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern IntPtr LoadLibraryEx(string file,IntPtr reserved,uint flags);
  [DllImport("kernel32.dll")] static extern IntPtr FindResource(IntPtr module,IntPtr name,IntPtr type);
  [DllImport("kernel32.dll")] static extern IntPtr LoadResource(IntPtr module,IntPtr resource);
@@ -71,7 +98,10 @@ static class Launcher {
    return;
   }
   bool created; using(var mutex=new Mutex(true,"Local\\SakuraLauncher_"+title.Replace(" ","_"),out created)) {
-   if(!created){MessageBox.Show(title+" is already running.",title);return;}
+   if(!created){
+    if(!FocusExisting(title))MessageBox.Show(title+" is starting. Please wait a moment, then open it again to bring it forward.",title);
+    return;
+   }
    try {
     string python=LocalModelDialog.Python(project);
     if(!File.Exists(python)||!File.Exists(Path.Combine(project,script))) throw new IOException("Keep this launcher beside the Sakura folder that contains its venv and source files.");
@@ -99,7 +129,7 @@ static class Launcher {
       process.StartInfo=start;
       DataReceivedEventHandler output=(sender,e)=>{if(e.Data!=null)lock(sync)log.WriteLine(e.Data);};
       process.OutputDataReceived+=output;process.ErrorDataReceived+=output;
-      process.Start();process.BeginOutputReadLine();process.BeginErrorReadLine();process.WaitForExit();
+      process.Start();FocusStartedWindow(process,title);process.BeginOutputReadLine();process.BeginErrorReadLine();process.WaitForExit();
       if(process.ExitCode!=0) MessageBox.Show(title+" stopped with an error. Check the launch log in Sakura\\logs.",title);
      }
     }

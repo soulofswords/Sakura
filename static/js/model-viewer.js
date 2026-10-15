@@ -1,4 +1,4 @@
-import Live2DViewer from './live2d-viewer.js?v=live2d-speed28';
+import Live2DViewer from './live2d-viewer.js?v=framing31';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
 import * as THREE from 'three';
 import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
@@ -12,10 +12,12 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import AvatarRetarget from './avatar-retarget.js?v=vrm-pitch14';
 import ArmClearance from './arm-clearance.js?v=clearance1';
 import ModelPhysics from './model-physics.js?v=hair-collision31';
-import ModelRigMonitor from './model-rig-monitor.js?v=4';
+import ModelRigMonitor from './model-rig-monitor.js?v=persistent5';
+import ModelRepairStore from './model-repair-store.js?v=1';
+import {ModelBones} from './model-bones.js?v=persistent5';
 import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
-import ReactionExpressions from './reaction-expressions.js?v=1';
-import ModelDance from './model-dance.js?v=1';
+import ReactionExpressions from './reaction-expressions.js?v=camera-emotions59';
+import ModelDance from './model-dance.js?v=palms64';
 
 /**
  * Smart loader for .tga textures.
@@ -119,6 +121,7 @@ export default class ModelViewer {
         this.camera.position.set(0, 14, 18);
 
         // Renderer
+        this.companionSurface = !document.title.startsWith('Sakura VTuber');
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             alpha: true,
@@ -189,6 +192,7 @@ export default class ModelViewer {
         this.allMorphNames = [];
         this.physics = new ModelPhysics();
         this.rigMonitor = new ModelRigMonitor(this);
+        this.repairStore = new ModelRepairStore();
         this.reactionExpressions = new ReactionExpressions(this);
         this.dance = new ModelDance(this);
         this.physicsInfo = null;
@@ -266,6 +270,7 @@ export default class ModelViewer {
     }
 
     _holdPresentedFrame() {
+        if (this.companionSurface) return;
         if (this._heldFrame || this._displayLoading || !this.model) return;
         const source = this.live2d?.app?.view || this.renderer.domElement;
         if (!source?.width || !source?.height) return;
@@ -273,11 +278,16 @@ export default class ModelViewer {
         // Render and copy in the same task, before releasing the old model.
         this._renderFrame();
         const frame = document.createElement('canvas');
+        frame.className = 'model-held-frame';
         frame.width = source.width; frame.height = source.height;
         frame.getContext('2d').drawImage(source, 0, 0);
         Object.assign(frame.style, {position:'absolute', inset:'0', width:'100%', height:'100%', pointerEvents:'none', zIndex:'1'});
         this.container.appendChild(frame);
         this._heldFrame = frame;
+        // Alpha snapshots cannot cover a live alpha canvas: both characters
+        // remain visible wherever the old frame is transparent. Replace the
+        // source surface until the new frame can be presented atomically.
+        this.container.classList?.add('model-frame-held');
     }
 
     _releasePresentedFrame(ticket) {
@@ -288,7 +298,10 @@ export default class ModelViewer {
         requestAnimationFrame(() => requestAnimationFrame(() => {
             if (ticket !== this._displayLoadTicket || this._displayLoading) return;
             frame.remove();
-            if (this._heldFrame === frame) this._heldFrame = null;
+            if (this._heldFrame === frame) {
+                this._heldFrame = null;
+                this.container.classList?.remove('model-frame-held');
+            }
         }));
     }
 
@@ -306,10 +319,12 @@ export default class ModelViewer {
             // Setting canvas dimensions clears its drawing buffer even when
             // unchanged. Native layout notifications can repeat one size.
             if (current.x !== width || current.y !== height) {
+                if (!this.live2d) this._holdPresentedFrame();
                 this.renderer.setSize(width, height);
                 this._resizeBloom();
             }
             this._renderFrame();
+            if (!this.live2d) this._releasePresentedFrame(this._displayLoadTicket);
         });
     }
 
@@ -596,7 +611,12 @@ export default class ModelViewer {
                 // Imported skinned bounds describe the bind pose. Moving
                 // hair/skirts can escape those cached bounds during dragging.
                 this.model?.traverse(child=>{if(child.isSkinnedMesh)child.frustumCulled=false;});
+                if(!this.live2d){
+                    await this.repairStore.load(url,()=>ticket===this._displayLoadTicket&&!!this.model);
+                    if(ticket!==this._displayLoadTicket)return null;
+                }
                 this.rigMonitor?.start(url);
+                if(!this.live2d)this.boneControls=new ModelBones(this,this.repairStore.key(url));
             }
             return result;
         } finally {
@@ -923,6 +943,7 @@ export default class ModelViewer {
         VRMUtils.rotateVRM0(vrm);
         // VRM uses meters; the existing MMD stage uses larger model units.
         vrm.scene.scale.setScalar(10);
+        this.setGlossBoost(Number(localStorage.getItem('sakura_gloss_boost') || 0), vrm.scene);
         try { await this.renderer.compileAsync(vrm.scene, this.camera, this.scene); }
         catch (error) { this._disposeObject(vrm.scene); throw error; }
         if (generation !== this.loadGeneration) { this._disposeObject(vrm.scene); return null; }
@@ -1721,6 +1742,7 @@ export default class ModelViewer {
             concern: this.emotion === 'concerned' ? 0.22 : 0,
             focus: this.thinkBlend * 0.18,
         };
+        if(this.areAiExpressionsAutomatic?.()===false)for(const key of Object.keys(targets))targets[key]=0;
         for (const [key, name] of Object.entries(this.expressionMorphs || {})) {
             this.expressionWeights[key] += (targets[key] - this.expressionWeights[key]) * alpha;
             if (name) this.setMorph(name, this.expressionWeights[key]);
@@ -1763,7 +1785,10 @@ export default class ModelViewer {
         const size = box.getSize(new THREE.Vector3());
         window.pywebview?.api.model_frame_status([center.x, center.y, center.z], [size.x, size.y, size.z]);
 
-        if (this.fullModelView || this.desktopMode || this.vrm || !this.animationBones.head) {
+        const headBone = this.vrm?.humanoid?.getRawBoneNode?.('head')
+            || this.vrm?.humanoid?.getNormalizedBoneNode?.('head')
+            || this.animationBones.head?.bone;
+        if (this.fullModelView || this.desktopMode || !headBone) {
             const verticalFov = THREE.MathUtils.degToRad(this.camera.fov);
             const distance = Math.max(
                 size.y / (2 * Math.tan(verticalFov / 2)),
@@ -1773,6 +1798,27 @@ export default class ModelViewer {
             this.camera.position.set(center.x, center.y, center.z + distance + size.z / 2);
             this.camera.far = Math.max(1000, distance * 4 + size.length());
             this.camera.updateProjectionMatrix();
+            this.controls.update();
+            return;
+        }
+
+        if (this.vrm) {
+            // VRM uses different model scales from PMX. Frame its upper body
+            // from world bounds rather than the PMX camera's fixed distances.
+            const head = headBone.getWorldPosition(new THREE.Vector3());
+            const framingHeight = size.y * .6;
+            const targetY = Math.min(box.max.y - framingHeight / 2,
+                Math.max(box.min.y + framingHeight / 2, head.y - size.y * .18));
+            this.controls.target.set(head.x, targetY, head.z);
+            const verticalFov = THREE.MathUtils.degToRad(this.camera.fov);
+            const distance = Math.max(
+                framingHeight / (2 * Math.tan(verticalFov / 2)),
+                size.x * .55 / (2 * Math.tan(verticalFov / 2) * this.camera.aspect)
+            ) * 1.15 + size.z / 2;
+            this.camera.position.set(head.x, targetY, head.z + distance);
+            this.camera.far = Math.max(1000, distance * 4 + size.length());
+            this.camera.updateProjectionMatrix();
+            this.camera.lookAt(this.controls.target);
             this.controls.update();
             return;
         }
@@ -1808,10 +1854,13 @@ export default class ModelViewer {
             this._spoutPixels=new Uint8Array(width*height*4);
         }
         const previous=this.renderer.getRenderTarget(),background=this.scene.background;
+        const viewport=this.renderer.getViewport(new THREE.Vector4()),scissor=this.renderer.getScissor(new THREE.Vector4()),scissorTest=this.renderer.getScissorTest();
         const color=this.renderer.getClearColor(new THREE.Color()),alpha=this.renderer.getClearAlpha();
         try {
             this.scene.background=null;this.renderer.setClearColor(0,0);
-            this.renderer.setRenderTarget(this._spoutTarget);this.renderer.clear();
+            this.renderer.setRenderTarget(this._spoutTarget);
+            this.renderer.setViewport(0,0,width,height);this.renderer.setScissorTest(false);
+            this.renderer.clear();
             this.renderer.render(this.scene,this.camera);
             this.renderer.readRenderTargetPixels(this._spoutTarget,0,0,width,height,this._spoutPixels);
             // WebGL starts at the bottom; send top-down, straight-alpha RGBA.
@@ -1820,6 +1869,7 @@ export default class ModelViewer {
             return {pixels,width,height};
         } finally {
             this.renderer.setRenderTarget(previous);this.renderer.setClearColor(color,alpha);this.scene.background=background;
+            this.renderer.setViewport(viewport);this.renderer.setScissor(scissor);this.renderer.setScissorTest(scissorTest);
         }
     }
 
@@ -1830,12 +1880,16 @@ export default class ModelViewer {
     captureAvatar() {
         if(this.live2d)return this.live2d.capture(768).canvas.toDataURL('image/jpeg',.85).split(',')[1];
         if (!this.model) return null;
-        this._renderFrame();
+        const frame=this.captureSpoutFrame(768);
+        if(!frame)return null;
+        // Never repaint the on-screen WebGL canvas from a preview timer.
+        // Qt's transparent compositor can expose mixed/stale damage tiles
+        // through settings while that extra frame is being presented.
+        const source=document.createElement('canvas');source.width=frame.width;source.height=frame.height;
+        source.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(frame.pixels),frame.width,frame.height),0,0);
         const output = document.createElement('canvas');
-        const source = this.renderer.domElement;
-        const scale = Math.min(1, 768 / source.width, 768 / source.height);
-        output.width = Math.max(1, Math.round(source.width * scale));
-        output.height = Math.max(1, Math.round(source.height * scale));
+        output.width = frame.width;
+        output.height = frame.height;
         const context = output.getContext('2d');
         context.fillStyle = '#202830'; context.fillRect(0, 0, output.width, output.height);
         context.drawImage(source, 0, 0, output.width, output.height);
@@ -1949,12 +2003,31 @@ export default class ModelViewer {
             center.y + Math.sin(pitch)*25, center.z + Math.cos(yaw)*Math.cos(pitch)*25);
     }
 
-    setGlossBoost(value) {
+    setGlossBoost(value, root=this.model) {
         const boost = Math.max(0, Math.min(1, Number(value) || 0));
         this.glossOriginals ||= new WeakMap();
-        this.model?.traverse(child => {
+        root?.traverse(child => {
             for (const mat of (Array.isArray(child.material) ? child.material : [child.material])) {
                 if (!mat) continue;
+                if(mat.isMToonMaterial&&!mat.isOutline){
+                    mat.userData ||= {};
+                    if(!mat.userData.sakuraGloss){
+                        const uniform={value:boost},compile=mat.onBeforeCompile,key=mat.customProgramCacheKey;
+                        mat.userData.sakuraGloss=uniform;
+                        mat.onBeforeCompile=function(shader,renderer){
+                            compile?.call(this,shader,renderer);
+                            shader.uniforms.sakuraGloss=uniform;
+                            shader.fragmentShader='uniform float sakuraGloss;\n'+shader.fragmentShader.replace(
+                                'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;',
+                                `vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
+                                vec3 sakuraHalf = normalize(normalize(vViewPosition) + normalize(vec3(0.4, 0.7, 1.0)));
+                                col += vec3(0.3) * sakuraGloss * pow(max(dot(normal, sakuraHalf), 0.0), 64.0);`);
+                        };
+                        mat.customProgramCacheKey=function(){return key.call(this)+'|sakura-gloss-v1';};
+                        mat.needsUpdate=true;
+                    }
+                    mat.userData.sakuraGloss.value=boost;
+                }
                 if (!this.glossOriginals.has(mat)) this.glossOriginals.set(mat, {
                     shininess: mat.shininess, specular: mat.specular?.clone(), roughness: mat.roughness });
                 const original = this.glossOriginals.get(mat);
@@ -2026,6 +2099,26 @@ export default class ModelViewer {
         }
     }
 
+    _prepareCompanionSurface() {
+        if (this.companionSurface) {
+            // Always present a complete default framebuffer after native size
+            // changes or offscreen captures, never reuse damaged alpha tiles.
+            if (this._heldFrame) {
+                this._heldFrame.remove(); this._heldFrame = null;
+                this.container.classList?.remove('model-frame-held');
+            }
+            const size = this.renderer.getSize(this._presentSize ||= new THREE.Vector2());
+            this.renderer.setRenderTarget(null);
+            this.renderer.setViewport(0, 0, size.x, size.y);
+            this.renderer.setScissorTest(false);
+            this.renderer.autoClear = true;
+            // render() clears and draws in the same submission. A separate
+            // clear before animation/physics exposes an empty alpha frame to
+            // the native compositor and can flash during expensive updates.
+        }
+
+    }
+
     _renderFrame() {
         // Keep the last image while the old GPU resources are released and
         // the replacement textures/shaders load. No empty scene flashes.
@@ -2033,6 +2126,7 @@ export default class ModelViewer {
         const delta = this.clock.getDelta();
         const elapsed = this.clock.getElapsedTime();
         if(this.live2d){this.reactionExpressions?.update(delta);this.autoExpressions?.update(delta);this.live2d.render(delta);return;}
+        this._prepareCompanionSurface();
 
         // RGB Aura / Breathing cycle
         if (this.rgbBreathing) {
@@ -2091,13 +2185,13 @@ export default class ModelViewer {
         this.autoExpressions?.update(delta);
         // Apply after webcam/idle morphs so tracking cannot overwrite the
         // explicitly selected expression on the following frame.
-        if(this.vtuberTrackingMode&&this.manualExpressions?.size) {
+        if(!this.areAiExpressionsAutomatic?.()&&this.manualExpressions?.size) {
             for(const [name,weight]of this.manualExpressions){
                 const custom=this.customExpressions?.[name];
                 if(custom&&!this.live2d)for(const p of custom.parameters)this.setMorph(p.id,p.value*weight);
                 else this.setMorph(name,weight);
             }
-        } else if (this.vtuberTrackingMode && this.manualExpression)
+        } else if (!this.areAiExpressionsAutomatic?.() && this.manualExpression)
             this.setMorph(this.manualExpression.name, this.manualExpression.weight);
         // Physics runs after the gesture poses are written so hair, clothing
         // and body chains inherit their motion as inertia this frame.

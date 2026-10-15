@@ -13,17 +13,18 @@ ROOT=BASE.parent
 def load(name,file):
     spec=importlib.util.spec_from_file_location(name,file);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
-def main():
+def main(edition=None):
     split=load('split_local',BASE/'tools/build-split-installers.py')
     builder=load('package_local',BASE/'tools/build-installers.py')
     results=[]
     work=BASE/'tools/local-products';work.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='refresh-',dir=work) as temp:
-        for edition in ['vtuber','companion']:
+        for edition in ([edition] if edition else ['vtuber','companion']):
             stage=Path(temp)/edition;stage.mkdir();display,launcher=split.edition_sources(edition,stage)
             destination=ROOT/display/'Sakura';destination.mkdir(parents=True,exist_ok=True)
             for path,name in builder.app_files():
                 relative=Path(name).relative_to('Sakura');target=destination/relative
+                if relative.parts[0]=='kokoro-assets':continue
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target)
             shutil.copy2(stage/'index.html',destination/'static/index.html')
             shutil.copy2(stage/'product.json',destination/'product.json')
@@ -45,7 +46,7 @@ def main():
             if not settings.exists():settings.write_text(json.dumps(builder.DEFAULTS,indent=2),encoding='utf-8')
             # Directory junctions share large libraries/runtimes. Independent
             # desktop profiles and logs are deliberately not linked.
-            for name in ['models','voices','venv','llm-models','ollama-runtime','rvc-assets','rvc-dependencies','rvc-extra','rvc-gpu-runtime','rvc-runtime','rvc-venv','rvc-amd-runtime']:
+            for name in ['models','voices','venv','kokoro-assets','llm-models','ollama-runtime','rvc-assets','rvc-dependencies','rvc-extra','rvc-gpu-runtime','rvc-runtime','rvc-venv','rvc-amd-runtime']:
                 if edition=='vtuber' and name in ['llm-models','ollama-runtime']:continue
                 source=BASE/name;target=destination/name
                 if not source.is_dir():continue
@@ -85,4 +86,8 @@ def main():
     (work/'Latest.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
     print(json.dumps(results,indent=2))
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--edition', choices=['companion','vtuber'])
+    main(parser.parse_args().edition)

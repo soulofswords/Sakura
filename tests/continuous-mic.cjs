@@ -33,13 +33,17 @@ const tick = async () => { time += 50; timer?.(); await new Promise(r => setImme
     await mic.start();
     for (let i = 0; i < 20; i++) await tick();
     assert.equal(submitted, 0, 'Silence cannot submit a request');
+    amplitude=.6; await tick(); amplitude=0; for(let i=0;i<100;i++)await tick();
+    assert.equal(submitted,0,'Sudden click noise must not submit');
     amplitude = 0.03;
     for (let i = 0; i < 10; i++) await tick();
     assert.equal(submitted, 0, 'Do not interrupt active speech');
     amplitude = 0;
     for (let i = 0; i < 10; i++) await tick();
     assert.equal(submitted, 0, 'Short pauses between words do not submit');
-    for (let i = 0; i < 15; i++) await tick();
+    for (let i = 0; i < 4; i++) await tick();
+    assert.equal(submitted,0,'Keep the complete 700ms speech pause');
+    await tick();
     assert.equal(submitted, 1, 'A completed phrase submits once');
     assert.equal(recordings[0].state, 'inactive', 'No recording during assistant reply');
     release(); await new Promise(r => setImmediate(r));

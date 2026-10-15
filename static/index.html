@@ -4,7 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sakura — Anime AI Assistant</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=game-visible10">
+    <script>
+        document.documentElement.classList.add('sakura-starting');
+        try {
+            if (new URLSearchParams(location.search).has('desktop') && localStorage.getItem('sakura_transparency') !== 'false') {
+                document.documentElement.classList.add('transparent-mode');
+            }
+        } catch (_) {}
+        // Keep controls usable if a GPU or initialization failure prevents ready.
+        setTimeout(() => document.documentElement.classList.remove('sakura-starting'), 60000);
+    </script>
+    <style>
+        html.sakura-starting body { transition: none !important; }
+        html.sakura-starting #viewer { visibility: hidden; }
+        #startup-render-status { display: none; }
+        html.sakura-starting #startup-render-status {
+            display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 100; padding: 12px 20px; border-radius: 12px;
+            color: #b9fbff; background: #151021; font: 14px 'Segoe UI', sans-serif;
+        }
+    </style>
+    <link rel="stylesheet" href="/static/css/style.css?v=cloud-providers61">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -17,7 +37,10 @@
     </script>
 </head>
 <body>
+    <div id="startup-render-status" role="status">Preparing Sakura…</div>
     <script>
+        if (/(?:desktop|library|upload)=1/.test(location.search)) document.body.classList.add('native-renderer');
+        if (new URLSearchParams(location.search).has('library')) document.body.classList.add('native-library');
         if (new URLSearchParams(location.search).has('desktop')) {
             document.body.classList.add('desktop-companion');
             if (localStorage.getItem('sakura_transparency') !== 'false') {
@@ -50,13 +73,14 @@
             <span class="logo">🌸</span>
             <span class="title" id="brand-title">Sakura</span>
             <span class="badge">Companion</span>
+            <button id="companion-toolbar-toggle" class="companion-toolbar-toggle no-drag" type="button" aria-expanded="false" aria-controls="companion-toolbar" title="Show companion controls">☰</button>
         </div>
         <div id="win-controls" class="win-controls no-drag" style="display: none;">
             <button id="win-min-btn" class="win-btn" title="Minimize" aria-label="Minimize">—</button>
             <button id="win-max-btn" class="win-btn" title="Maximize" aria-label="Maximize">□</button>
             <button id="win-close-btn" class="win-btn close" title="Close" aria-label="Close">✕</button>
         </div>
-        <div class="controls no-drag">
+        <div id="companion-toolbar" class="controls no-drag">
             <button id="expression-editor-btn" class="expression-editor-btn" type="button">Model Settings</button>
             <!-- 3D Model Selector (Custom Dropdown) -->
             <div class="custom-dropdown no-drag" id="model-dropdown">
@@ -114,6 +138,7 @@
             <button id="dance-btn" type="button">Dance</button>
             <button id="dance-stop-btn" type="button">Stop dance</button>
             <button id="pmx-editor-btn" type="button" class="hidden" title="Open the selected PMX in its native editor">PMX Editor</button>
+            <button id="connect-phone-btn" type="button" title="Pair the Android app for face tracking, expressions or companion chat">📱 Connect to Phone</button>
             <label class="model-size-control no-drag" for="model-size">Size <input id="model-size" type="range" min="40" max="180" step="5" value="100" aria-label="Model display size"><output id="model-size-value">100%</output></label>
             <button id="interrupt-btn" type="button" title="Interrupt the current reply">⏹ Stop speaking</button>
             <button id="clear-memory-desktop" type="button" title="Forget saved conversations and memory">🧹 Clear memory</button>
@@ -134,6 +159,18 @@
         </div>
     </header>
     <div id="listening-status" role="status"></div>
+    <div id="kokoro-loading-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="kokoro-loading-title">
+        <div class="modal-card rvc-loading-card">
+            <div class="modal-header"><h3 id="kokoro-loading-title">Preparing local voices</h3></div>
+            <div class="modal-body">
+                <p id="kokoro-loading-message" role="status">Loading Kokoro speech…</p>
+                <div class="rvc-loading-bar" aria-hidden="true"><span></span></div>
+                <p class="modal-hint">Speech runs on your PC. If files are missing, the first setup downloads about 121 MB. No API key is needed.</p>
+                <p id="kokoro-loading-error" class="error-text" role="alert"></p>
+                <button id="kokoro-loading-close" type="button" class="hidden">Close</button>
+            </div>
+        </div>
+    </div>
     <div id="rvc-loading-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="rvc-loading-title">
         <div class="modal-card rvc-loading-card">
             <div class="modal-header"><h3 id="rvc-loading-title">Loading RVC voice</h3></div>
@@ -158,6 +195,10 @@
             </div>
             <div class="modal-body">
               <section id="model-remapping-panel" data-model-panel="remapping" hidden>
+                <button id="model-texture-snapshot-check" type="button">Take snapshot and check textures</button>
+                <p id="model-texture-check-status" class="modal-hint" role="status">Capture the model, check its texture images and repair confirmed PMX path problems.</p>
+                <p class="modal-hint">Repairs preserve original artwork and texture transparency. Missing images or incorrect artwork need a replacement below. For PMX appearance differences, compare in PMX Editor.</p>
+                <div class="bone-diagnostic-images"><img id="model-texture-before-image" alt="Model before texture check" hidden><img id="model-texture-after-image" alt="Model after texture check" hidden></div>
                 <label for="model-remap-part">Texture / material</label><select id="model-remap-part"></select>
                 <p id="model-remap-hint" class="modal-hint"></p>
                 <input type="file" id="model-remap-file" accept="image/png,image/jpeg,image/webp">
@@ -239,7 +280,10 @@
             <div class="tracking-options">
                 <p>Use your expressions, gaze and head to animate the character. The body-tracking switch also controls shoulders, arms, hands and fingers. Chat AI, speech and screen reactions are paused and the local language model is unloaded.</p>
                 <label for="tracking-camera">Camera</label>
-                <select id="tracking-camera"><option value="">Default camera</option></select>
+                <div class="camera-phone-row">
+                    <select id="tracking-camera"><option value="">Default camera</option></select>
+                    <button id="tracking-connect-phone-btn" type="button">📱 Connect to Phone</button>
+                </div>
                 <label><input id="tracking-mirror" type="checkbox" checked> Mirror movement</label>
                 <label><input id="tracking-hands-enabled" type="checkbox" checked> Track shoulders, arms, hands and fingers</label>
                 <p class="modal-hint">Show each full hand inside the camera frame to move its arm. When a hand leaves the frame, that arm and its fingers return to rest. Shoulders alone do not activate arm tracking.</p>
@@ -334,7 +378,7 @@
                 <button id="clear-btn" title="Clear conversation memory">🗑️</button>
             </div>
         </div>
-        <div id="screen-view-status" role="status">Screen off · No snapshots sent</div>
+        <div id="screen-view-status" role="status">Screen off · Capture stopped</div>
         <div id="messages"></div>
         <div class="input-area no-drag">
             <input type="text" id="chat-input" placeholder="Type a message or use your mic..." autocomplete="off">
@@ -367,6 +411,17 @@
 
             <!-- ── TAB: Voice ── -->
             <div class="tab-content" id="tab-general">
+                <fieldset class="setting-group"><legend>Android · Phone connection</legend>
+                    <label><input id="phone-link-enabled" type="checkbox"> Enable phone connection on home Wi-Fi</label>
+                    <div class="camera-phone-row"><button id="phone-link-existing" type="button">Existing devices</button><button id="phone-link-new" type="button">New device</button></div>
+                    <div id="phone-link-devices"></div>
+                    <p id="phone-link-status" role="status">Phone connection off</p>
+                    <label for="phone-link-address">PC connection link</label><input id="phone-link-address" readonly placeholder="Enable phone connection first">
+                    <button id="phone-link-copy-address" type="button" disabled>Copy link</button>
+                    <label for="phone-link-code">Pairing code</label><input id="phone-link-code" readonly placeholder="Enable phone connection first">
+                    <button id="phone-link-copy-code" type="button" disabled>Copy pairing code</button>
+                    <p class="modal-hint">Choose New device to pair an Android phone. Existing devices lists remembered phones; reconnect from the phone without another code. Turning this off disconnects phones but keeps the list. Forget removes that phone's access. Keep both devices on the same trusted home network.</p>
+                </fieldset>
                 <div class="setting-group checkbox-group">
                     <label><input id="preserve-configuration" type="checkbox" checked> Preserve configuration on reinstall</label>
                     <p class="modal-hint">Keep your settings when updating or reinstalling. Turning this off resets configuration on the next reinstall; imported models, voices and artwork remain intact. A configuration backup is kept.</p>
@@ -583,7 +638,10 @@
             <div class="tab-content" id="tab-audio">
                 <div class="setting-group vtuber-camera-settings">
                     <label for="settings-tracking-camera">VTuber camera:</label>
-                    <select id="settings-tracking-camera"><option value="">Default camera</option></select>
+                    <div class="camera-phone-row">
+                        <select id="settings-tracking-camera"><option value="">Default camera</option></select>
+                        <button id="settings-connect-phone-btn" type="button">📱 Connect to Phone</button>
+                    </div>
                     <p class="modal-hint">Distance assist is automatic. HD camera input and face/hand close-ups help at farther distances. Good lighting and a clearly visible face and hands are still required.</p>
                     <button id="settings-refresh-cameras" type="button">Refresh cameras</button>
                     <div class="save-actions"><button id="tracking-broadcast-camera" type="button">Use NVIDIA Broadcast camera</button><button id="tracking-broadcast-open" type="button">Open NVIDIA Broadcast</button></div>
@@ -616,6 +674,19 @@
                     <select id="tracking-fps"><option value="15">15 FPS · lower CPU usage</option><option value="24">24 FPS</option><option value="30">30 FPS</option></select>
                     <button id="tracking-reset-options" type="button">Reset tracking settings</button>
                 </div>
+                <fieldset class="setting-group"><legend>Camera preview · Tracking overlay</legend>
+                    <label><input id="camera-preview-enabled" type="checkbox"> Show camera preview and tracking</label>
+                    <label><input id="camera-preview-hide-face" type="checkbox" checked> Hide face in preview</label>
+                    <canvas id="camera-preview-canvas" width="640" height="360" hidden style="max-width:100%;height:auto;border-radius:12px;background:#101522"></canvas>
+                    <p id="camera-preview-status" role="status">Camera preview off</p>
+                    <p class="modal-hint">Uses your active tracking camera. Face privacy covers the face while showing tracking points; when no face is detected, the image stays hidden. Phone tracking shows points only—camera video stays on the phone.</p>
+                </fieldset>
+                <fieldset id="companion-camera-group" class="setting-group"><legend>Companion camera access</legend>
+                    <label><input id="companion-camera-enabled" type="checkbox"> Let Sakura see my camera</label>
+                    <label><input id="companion-camera-comments" type="checkbox" checked> Occasional camera comments while idle</label>
+                    <p id="companion-camera-status" role="status">Camera access off</p>
+                    <p class="modal-hint">Off on every launch. Uses the selected camera above. When enabled, camera images accompany your messages and occasional idle checks. Gemini sends these images to Google; local Qwen-VL processes them on your PC. Turning this off stops camera capture. Tracking preview face masking does not mask these AI images. No camera images are saved to conversation memory.</p>
+                </fieldset>
                 <div class="setting-group">
                     <label><input id="obs-background-enabled" type="checkbox"> Solid background for OBS</label>
                     <label for="obs-background-color">Background color:</label>
@@ -644,9 +715,17 @@
                     <button id="refresh-audio-devices-btn" type="button">🔄 Refresh audio devices</button>
                 </div>
 
+                <fieldset class="setting-group" id="screen-audio-group">
+                    <legend>Screen &amp; Game audio</legend>
+                    <label><input id="screen-audio-enabled" type="checkbox" checked> Listen to computer audio and selected inputs</label>
+                    <div id="screen-audio-sources"><p>Default computer playback selected. Refresh to choose other sources.</p></div>
+                    <button id="screen-audio-refresh" type="button">Refresh audio sources</button>
+                    <p id="screen-audio-status" role="status">Audio listening off</p>
+                    <p class="modal-hint">Normal AI mode listens to your selected microphone when Screen viewing is enabled. Computer audio can be disabled here. AI VTuber uses computer audio, live screen frames and chat only; microphone inputs are excluded. Choose up to four outputs, microphones or virtual inputs. Recent speech is transcribed locally; its text accompanies screen questions and reactions. No audio recordings are saved. Listening pauses while Sakura speaks. On macOS, use a virtual loopback input for computer audio.</p>
+                </fieldset>
                 <div class="setting-group" id="vtuber-rvc-changer-group">
-                    <label class="toggle-label"><input id="vtuber-rvc-changer-toggle" type="checkbox"> 🎙 Microphone voice mode</label>
-                    <p class="modal-hint">Off by default. Enable it with any built-in or [RVC] voice selected. Built-in voices use local speech recognition, then speak the transcript with your configured speech engine; internet may be required. [RVC] voices convert your microphone audio through the local RVC service and load before capture. Playback drives the model’s mouth movement.</p>
+                    <label class="toggle-label"><input id="vtuber-rvc-changer-toggle" type="checkbox"> 🎙 Voice changer</label>
+                    <p class="modal-hint">Off by default. Enable it with any built-in or [RVC] voice selected. Built-in voices use local speech recognition, then speak the transcript with local Kokoro or your selected installed Windows voice. [RVC] voices convert your microphone audio through the local RVC service and load before capture. Playback drives the model’s mouth movement.</p>
                     <p id="vtuber-rvc-changer-status" class="modal-hint" role="status">Off</p>
                 </div>
 
@@ -671,7 +750,7 @@
             <div class="tab-content" id="tab-ai">
                 <div class="setting-group">
                     <label for="llm-provider">AI provider:</label>
-                    <select id="llm-provider"><option value="ollama">Local Ollama</option><option value="gemini">Google Gemini</option></select>
+                    <select id="llm-provider"><option value="ollama">Local Ollama</option><option value="auto">Auto-detect API key</option><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="xai">xAI</option><option value="deepseek">DeepSeek</option><option value="compatible">Custom OpenAI-compatible API</option></select>
                 </div>
                 <div id="local-llm-settings">
                     <div class="setting-group">
@@ -699,24 +778,30 @@
                         <span class="modal-hint">Try 2048 for a 4 GB GPU. Larger values use more memory.</span>
                     </div>
                     <div class="setting-group">
-                        <label class="toggle-label"><input id="gemini-fallback" type="checkbox">Use Gemini if the local model fails or takes too long</label>
+                        <label class="toggle-label"><input id="gemini-fallback" type="checkbox">Allow Gemini fallback for text only (screen and camera stay local)</label>
                         <label for="local-timeout">Wait for local reply (seconds):</label>
                         <input id="local-timeout" type="number" min="5" max="120" value="20">
                         <span class="modal-hint">Fallback uses your saved key and sends this conversation to Gemini when needed.</span>
                     </div>
                 </div>
                 <div id="gemini-settings" class="hidden">
+                    <div id="cloud-connection-fields" class="setting-group">
+                        <label for="cloud-model">Cloud model ID:</label><input id="cloud-model" type="text" placeholder="Default for OpenAI/Claude; required for other services">
+                        <label for="cloud-endpoint">Custom API base URL (custom provider only):</label><input id="cloud-endpoint" type="url" placeholder="https://your-provider.example/v1">
+                        <label><input id="cloud-vision" type="checkbox"> This selected model supports camera/screen images</label>
+                        <p class="modal-hint">Auto-detection uses distinctive key prefixes only. Ambiguous keys need a manual provider choice. Keys are never tested against unrelated services. Custom endpoints must support OpenAI Chat Completions. Model availability and billing depend on your provider.</p>
+                    </div>
                     <div class="setting-group">
                         <label for="gemini-model">Gemini model:</label>
                         <input id="gemini-model" type="text" value="gemini-flash-latest" autocomplete="off" placeholder="gemini-flash-latest">
                     </div>
                     <div class="setting-group">
-                        <label for="gemini-api-key">Gemini API key:</label>
-                        <input id="gemini-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter your Google AI Studio key">
+                        <label for="gemini-api-key">API key for selected provider:</label>
+                        <input id="gemini-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste your provider API key">
                         <span id="gemini-key-status" class="modal-hint"></span>
                         <button id="remove-gemini-key" type="button">Remove saved key</button>
                     </div>
-                    <div class="modal-hint">Gemini sends your messages, conversation context, and shared screen snapshots to Google. Screen access still follows the Screen toggle.</div>
+                    <div class="modal-hint">Cloud mode sends messages and conversation context to your selected provider or custom endpoint. Camera images, screen frames and audio transcripts are included only when the corresponding access is enabled. Review the selected endpoint before saving.</div>
                     <div class="modal-hint">Your saved key uses Windows encryption or macOS Keychain. Leave the key field blank to keep it.</div>
                     <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get a Gemini API key in Google AI Studio</a>
                 </div>
@@ -733,7 +818,8 @@
                     <label for="youtube-chat-link">VTuber mode · YouTube livestream/chat link:</label>
                     <input id="youtube-chat-link" type="text" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
                     <label class="toggle-label"><input id="vtuber-chat-enabled" type="checkbox" checked>Answer selected viewers aloud</label>
-                    <label class="toggle-label"><input id="vtuber-screen-enabled" type="checkbox" checked>Include occasional screen reactions</label>
+                    <label class="toggle-label"><input id="vtuber-screen-enabled" type="checkbox" checked>React to gameplay and screen events</label>
+                    <p class="modal-hint">Starting AI VTuber automatically enables Screen viewing and reactions. In a browser, choose the screen to share. You can turn Screen off at any time.</p>
                     <div class="save-actions"><button id="vtuber-start-btn" type="button">Start AI VTuber mode</button><button id="vtuber-stop-btn" type="button">Stop AI VTuber</button></div>
                     <span id="vtuber-status" role="status" class="modal-hint">Off · voice replies only, no messages posted to YouTube</span>
                     <span class="modal-hint">Uses public live chat. Answers are paced; old messages and repeated spam are skipped. Screen access follows the Screen toggle.</span>
@@ -741,6 +827,18 @@
                 <div class="setting-group">
                     <label for="assistant-name-input">🌸 Assistant Name:</label>
                     <input type="text" id="assistant-name-input" placeholder="e.g. Sakura, Jarvis, Friday, Miku" autocomplete="off">
+                </div>
+
+                <div class="setting-group">
+                    <label for="vtuber-name-input">VTuber Name (AI VTuber mode):</label>
+                    <input type="text" id="vtuber-name-input" maxlength="80" placeholder="e.g. Sakura" autocomplete="off">
+                    <p class="modal-hint">Her stage name for stream chat and gameplay reactions. Saved separately from Assistant Name and Wake Word Phrase.</p>
+                </div>
+
+                <div class="setting-group">
+                    <label for="avatar-presentation">Avatar self-presentation:</label>
+                    <select id="avatar-presentation"><option value="auto">Auto · use visible avatar when Screen is on</option><option value="feminine">Feminine</option><option value="masculine">Masculine</option><option value="neutral">Neutral</option></select>
+                    <p class="modal-hint">Controls how the assistant refers to herself or himself, including Hindi grammar. This describes the avatar, not you.</p>
                 </div>
 
                 <div class="setting-group">
@@ -790,7 +888,7 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=live2d-speed28"></script>
+    <script type="module" src="/static/js/app.js?v=phone-game67"></script>
 </body>
 </html>
 

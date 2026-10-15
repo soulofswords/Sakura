@@ -43,7 +43,7 @@ export function installCustomExpressions(getViewer,getKey,refreshCards) {
     document.getElementById('custom-expression-new').onclick=()=>open();
     document.getElementById('custom-expression-cancel').onclick=()=>{clearPreview();form.classList.add('hidden');};
     document.getElementById('custom-expression-preview').onclick=()=>{
-        const v=getViewer();if(!v?.vtuberTrackingMode){status.textContent='Enable VTuber mode to preview expressions.';return;}
+        const v=getViewer();if(!v||v.areAiExpressionsAutomatic?.()){status.textContent='Turn Reactions off to preview expressions manually.';return;}
         clearPreview();const expression=definition();v.customExpressions ||= {};v.customExpressions[previewId]=expression;
         v.manualExpressions ||= new Map();v.manualExpressions.set(previewId,1);
         if(v.live2d){v.live2d.expressions.set(previewId,{Parameters:expression.parameters.map(p=>({Id:p.id,Value:p.value,Blend:'Overwrite'}))});v.live2d.setExpression(previewId,1);}

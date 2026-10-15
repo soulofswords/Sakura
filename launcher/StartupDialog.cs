@@ -13,6 +13,8 @@ sealed class StartupDialog : Form {
  readonly TextBox keyBox;
  readonly Label keyHint;
  readonly Panel keyFrame;
+ readonly ComboBox apiProvider;
+ readonly TextBox cloudModel;
  static readonly Color Background = Color.FromArgb(12,15,26);
  static readonly Color Muted = Color.FromArgb(145,155,180);
  static readonly Color Cyan = Color.FromArgb(97,225,235);
@@ -34,20 +36,23 @@ sealed class StartupDialog : Form {
   Controls.Add(LabelAt("CHOOSE YOUR EXPERIENCE",32,59,500,23,9,Cyan,FontStyle.Bold));
   Controls.Add(LabelAt("Welcome to Sakura",30,86,555,48,28,Color.FromArgb(242,245,255),FontStyle.Bold));
   Controls.Add(LabelAt("One companion. Three ways to connect.",33,137,550,26,11,Muted,FontStyle.Regular));
-  Controls.Add(LabelAt("GEMINI API KEY",33,183,550,22,9,Muted,FontStyle.Bold));
+  Controls.Add(LabelAt("CLOUD API KEY",33,183,230,22,9,Muted,FontStyle.Bold));
+  apiProvider=new ComboBox {Location=new Point(320,179),Size=new Size(268,27),DropDownStyle=ComboBoxStyle.DropDownList,BackColor=Background,ForeColor=Color.White,AccessibleName="API provider"};
+  apiProvider.Items.AddRange(new object[]{"Auto-detect key","Google Gemini","OpenAI","Anthropic Claude","DeepSeek","OpenRouter","Groq","xAI"});apiProvider.SelectedIndex=0;Controls.Add(apiProvider);
 
   keyFrame=new Panel {Location=new Point(32,210),Size=new Size(556,42),BackColor=Color.FromArgb(21,27,44)};
   keyFrame.Paint+=(s,e)=>{using(var pen=new Pen(keyBox.Focused?Cyan:Color.FromArgb(48,59,82)))e.Graphics.DrawRectangle(pen,0,0,keyFrame.Width-1,keyFrame.Height-1);};
   keyBox=new TextBox {Location=new Point(14,11),Size=new Size(528,24),BorderStyle=BorderStyle.None,
    BackColor=keyFrame.BackColor,ForeColor=Color.FromArgb(230,236,250),UseSystemPasswordChar=true,
-   AccessibleName="Gemini API key. Leave blank to use your saved key.",TabIndex=0};
+   AccessibleName="Cloud API key. Leave blank to use your saved provider and key.",TabIndex=0};
   keyBox.Enter+=(s,e)=>keyFrame.Invalidate(); keyBox.Leave+=(s,e)=>keyFrame.Invalidate();
   keyFrame.Controls.Add(keyBox); Controls.Add(keyFrame);
-  keyHint=LabelAt("Leave blank to use your saved key. Only needed for Gemini.",33,258,550,23,9,Muted,FontStyle.Regular);
+  keyHint=LabelAt("Blank keeps saved key. Model ID (optional):",33,258,350,28,8,Muted,FontStyle.Regular);
   Controls.Add(keyHint);
+  cloudModel=new TextBox {Location=new Point(393,258),Size=new Size(195,24),BackColor=Background,ForeColor=Color.White,BorderStyle=BorderStyle.FixedSingle,AccessibleName="Cloud model ID"};Controls.Add(cloudModel);
 
   string[] modes={"gemini","local","vtuber"};
-  string[] titles={"Gemini","Local LLM","VTuber"};
+  string[] titles={"Cloud API","Local LLM","VTuber"};
   string[] descriptions={"Cloud AI companion · Use your API key","On-device AI companion · Run on this PC","Face + hand tracking · No AI models loaded"};
   string[] tags={"CLOUD","LOCAL","TRACKING"};
   Color[] accents={Cyan,Color.FromArgb(180,153,255),Color.FromArgb(245,144,196)};
@@ -67,16 +72,26 @@ sealed class StartupDialog : Form {
   discord.LinkClicked+=(s,e)=>Process.Start(new ProcessStartInfo((string)e.Link.LinkData){UseShellExecute=true});
   Controls.Add(discord);
   Controls.Add(LabelAt("You can change your AI provider later in Settings.",33,667,550,22,9,Muted,FontStyle.Regular));
-  Shown+=(s,e)=>ActiveControl=firstModeCard;
+  Shown+=(s,e)=>{BringToFront();Activate();ActiveControl=firstModeCard;};
  }
  void SelectMode(string mode) {
   if(mode=="local" && !LocalModelDialog.Installed(project)) {
    if(MessageBox.Show(this,"Are you sure you want to run Local LLM? This downloads an optional runtime and Qwen model to Sakura's folder.","Set up local AI",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
    using(var setup=new LocalModelDialog(project))if(setup.ShowDialog(this)!=DialogResult.OK)return;
   }
-  if(mode=="gemini" && keyBox.Text.Trim().Length==0 && !File.Exists(Path.Combine(project,".gemini-key.bin"))) {
-   keyHint.Text="Enter a Gemini API key to continue."; keyHint.ForeColor=Color.FromArgb(255,151,177);
+  if(mode=="gemini" && keyBox.Text.Trim().Length==0 && !File.Exists(Path.Combine(project,".gemini-key.bin")) && !File.Exists(Path.Combine(project,".cloud-keys.bin"))) {
+   keyHint.Text="Enter an API key to continue."; keyHint.ForeColor=Color.FromArgb(255,151,177);
    keyBox.Focus(); return;
+  }
+  if(mode=="gemini" && keyBox.Text.Trim().Length>0) {
+   string key=keyBox.Text.Trim();string[] providers={"auto","gemini","openai","anthropic","deepseek","openrouter","groq","xai"};string provider=providers[apiProvider.SelectedIndex];
+   if(provider=="auto") {
+    if(key.StartsWith("AIza"))provider="gemini";else if(key.StartsWith("sk-ant-"))provider="anthropic";else if(key.StartsWith("sk-or-"))provider="openrouter";else if(key.StartsWith("sk-proj-")||key.StartsWith("sk-svcacct-"))provider="openai";else if(key.StartsWith("gsk_"))provider="groq";else if(key.StartsWith("xai-"))provider="xai";
+    else {keyHint.Text="Ambiguous key. Select its provider above.";keyHint.ForeColor=Color.FromArgb(255,151,177);return;}
+   }
+   if((provider=="groq"||provider=="xai"||provider=="openrouter")&&cloudModel.Text.Trim().Length==0){keyHint.Text="Enter this provider's model ID on the right.";return;}
+   Environment.SetEnvironmentVariable("SAKURA_START_API_PROVIDER",provider);
+   Environment.SetEnvironmentVariable("SAKURA_START_CLOUD_MODEL",cloudModel.Text.Trim());
   }
   SelectedMode=mode; ApiKey=mode=="gemini"?keyBox.Text.Trim():""; DialogResult=DialogResult.OK; Close();
  }

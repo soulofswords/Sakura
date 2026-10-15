@@ -25,6 +25,16 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(run_command('what time is it').startswith("It's "))
         self.assertIsNone(run_command('tell me about cats'))
 
+    def test_natural_time_requests(self):
+        for phrase in ["Can you tell me what time it is?", 'What is the time now?',
+                       'Hey Luna, please tell me the current time.', 'Say the time',
+                       "What's the time right now?"]:
+            with self.subTest(phrase=phrase):
+                self.assertTrue(run_command(phrase,False,'Luna').startswith("It's "))
+        for phrase in ['what time does the movie start', 'tell me about time travel',
+                       'say time flies']:
+            self.assertIsNone(run_command(phrase))
+
     def test_spoken_youtube_requests(self):
         with patch('assistant_commands.webbrowser.open', return_value=True) as browser:
             for phrase in ['Ok then, what can you open youtube?', 'Okay, can you open YouTube?', 'Hey Sakura, please open you tube.']:

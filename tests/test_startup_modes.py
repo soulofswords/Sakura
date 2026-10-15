@@ -14,6 +14,7 @@ class StartupModeTests(unittest.TestCase):
         model.warmup.return_value = None
         model.configure_local.return_value = None
         with patch.dict(os.environ, {'SAKURA_DESKTOP':'1', 'SAKURA_START_MODE':mode,
+                                    'SAKURA_START_API_PROVIDER':'gemini',
                                     'SAKURA_START_GEMINI_KEY':'synthetic-test-key' if mode=='gemini' else ''}), \
              patch.object(app, 'get_settings', return_value=config), \
              patch.object(app, 'save_settings', return_value=config) as save, \
@@ -31,6 +32,8 @@ class StartupModeTests(unittest.TestCase):
                     self.assertIsNone(app.app.state.llm_warmup)
                     self.assertEqual(client.post('/api/chat', json={'text':'hello'}).status_code, 409)
                 self.assertEqual(save.call_args.args[0]['vtuber_tracking_only'], tracking)
+                if mode=='local':
+                    self.assertIs(save.call_args.args[0]['gemini_fallback_enabled'],False)
                 if mode=='gemini':
                     protect.assert_called_once_with('synthetic-test-key')
                     model.configure_provider.assert_called_once_with('gemini', config['gemini_model'], 'synthetic-test-key')

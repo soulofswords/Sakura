@@ -6,9 +6,11 @@ let decodeImpl = async () => ({});
 let amplitude = 0.012;
 const frames = new Map(); let frameId = 0;
 const sources = [];
+const sinkCalls=[];
 class AudioContext {
     state = 'suspended'; sampleRate = 48000; currentTime = 0; destination = {};
     async resume() { this.state = 'running'; }
+    async setSinkId(deviceId) { sinkCalls.push(deviceId); }
     decodeAudioData(buffer) { return decodeImpl(buffer); }
     createBufferSource() {
         const source = { started: false, stopped: false, connect() {}, disconnect() {},
@@ -37,6 +39,11 @@ function frame(delta) {
     frames.delete(id); sync.audioContext.currentTime += delta; fn();
 }
 (async () => {
+    await sync.setAudioOutput('headphones');
+    await sync._ensureAudioContext();await sync._ensureAudioContext();
+    assert.deepEqual(sinkCalls,['headphones'],'Speech reuses the output route instead of resetting the audio device');
+    await sync.setAudioOutput('');await sync._ensureAudioContext();
+    assert.deepEqual(sinkCalls,['headphones',''],'Explicit default-output change still works');
     // Quiet converted audio and louder speech should animate consistently.
     const clip = level => ({ sampleRate: 16000, getChannelData: () =>
         Float32Array.from({ length: 1600 }, (_, i) => i < 800 ? level : 0) });

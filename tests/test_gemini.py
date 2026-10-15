@@ -8,6 +8,19 @@ import credentials
 from llm import LLM
 
 class GeminiTests(unittest.TestCase):
+    def test_slow_api_fails_once_without_saving_fake_reply(self):
+        import requests
+        with tempfile.TemporaryDirectory() as folder:
+            model = LLM(Path(folder)/'memory.json')
+            model.configure_provider('gemini', api_key='synthetic-key')
+            with patch('llm.requests.post', side_effect=requests.Timeout) as post:
+                reply = model.chat('hello')
+                self.assertIn('took too long', reply)
+                self.assertNotIn('synthetic-key', reply)
+                self.assertEqual(model.history, [])
+                post.assert_called_once()
+                self.assertEqual(post.call_args.kwargs['timeout'], (5, 45))
+
     def test_windows_key_protection(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(credentials, 'KEY_FILE', Path(folder)/'key.bin'):
             credentials.set_gemini_key('synthetic-key-for-tests')
@@ -89,10 +102,10 @@ class GeminiTests(unittest.TestCase):
             busy = Mock(ok=False, status_code=503, headers={})
             success = Mock(ok=True)
             success.json.return_value = {'candidates':[{'content':{'parts':[{'text':'Hello'}]}}]}
-            with patch('llm.requests.post', side_effect=[busy, busy, success]) as post, patch('llm.time.sleep') as sleep:
+            with patch('llm.requests.post', side_effect=[busy, success]) as post, patch('llm.time.sleep') as sleep:
                 self.assertEqual(llm.chat('hello'), 'Hello')
-                self.assertEqual(post.call_count, 3)
-                self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4])
+                self.assertEqual(post.call_count, 2)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [1])
                 self.assertEqual(len(llm.history), 2)
 
     def test_persistent_overload_has_clear_error_and_no_fake_memory(self):
@@ -103,8 +116,8 @@ class GeminiTests(unittest.TestCase):
                 reply = llm.chat('hello')
                 self.assertIn('temporarily busy', reply)
                 self.assertNotIn('Check your key', reply)
-                self.assertEqual(post.call_count, 3)
-                self.assertEqual([call.args[0] for call in sleep.call_args_list], [10, 10])
+                self.assertEqual(post.call_count, 2)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [2])
                 self.assertEqual(llm.history, [])
 
     def test_invalid_key_is_not_retried(self):

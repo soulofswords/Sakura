@@ -11,7 +11,7 @@ export default class ContinuousMic {
         const generation = this.generation;
         const stream = await navigator.mediaDevices.getUserMedia({ audio: {
             ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-            echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+            echoCancellation: true, noiseSuppression: true, autoGainControl: false,
         } });
         if (generation !== this.generation) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
@@ -31,7 +31,8 @@ export default class ContinuousMic {
         const recorder = new MediaRecorder(this.stream);
         this.recorder = recorder;
         const chunks = [];
-        let speechMs = 0, lastVoice = 0;
+        let speechMs = 0, lastVoice = 0, consecutiveVoice = 0;
+        let noiseFloor = .003;
         const started = performance.now();
         const samples = new Float32Array(this.analyser.fftSize);
         this.onStatus('Listening…');
@@ -39,7 +40,7 @@ export default class ContinuousMic {
         recorder.onstop = async () => {
             clearInterval(this.timer);
             if (!this.enabled || generation !== this.generation) return;
-            if (speechMs >= 200 && chunks.length) {
+            if (speechMs >= 350 && chunks.length) {
                 this.onStatus('Preparing reply…');
                 // No recorder runs while recognizing/generating/playing a reply.
                 try { await this.onUtterance(new Blob(chunks, { type: recorder.mimeType })); }
@@ -53,14 +54,20 @@ export default class ContinuousMic {
             this.analyser.getFloatTimeDomainData(samples);
             const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
             const now = performance.now();
-            if (rms > 0.012) {
+            const threshold = Math.max(.012, noiseFloor * 3);
+            if (rms > threshold) {
+                consecutiveVoice += 50;
                 speechMs += 50;
                 lastVoice = now;
                 this.onStatus('Hearing you…');
+            } else {
+                if(consecutiveVoice < 150)speechMs=Math.max(0,speechMs-consecutiveVoice);
+                consecutiveVoice=0;
+                noiseFloor += (Math.min(rms,.02)-noiseFloor)*.04;
             }
             // Wait for a full pause, not the gaps between individual words.
-            if ((speechMs >= 200 && now - lastVoice > 1100) ||
-                (!speechMs && now - started > 5000)) recorder.stop();
+            if ((speechMs >= 350 && now - lastVoice > 700) ||
+                (now - started > 5000 && speechMs < 350) || now-started>20000) recorder.stop();
         }, 50);
     }
 

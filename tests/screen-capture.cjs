@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 let image = '/9j/test';
 let allowed = false;
-const context = {window:{pywebview:{api:{
+const context = {setInterval(){return 1;},clearInterval(){},window:{pywebview:{api:{
     set_screen_access: async value => {allowed=value;return value;},
     screen_snapshot: async () => image,
 }}},document:{createElement:()=>({})}};

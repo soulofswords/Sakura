@@ -5,6 +5,10 @@ export default class ScreenShare {
         this.video = null;
         this.generation = 0;
         this.starting = false;
+        this.frames = [];
+        this.observationSamples = [];
+        this.frameTimer = null;
+        this.frameBusy = false;
         this.canvas = document.createElement('canvas');
     }
 
@@ -24,8 +28,10 @@ export default class ScreenShare {
                     throw new Error('Desktop screen capture returned no image. Turn Screen on again.');
                 }
                 this.desktopEnabled = true;
+                this._remember(image);
                 this.starting = false;
                 this.onChange(true, false);
+                this._startCapture(generation);
             } catch (error) {
                 if (generation === this.generation) this.stop();
                 throw error;
@@ -42,7 +48,7 @@ export default class ScreenShare {
         try {
             // This call stays directly in the click handler for browser permission.
             stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { frameRate: { ideal: 1, max: 5 } }, audio: false,
+                video: { frameRate: { ideal: 30, max: 30 } }, audio: false,
             });
             if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
             this.stream = stream;
@@ -57,6 +63,7 @@ export default class ScreenShare {
             if (generation !== this.generation) return;
             this.starting = false;
             this.onChange(true, false);
+            this._startCapture(generation);
         } catch (err) {
             stream?.getTracks().forEach(track => track.stop());
             if (generation !== this.generation) return;
@@ -65,7 +72,55 @@ export default class ScreenShare {
         }
     }
 
+    _remember(image) {
+        const now=Date.now();
+        this.frames.push({image, time: now});
+        this.frames = this.frames.filter(frame => Date.now() - frame.time < 2500).slice(-8);
+        if(!this.observationSamples.length||now-this.observationSamples.at(-1).time>=6000){
+            this.observationSamples.push({image,time:now});
+        }
+        this.observationSamples=this.observationSamples.filter(frame=>now-frame.time<22000).slice(-4);
+    }
+
+    observationFrames(){
+        if(!this.enabled)return [];
+        const frames=this.observationSamples.filter(frame=>Date.now()-frame.time<22000);
+        return frames.length>3?[frames[0].image,frames[Math.floor(frames.length/2)].image,frames.at(-1).image]:frames.map(f=>f.image);
+    }
+
+    _startCapture(generation) {
+        clearInterval(this.frameTimer);
+        this.frameTimer = setInterval(async () => {
+            if (!this.enabled || generation !== this.generation || this.frameBusy) return;
+            this.frameBusy = true;
+            try {
+                const image = await this._captureFrame();
+                if (image && generation === this.generation && this.enabled) this._remember(image);
+            } catch (_) {
+                if (generation === this.generation) this.stop();
+            } finally { this.frameBusy = false; }
+        }, 333);
+    }
+
+    recentFrames() {
+        if (!this.enabled) return [];
+        const recent = this.frames.filter(frame => Date.now() - frame.time < 2500);
+        if (recent.length <= 3) return recent.map(frame => frame.image);
+        return [recent[0].image, recent[Math.floor(recent.length / 2)].image, recent.at(-1).image];
+    }
+
     async snapshot() {
+        if (!this.enabled) return null;
+        const generation = this.generation;
+        const newest = this.frames.at(-1);
+        if (newest && Date.now() - newest.time < 1500) return newest.image;
+        const image = await this._captureFrame();
+        if (generation !== this.generation || !this.enabled) return null;
+        if (image) this._remember(image);
+        return image;
+    }
+
+    async _captureFrame() {
         if (!this.enabled) return null;
         if (this.desktopEnabled) {
             const image = await window.pywebview.api.screen_snapshot();
@@ -90,6 +145,10 @@ export default class ScreenShare {
 
     stop() {
         ++this.generation;
+        clearInterval(this.frameTimer);
+        this.frameTimer = null;
+        this.frames = [];
+        this.observationSamples = [];
         this.desktopEnabled = false;
         window.pywebview?.api?.set_screen_access?.(false);
         this.stream?.getTracks().forEach(track => track.stop());

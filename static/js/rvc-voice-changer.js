@@ -16,7 +16,7 @@ export default class RvcVoiceChanger {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone capture is unavailable in this window.');
         const stream = await navigator.mediaDevices.getUserMedia({audio: {
             ...(deviceId ? {deviceId: {exact: deviceId}} : {}),
-            echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+            echoCancellation: true, noiseSuppression: true, autoGainControl: false,
         }});
         this.stream = stream;
         this.context = new (window.AudioContext || window.webkitAudioContext)({latencyHint: 'interactive'});

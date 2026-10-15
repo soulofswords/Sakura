@@ -1,11 +1,4 @@
-"""
-🔊 Text-to-Speech — multiple backends.
-
-Backends
---------
-edge-tts   : Works immediately, no setup. Cute but generic voices.
-gpt-sovits : Clone any anime character's voice. Needs separate setup.
-"""
+"""Local Kokoro speech, optional installed system voices and RVC conversion."""
 import asyncio
 import time
 import concurrent.futures
@@ -13,11 +6,15 @@ import os
 import uuid
 import copy
 import re
+from pathlib import Path
 from config import (
-    TTS_BACKEND, EDGE_TTS_VOICE, EDGE_TTS_VOICE_HINDI, EDGE_TTS_VOICE_HINGLISH,
-    EDGE_TTS_RATE, EDGE_TTS_PITCH, GPT_SOVITS_URL, AUDIO_DIR, VOICES_DIR,
+    TTS_BACKEND, KOKORO_VOICE, DEFAULT_VOICE_ID, canonical_voice_id,
+    TTS_RATE, TTS_PITCH, GPT_SOVITS_URL, AUDIO_DIR, VOICES_DIR,
     VOICE_PRESETS, RVC_SERVER_URL, RVC_PITCH, RVC_INDEX_RATE,
 )
+
+def speech_notice(path):
+    return None
 
 
 def _run_coroutine_safely(fn, *args, **kwargs):
@@ -53,10 +50,10 @@ class TextToSpeech:
         self.backend = TTS_BACKEND
 
         # Current active voice and speech modulation
-        self.current_voice = EDGE_TTS_VOICE
-        self.current_rate = EDGE_TTS_RATE
-        self.current_pitch = EDGE_TTS_PITCH
-        self.selected_preset_id = "sakura_ava"
+        self.current_voice = KOKORO_VOICE
+        self.current_rate = TTS_RATE
+        self.current_pitch = TTS_PITCH
+        self.selected_preset_id = DEFAULT_VOICE_ID
 
         # RVC Settings (.pth and .index)
         self.rvc_model = None
@@ -67,16 +64,20 @@ class TextToSpeech:
         # Browser playback does not need a second native audio device.
         self._pygame = None
 
-        if self.backend == "edge-tts":
-            print(f"  🔊 TTS ready (Edge-TTS · {self.current_voice})")
-        else:
-            print(f"  🔊 TTS ready (GPT-SoVITS · {GPT_SOVITS_URL})")
+        print(f"  TTS ready (local Kokoro · {self.current_voice}; loaded on first use)")
 
     # ── Configuration / Voice Switching API ────────────────────
     def set_voice_preset(self, preset_id: str, custom_pitch: str = None, custom_rate: str = None):
         """Switch to one of the 10 voice presets or a custom voice."""
-        if preset_id == 'nanami_japanese': preset_id = 'libby_english'
+        preset_id = canonical_voice_id(preset_id)
         self.selected_preset_id = preset_id
+
+        if preset_id.startswith('system_'):
+            self.current_voice=preset_id
+            self.current_rate=custom_rate or '+0%'
+            self.current_pitch=custom_pitch or '+0Hz'
+            self.rvc_model=None;self.rvc_index=None
+            return
 
         # Check if it's one of the built-in presets
         preset = next((p for p in VOICE_PRESETS if p["id"] == preset_id), None)
@@ -90,11 +91,12 @@ class TextToSpeech:
         elif preset_id.startswith("rvc_") or (preset and preset["voice"] == "rvc"):
             # RVC voice requested
             self.selected_preset_id = preset_id
-            self.current_voice = EDGE_TTS_VOICE
+            self.current_voice = KOKORO_VOICE
             print(f"  🎭 Switched to RVC Voice Mode ({preset_id})")
         else:
-            # Fallback direct voice name
-            self.current_voice = preset_id
+            # Unknown legacy cloud selections migrate to the local default.
+            self.selected_preset_id = DEFAULT_VOICE_ID
+            self.current_voice = KOKORO_VOICE
             self.rvc_model = None
             self.rvc_index = None
             if custom_rate: self.current_rate = custom_rate
@@ -116,8 +118,10 @@ class TextToSpeech:
         if not text:
             return
 
-        if self.backend == "edge-tts":
-            self._speak_edge(text)
+        if self.selected_preset_id.startswith('system_'):
+            self._play(self._generate_system(text))
+        elif self.backend == "kokoro":
+            self._play(_run_coroutine_safely(self._generate_kokoro_async,text))
         elif self.backend == "gpt-sovits":
             self._speak_sovits(text)
 
@@ -132,8 +136,10 @@ class TextToSpeech:
             return None
 
         voice = copy.copy(self)
-        if voice.backend == "edge-tts":
-            out_file = await voice._generate_edge_async(text)
+        if voice.selected_preset_id.startswith('system_'):
+            return await asyncio.to_thread(voice._generate_system, text)
+        elif voice.backend == "kokoro":
+            out_file = await voice._generate_kokoro_async(text)
             if voice.rvc_model:
                 out_file = await asyncio.to_thread(voice._apply_rvc_conversion, out_file)
             return out_file
@@ -177,34 +183,31 @@ class TextToSpeech:
         raise RuntimeError('The RVC converter did not return valid audio. Check the conversion service '
                            'or choose a built-in voice in Settings > Voice.')
 
-    # ── Edge-TTS ───────────────────────────────────────────────
-    def _pick_voice(self, text: str) -> str:
-        # Respect the voice the user chose, including for Hindi/Hinglish speech.
+    # ── Local Kokoro ───────────────────────────────────────────
+    def _pick_voice(self,text):
         return self.current_voice
 
-    async def _generate_edge_async(self, text: str) -> str:
-        """Generate audio file via Edge-TTS asynchronously, return path."""
-        import edge_tts
+    async def _generate_kokoro_async(self,text):
+        from kokoro_speech import render_speech
+        preset=next((p for p in VOICE_PRESETS if p['id']==self.selected_preset_id),None)
+        if not preset or preset['voice']=='rvc':
+            preset=next(p for p in VOICE_PRESETS if p['id']==DEFAULT_VOICE_ID)
+        out=AUDIO_DIR / f"response_kokoro_{uuid.uuid4().hex}.wav"
+        return await asyncio.to_thread(render_speech,text,out,voice=self.current_voice,
+            language=preset['language'],locale=preset['kokoro_language'],rate=self.current_rate)
 
-        out = str(AUDIO_DIR / f"response_{uuid.uuid4().hex}.mp3")
-        voice = self._pick_voice(text)
-
-        comm = edge_tts.Communicate(
-            text,
-            voice,
-            rate=self.current_rate,
-            pitch=self.current_pitch,
-        )
-        await comm.save(out)
-        return out
-
-    def _generate_edge(self, text: str) -> str:
-        """Synchronous wrapper for _generate_edge_async."""
-        return _run_coroutine_safely(self._generate_edge_async, text)
-
-    def _speak_edge(self, text: str):
-        out = self._generate_edge(text)
-        self._play(out)
+    def _generate_system(self, text):
+        from system_speech import render_system_speech, system_voice_presets
+        native=self.selected_preset_id.startswith('system_')
+        presets=system_voice_presets() if native else VOICE_PRESETS
+        preset = next((p for p in presets if p['id'] == self.selected_preset_id), {})
+        if native and not preset:raise RuntimeError('The selected Offline voice is no longer installed. Choose another voice in Settings.')
+        gender = preset.get('gender', 'Female')
+        if gender not in {'Male', 'Female'}:
+            gender = 'Female'
+        prefix='response_offline_' if native else 'response_system_'
+        return render_system_speech(text, AUDIO_DIR / f'{prefix}{uuid.uuid4().hex}.wav',
+            language=preset.get('language', 'English'), gender=gender, rate=self.current_rate, voice=preset.get('system_name'))
 
     # ── GPT-SoVITS ─────────────────────────────────────────────
     def _generate_sovits(self, text: str) -> str:
@@ -223,8 +226,8 @@ class TextToSpeech:
             return out
 
         except requests.ConnectionError:
-            print("  ⚠️  GPT-SoVITS offline — falling back to Edge-TTS")
-            return self._generate_edge(text)
+            print("  ⚠️  GPT-SoVITS offline — falling back to local Kokoro")
+            return _run_coroutine_safely(self._generate_kokoro_async,text)
 
     def _speak_sovits(self, text: str):
         out = self._generate_sovits(text)

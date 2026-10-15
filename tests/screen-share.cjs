@@ -3,7 +3,7 @@ const fs = require('node:fs'); const vm = require('node:vm');
 let stream;
 let capture = async () => stream;
 let draws = 0;
-const context = {
+const context = {setInterval(){return 1;},clearInterval(){},
     window: {},
     navigator: { mediaDevices: { getDisplayMedia(options) { assert.equal(options.audio, false); return capture(); } } },
     document: { createElement(type) {

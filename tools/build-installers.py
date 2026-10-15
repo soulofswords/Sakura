@@ -14,8 +14,10 @@ import uuid
 import zipfile
 import zlib
 import argparse
+import sys
 
 BASE = Path(__file__).resolve().parents[1]
+if str(BASE) not in sys.path:sys.path.insert(0,str(BASE))
 OUT = Path('C:/AI/Installer ready')
 BUILD = BASE / 'tools/installer-build'
 CSC = Path('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe')
@@ -25,7 +27,8 @@ INSTALLER_FILE='Sakura-Setup-Windows-x64.exe'
 MAC_NAME='Sakura Installer'
 DMG_FILE='Sakura-Setup-macOS-Apple-Silicon.dmg'
 MAC_README=None
-DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'sakura_ava',
+PROTECT_RELEASE=True
+DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'kokoro_af_heart',
             'ollama_model': 'qwen3-vl:2b-instruct', 'ollama_context': 2048,
             'ollama_models_folder': 'llm-models', 'computer_control_enabled': False,
             'screen_enabled': False, 'screen_reactions_enabled': False,
@@ -42,6 +45,14 @@ def compile_cs(output, files, references=(), resource=None):
     subprocess.run(args + [str(CS_DIR / file) for file in files], check=True)
 
 def app_files():
+    from kokoro_speech import ASSETS, _hash
+    for name, (size,digest) in ASSETS.items():
+        path=BASE/'kokoro-assets'/name
+        if not path.is_file() or path.stat().st_size!=size or _hash(path)!=digest:
+            raise RuntimeError('Kokoro speech assets are missing or invalid. Run tools/install-kokoro.py before building.')
+        yield path,'Sakura/kokoro-assets/'+name
+    for name in ('KOKORO-LICENSE.txt','KOKORO-ONNX-LICENSE.txt','ATTRIBUTION.txt'):
+        yield BASE/'docs'/(Path(name).stem+'.md'),'Sakura/kokoro-assets/'+name
     for file in BASE.glob('*.py'):
         yield file, 'Sakura/' + file.name
     for name in ('requirements.txt','requirements-macos.txt','run-macos.command',
@@ -59,14 +70,20 @@ def app_files():
 def windows():
     print('Building Windows payload…', flush=True)
     from build_bytecode import compile_application
-    bytecode_files = compile_application(BUILD/'application-bytecode')
+    bytecode_files = [] if PROTECT_RELEASE else compile_application(BUILD/'application-bytecode')
+    records=list(app_files())
+    if PROTECT_RELEASE:
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('release_protection',BASE/'tools/release-protection.py')
+        protection=importlib.util.module_from_spec(spec);spec.loader.exec_module(protection)
+        records=list(protection.protected_files(records,BUILD/'protection'))
     compile_cs(BUILD/LAUNCHER_FILE, ['Launcher.cs','StartupDialog.cs','LocalModelDialog.cs'], ['System.Web.Extensions'])
     compile_cs(BUILD/'Uninstall.exe',['Uninstall.cs'])
     payload=BUILD/'windows-payload.zip'; manifest=[]
     with zipfile.ZipFile(payload,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as output:
         def add(path,name):
             output.write(path,name);manifest.append(hashlib.sha256(path.read_bytes()).hexdigest()+'\t'+name)
-        for path,name in app_files(): add(path,name)
+        for path,name in records: add(path,name)
         # The Windows native comparison editor includes its companion DLLs,
         # plugins and original documentation. Never include character files.
         editor_root=BASE/'tools/pmx-editor'
@@ -92,11 +109,12 @@ def windows():
             relative=path.relative_to(packages)
             if any(part in ('__pycache__','.pytest_cache','tests','test','datasets') for part in relative.parts):continue
             if relative.parts[0].startswith(('pytest','_pytest','pycdlib','onnxruntime-dml')):continue
+            if relative.parts[0].startswith(('edge_tts','phonemizer_fork-')):continue
             if path.suffix.lower() in ('.pyc','.pmx','.vrm','.gguf','.safetensors','.pth'):continue
             add(path,'Sakura/runtime/Lib/site-packages/'+relative.as_posix())
         output.writestr('Sakura/settings.json',json.dumps(DEFAULTS,indent=2))
         output.writestr('Sakura/installed-files.tsv','\n'.join(manifest))
-        output.writestr('Sakura/INSTALLATION.txt','Imported characters and voices are empty. Qwen is optional and downloaded on request.\nPython and third-party library licenses are in runtime/ and each package dist-info/licenses directory.\n')
+        output.writestr('Sakura/INSTALLATION.txt','Imported characters and RVC voices are empty. Kokoro speech voices are included. Qwen is optional and downloaded on request.\nPython and third-party library licenses are in runtime/ and each package dist-info/licenses directory.\n')
     print('Compiling Windows installer…',flush=True)
     compile_cs(OUT/INSTALLER_FILE,['Installer.cs'],['System.IO.Compression','System.IO.Compression.FileSystem','System.Web.Extensions'],payload)
 
@@ -108,7 +126,7 @@ if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
 fi
 major="$(sw_vers -productVersion | cut -d. -f1)"
 if ((major < 14)); then echo "macOS 14 or newer is required."; exit 1; fi
-choice=$(/usr/bin/osascript -e 'choose from list {"Gemini API key (skip local AI)", "Local LLM (choose Qwen after setup)"} with title "Install Sakura Companion" with prompt "No character or voice models are included. Install optional local AI?" default items {"Gemini API key (skip local AI)"}')
+choice=$(/usr/bin/osascript -e 'choose from list {"Gemini API key (skip local AI)", "Local LLM (choose Qwen after setup)"} with title "Install Sakura Companion" with prompt "Kokoro speech is included. No character or RVC models are bundled. Install optional local AI?" default items {"Gemini API key (skip local AI)"}')
 if [[ "$choice" == false ]]; then exit 0; fi
 project="$HOME/Library/Application Support/Sakura Companion/Sakura"
 mkdir -p "$project"

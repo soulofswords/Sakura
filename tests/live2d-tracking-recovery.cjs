@@ -16,6 +16,19 @@ function response(fps){
     return {head:values.ParamAngleX,mouth:values.ParamMouthOpenY};
 }
 const slow=response(30),fast=response(60);assert.ok(Math.abs(slow.head-fast.head)<1e-6,'Smoothing must have the same response at 30 and 60 FPS');assert.ok(Math.abs(slow.mouth-fast.mouth)<1e-6);assert.ok(slow.mouth>.99,'Mouth responds within 100ms');
+live.filtered={};live.renderDelta=1/60;live.neutral=new THREE.Euler();
+frame({landmarks:[{}],matrix:new THREE.Matrix4().identity().toArray(),blendshapes:[]});
+for(let i=0;i<2;i++)frame({landmarks:[{}],matrix:new THREE.Matrix4().makeRotationY(.2).toArray(),blendshapes:[]});
+assert.ok(values.ParamAngleX>0&&values.ParamAngleX<.2*57.3*.6,'Default head interpolation spreads new camera packets across render frames');
+live.owner.trackingOptions={smoothing:0};live.filtered={};
+frame({landmarks:[{}],matrix:new THREE.Matrix4().identity().toArray(),blendshapes:[]});
+for(let i=0;i<2;i++)frame({landmarks:[{}],matrix:new THREE.Matrix4().makeRotationY(.2).toArray(),blendshapes:[]});
+assert.ok(values.ParamAngleX>.2*57.3*.8,'Smoothing zero retains a faster response');
+live.owner.trackingOptions={smoothing:.75};live.filtered={};
+frame({landmarks:[{}],matrix:new THREE.Matrix4().identity().toArray(),blendshapes:[]});
+for(let i=0;i<2;i++)frame({landmarks:[{}],matrix:new THREE.Matrix4().makeRotationY(.2).toArray(),blendshapes:[]});
+assert.ok(values.ParamAngleX<.2*57.3*.2,'Higher smoothing increases interpolation like the 3D retargeter');
+console.log('PASS: Live2D head uses the same smoothing range as 3D without slowing mouth signals');
 console.log('PASS: time-based Live2D smoothing at 30/60 FPS and responsive mouth');
 const source=fs.readFileSync('static/js/live2d-viewer.js','utf8');
 assert.match(source,/on\('afterMotionUpdate',\(\)=>v.applyParameters\(\)\)/,'Tracking inputs reach authored physics before visible model evaluation');

@@ -22,7 +22,11 @@ def check_windows():
         assert not any(Path(name).name in ('.gemini-key.bin','conversation-memory.json','steam-shortcuts.json') for name in names)
         assert not any(Path(name).suffix.lower() in ('.pmx','.vrm','.gguf','.pth','.pt','.safetensors') for name in names)
         import importlib.util
-        for source_name in [name for name in names if name.startswith('Sakura/') and name.count('/') == 1 and name.endswith('.py')]:
+        protected=any(name.startswith('Sakura/sakura_core') and name.endswith('.pyd') for name in names)
+        if protected:
+            assert 'Sakura/app.py' not in names and 'Sakura/llm.py' not in names
+            assert not any(name.startswith('Sakura/__pycache__/app.') for name in names)
+        for source_name in ([] if protected else [name for name in names if name.startswith('Sakura/') and name.count('/') == 1 and name.endswith('.py')]):
             cache_name = 'Sakura/__pycache__/' + Path(importlib.util.cache_from_source(Path(source_name).name)).name
             raw = archive.read(cache_name)
             assert raw[:4] == importlib.util.MAGIC_NUMBER, 'Bytecode runtime mismatch'

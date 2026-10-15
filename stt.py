@@ -2,6 +2,7 @@
 🎤 Speech-to-Text — Faster-Whisper with live mic recording.
 Records until silence is detected, then transcribes.
 """
+import threading
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
@@ -14,6 +15,7 @@ from config import (
 
 class SpeechToText:
     def __init__(self):
+        self._transcribe_lock = threading.RLock()
         from faster_whisper import WhisperModel
 
         print(f"  🎤 Loading Whisper ({WHISPER_MODEL}) on {WHISPER_DEVICE}...")
@@ -70,7 +72,11 @@ class SpeechToText:
         return np.concatenate(chunks).flatten()
 
     # ── transcription ──────────────────────────────────────────
-    def transcribe(self, audio: np.ndarray) -> str:
+    def transcribe(self, audio: np.ndarray, language=None) -> str:
+        with self._transcribe_lock:
+            return self._transcribe(audio,language)
+
+    def _transcribe(self, audio: np.ndarray, language=None) -> str:
         if audio.size == 0:
             return ""
 
@@ -81,34 +87,35 @@ class SpeechToText:
         peak = float(np.max(np.abs(audio))) if audio.size else 0.0
         if peak < 0.008:
             return ""
+        # A click can have a large peak but almost no sustained energy.
+        frames = audio[:audio.size // 320 * 320].reshape(-1, 320)
+        if not len(frames):
+            return ""
+        rms = np.sqrt(np.mean(frames * frames, axis=1))
+        if np.count_nonzero(rms > 0.003) * .02 < .30:
+            return ""
         if peak < 0.20:
             audio = np.clip(audio * (0.20 / peak), -1.0, 1.0)
 
-        # Code-switching prompt enables Whisper to seamlessly handle mid-sentence transitions between Hindi and English
-        code_switch_prompt = "Hello Sakura! नमस्ते साकुरा, arre yaar, let's write code together. Please help me with this problem."
+        # Short Hindi phrases are often misdetected as English by tiny Whisper.
+        # Pin Hindi/Hinglish microphone input to Hindi; system audio keeps auto.
         segments, info = self.model.transcribe(
             audio,
-            language=None,
-            initial_prompt=code_switch_prompt,
+            language=language if language in ('hi','en') else None,
+            task='transcribe',
             vad_filter=getattr(self, 'vad_available', False),
             vad_parameters=dict(min_silence_duration_ms=400),
             beam_size=5,
             condition_on_previous_text=False,
         )
-        text = " ".join(seg.text for seg in segments).strip()
+        text = " ".join(seg.text for seg in segments
+                        if getattr(seg, 'no_speech_prob', 0) < .6
+                        and getattr(seg, 'avg_logprob', 0) > -1.0).strip()
         if text:
             return text
 
-        # Short phrases can be discarded by VAD. Retry once without VAD so a
-        # quick greeting such as “hello, how are you?” is still recognized.
-        segments, _ = self.model.transcribe(
-            audio,
-            language="en",
-            beam_size=3,
-            condition_on_previous_text=False,
-            vad_filter=False,
-        )
-        return " ".join(seg.text for seg in segments).strip()
+        # VAD rejecting audio is not a reason to ask Whisper to invent speech.
+        return ""
 
     # ── convenience ────────────────────────────────────────────
     def listen(self) -> str:

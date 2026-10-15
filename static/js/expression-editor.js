@@ -1,4 +1,4 @@
-import {installCustomExpressions} from './custom-expressions.js?v=1';
+import {installCustomExpressions} from './custom-expressions.js?v=ai-expression52';
 import {installAutoExpressions} from './auto-expressions.js?v=1';
 export function hotkeyFor(event) {
     if (!event.code || ['ControlLeft','ControlRight','ShiftLeft','ShiftRight','AltLeft','AltRight','MetaLeft','MetaRight'].includes(event.code)) return '';
@@ -37,7 +37,8 @@ export function installExpressionEditor(getViewer, getModelKey) {
         return data;
     };
     const apply=(name,weight)=>{
-        const v=getViewer();if(!v?.vtuberTrackingMode||!v.allMorphNames.includes(name))return;
+        const v=getViewer();if(!v||!v.allMorphNames.includes(name))return;
+        if(v.areAiExpressionsAutomatic?.()){status.textContent='Reactions are on: expressions are automatic. Turn Reactions off to select expressions manually.';return;}
         v.manualExpressions ||= new Map();v.manualExpressions.set(name,weight);v.manualExpression={name,weight};
         if(v.live2d&&!v.live2d.setExpression(name,weight)){
             v.manualExpressions.delete(name);v.manualExpression=null;status.textContent='This Live2D expression could not be applied.';return;
@@ -77,7 +78,7 @@ export function installExpressionEditor(getViewer, getModelKey) {
                 }
             };
             const actions=document.createElement('div');actions.className='expression-card-actions';
-            const preview=document.createElement('button');preview.type='button';preview.textContent='Preview';preview.onclick=()=>apply(name,Number(strength.value)/100);
+            const preview=document.createElement('button');preview.type='button';preview.textContent='Preview';preview.disabled=!!getViewer()?.areAiExpressionsAutomatic?.();preview.onclick=()=>apply(name,Number(strength.value)/100);
             const assign=document.createElement('button');assign.type='button';assign.textContent='Set hotkey';assign.onclick=()=>{recordingName=name;status.textContent=`Press a shortcut for ${name}…`;};
             const remove=document.createElement('button');remove.type='button';remove.textContent='Clear hotkey';remove.onclick=()=>{const current=bindings();current[name]={...current[name],hotkey:null,weight:Number(strength.value)/100};save(current);updateShortcut(name,shortcut);};
             const off=document.createElement('button');off.type='button';off.textContent='Turn off';off.onclick=()=>deactivate(name);
@@ -87,14 +88,16 @@ export function installExpressionEditor(getViewer, getModelKey) {
             const naming=document.createElement('div');naming.className='expression-card-actions';naming.append(rename,renameButton);card.append(naming);
             if(name.startsWith('custom:')){const edit=document.createElement('button');edit.textContent='Edit';edit.onclick=()=>customEditor.open(name);const deletion=document.createElement('button');deletion.textContent='Delete custom';deletion.onclick=()=>{deactivate(name);customEditor.remove(name);};naming.append(edit,deletion);}
         }
-        status.textContent=names.length?`${names.length} imported expressions. Shortcuts work while Sakura has focus.`:'No supported expressions in the loaded model.';
+        status.textContent=getViewer()?.areAiExpressionsAutomatic?.()
+            ? 'Reactions are on: expressions are automatic. Turn Reactions off for manual previews and hotkeys.'
+            : names.length?`${names.length} imported expressions. Manual previews and hotkeys are enabled. Shortcuts work while Sakura has focus.`:'No supported expressions in the loaded model.';
     };
     customEditor=installCustomExpressions(getViewer,getModelKey,render);
     document.getElementById('expression-editor-btn').onclick=()=>{render();panel.classList.remove('hidden');};
     document.getElementById('close-expression-modal').onclick=()=>{recordingName=null;customEditor.clearPreview();panel.classList.add('hidden');};
-    document.getElementById('expression-neutral').onclick=()=>{const v=getViewer();v?.clearManualExpression();v?.manualExpressions?.clear();status.textContent='All active expressions cleared.';};
+    document.getElementById('expression-neutral').onclick=()=>{const v=getViewer();if(v?.areAiExpressionsAutomatic?.())return;v?.clearManualExpression();v?.manualExpressions?.clear();status.textContent='All active expressions cleared.';};
     window.addEventListener('keydown',event=>{
-        const v=getViewer();if(!v?.vtuberTrackingMode||event.repeat)return;
+        const v=getViewer();if(!v||event.repeat||(!recordingName&&v.areAiExpressionsAutomatic?.()))return;
         if(!recordingName&&(event.target.closest?.('input,textarea,select,[contenteditable="true"]')||!panel.classList.contains('hidden')))return;
         const code=hotkeyFor(event);if(!code)return;
         if(recordingName){
@@ -112,5 +115,6 @@ export function installExpressionEditor(getViewer, getModelKey) {
         event.preventDefault();event.stopImmediatePropagation();
         if(v.manualExpressions?.has(entry[0]))deactivate(entry[0]);else apply(entry[0],entry[1].weight);
     },true);
+    window.addEventListener('sakura-reactions-changed',()=>{if(!panel.classList.contains('hidden'))render();});
     return {refresh:render};
 }

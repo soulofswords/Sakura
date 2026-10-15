@@ -31,10 +31,12 @@ const context = {
 let source = fs.readFileSync('static/js/model-viewer.js', 'utf8')
     .replace(/^import .*;\r?\n/gm, '').replace('export default class ModelViewer', 'class ModelViewer');
 vm.runInNewContext(source + '\nthis.ModelViewer = ModelViewer; this.SmartTgaLoader = SmartTgaLoader;', context);
+vm.runInNewContext(fs.readFileSync('static/js/model-bones.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+'\nthis.ModelBones=ModelBones;',context);
 const viewer = Object.create(context.ModelViewer.prototype);
 const scene = new Set();
 Object.assign(viewer, {
     loadGeneration: 0, model: null, placeholderGroup: null,
+    repairStore: {async load(){},key(url){return url;},manual(){return [];},diagnostic(){return null;}},
     physics: { detach() {}, attach() { return { bones: 0 }; } },
     scene: { add(model) { scene.add(model); } },
     renderer: { domElement: {style: {}}, renderLists: { dispose() {} }, compileAsync: async () => {} },
@@ -63,6 +65,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     let first = mesh('Evelyn');
     const initial = viewer.loadModel('evelyn');
     await tick(); pending.get('evelyn').onLoad(first); await initial;
+    assert.ok(viewer.boneControls instanceof context.ModelBones,'Bone restoration must initialize during model load, before Settings is opened');
     const kafkaPromise = viewer.loadModel('kafka');
     assert.equal(scene.size, 0, 'Previous model removed immediately');
     for (const resource of [first.geometry, first.skeleton, first.material, first.texture]) {

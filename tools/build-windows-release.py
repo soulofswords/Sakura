@@ -148,8 +148,15 @@ class Release:
             import zipfile
             with zipfile.ZipFile(build/'windows-payload.zip') as payload:
                 for path,name in module.app_files():
-                    if hashlib.sha256(path.read_bytes()).digest()!=hashlib.sha256(payload.read(name)).digest():
+                    if getattr(module,'PROTECT_RELEASE',False) and name.startswith('Sakura/') and name.count('/')==1 and name.endswith('.py'):
+                        continue
+                    expected=build/'protection/js'/Path(name).name if getattr(module,'PROTECT_RELEASE',False) and name.startswith('Sakura/static/js/') and name.endswith('.js') else path
+                    if hashlib.sha256(expected.read_bytes()).digest()!=hashlib.sha256(payload.read(name)).digest():
                         raise RuntimeError('Source changed during build: '+str(path)+'. Run the builder again after saving your changes.')
+                if getattr(module,'PROTECT_RELEASE',False):
+                    core=next((BASE/'tools/protected-build/native').glob('sakura_core*.pyd'))
+                    if hashlib.sha256(core.read_bytes()).digest()!=hashlib.sha256(payload.read('Sakura/'+core.name)).digest():
+                        raise RuntimeError('Native application core changed during packaging.')
             self.entries.append(self.stage)
             self.stage='Publish verified installer'
             artifact=stage/'Sakura-Setup-Windows-x64.exe'

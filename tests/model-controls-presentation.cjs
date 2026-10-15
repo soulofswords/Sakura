@@ -1,18 +1,26 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-let frames=[],renders=0,removed=0,copies=0;
+let frames=[],renders=0,removed=0,copies=0,held=false;
 const source=fs.readFileSync('static/js/model-viewer.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export default class ModelViewer','class ModelViewer');
 const context={THREE:{Loader:class{},MOUSE:{PAN:2,ROTATE:0},TOUCH:{PAN:1}},requestAnimationFrame:cb=>frames.push(cb),document:{createElement:()=>({style:{},getContext:()=>({drawImage(){copies++;}}),remove(){removed++;}})}};
 vm.runInNewContext(source+'\nthis.Viewer=ModelViewer;',context);
 const v=Object.create(context.Viewer.prototype);
-Object.assign(v,{model:{},renderer:{domElement:{width:800,height:600}},container:{appendChild(){}},controls:{mouseButtons:{},touches:{}},_renderFrame(){renders++;},_applyTrackingRestPose(){},clearManualExpression(){},setMorph(){}});
+Object.assign(v,{model:{},renderer:{domElement:{width:800,height:600}},container:{appendChild(){},classList:{add(){held=true;},remove(){held=false;}}},controls:{mouseButtons:{},touches:{}},_renderFrame(){renders++;},_applyTrackingRestPose(){},clearManualExpression(){},setMorph(){}});
 for(const mode of ['gemini','local','vtuber']){
  v.desktopMode=false;v.setVtuberTrackingMode(mode==='vtuber');
  assert.equal(v.controls.mouseButtons.LEFT,2);assert.equal(v.controls.mouseButtons.RIGHT,0);assert.equal(v.controls.touches.ONE,1);assert.equal(v.controls.screenSpacePanning,true);
 }
 v._displayLoadTicket=1;v._holdPresentedFrame();assert.equal(copies,1);assert.equal(renders,1);assert.equal(v._heldFrame.width,800);
+assert.equal(held,true,'Live canvas hidden while the alpha snapshot replaces it');assert.equal(v._heldFrame.className,'model-held-frame');
 v._holdPresentedFrame();assert.equal(copies,1,'Keep original snapshot throughout rapid model changes');
 const flush=()=>{while(frames.length)frames.shift()();};
 v._releasePresentedFrame(1);v._displayLoadTicket=2;flush();assert.equal(removed,0,'Old load cannot uncover a new pending load');
 v._displayLoading=true;v._releasePresentedFrame(2);flush();assert.equal(removed,0);
 v._displayLoading=false;v._releasePresentedFrame(2);frames.shift()();assert.equal(removed,0,'Keep cover through the compositor frame');flush();assert.equal(removed,1);assert.equal(v._heldFrame,null);
+assert.equal(held,false,'Live canvas restored atomically when the saved frame is removed');
+v.companionSurface=true;v._holdPresentedFrame();assert.equal(v._heldFrame,null,'Companion must never add a second alpha canvas');
+let calls=[];
+context.THREE.Vector2=class{};
+v.renderer={getSize(){return {x:460,y:760};},setRenderTarget(value){calls.push(['target',value]);},setViewport(...args){calls.push(['viewport',...args]);},setScissorTest(value){calls.push(['scissor',value]);},clear(...args){calls.push(['clear',...args]);}};
+v._prepareCompanionSurface();assert.deepEqual(calls,[['target',null],['viewport',0,0,460,760],['scissor',false]]);assert.equal(v.renderer.autoClear,true);
+calls=[];v.companionSurface=false;v._prepareCompanionSurface();assert.equal(calls.length,0,'VTuber surface stays unchanged');
 console.log('PASS: all three modes share controls; presentation snapshot survives overlapping loads and releases only after ready');

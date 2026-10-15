@@ -12,7 +12,7 @@ from config import VOICE_PRESETS
 PRESETS=[p for p in VOICE_PRESETS if p['voice']!='rvc']
 def voice():
     tts=TextToSpeech.__new__(TextToSpeech)
-    tts.backend='edge-tts';tts.rvc_model=None;tts.rvc_index=None
+    tts.backend='kokoro';tts.rvc_model=None;tts.rvc_index=None
     tts.rvc_pitch=0;tts.rvc_index_rate=0.75
     tts.set_voice_preset(PRESETS[0]['id'])
     return tts
@@ -32,12 +32,11 @@ class VoiceTests(unittest.TestCase):
 
     def test_audio_urls_are_unique(self):
         tts=voice()
-        with patch('edge_tts.Communicate') as communicate:
-            communicate.return_value.save=AsyncMock()
-            first=asyncio.run(tts._generate_edge_async('hello'))
-            second=asyncio.run(tts._generate_edge_async('hello'))
+        with patch('kokoro_speech.render_speech',side_effect=lambda text,path,**kwargs:str(path)) as render:
+            first=asyncio.run(tts._generate_kokoro_async('hello'))
+            second=asyncio.run(tts._generate_kokoro_async('hello'))
             self.assertNotEqual(first,second)
-            self.assertEqual(communicate.call_args.args[1],tts.current_voice)
+            self.assertEqual(render.call_args.kwargs['voice'],tts.current_voice)
 
     def test_inflight_speech_keeps_its_voice(self):
         async def scenario():
@@ -45,7 +44,7 @@ class VoiceTests(unittest.TestCase):
             async def generate(snapshot,text):
                 used.append(snapshot.current_voice);entered.set();await release.wait()
                 used.append(snapshot.current_voice);return 'sample.mp3'
-            with patch.object(TextToSpeech,'_generate_edge_async',generate):
+            with patch.object(TextToSpeech,'_generate_kokoro_async',generate):
                 task=asyncio.create_task(tts.speak_to_file_async('hello'))
                 await entered.wait();tts.set_voice_preset(PRESETS[1]['id']);release.set();await task
                 self.assertEqual(used,[PRESETS[0]['voice']]*2)
@@ -57,7 +56,7 @@ class VoiceTests(unittest.TestCase):
             active=voice();entered=asyncio.Event();release=asyncio.Event()
             async def generate(snapshot,text):
                 entered.set();await release.wait();return 'sample.mp3'
-            with patch.object(app,'tts',active),patch.object(TextToSpeech,'_generate_edge_async',generate):
+            with patch.object(app,'tts',active),patch.object(TextToSpeech,'_generate_kokoro_async',generate):
                 task=asyncio.create_task(app.test_tts_voice({'voice':PRESETS[0]['id']}))
                 await entered.wait();active.set_voice_preset(PRESETS[1]['id']);release.set();await task
                 self.assertEqual(active.current_voice,PRESETS[1]['voice'])

@@ -21,10 +21,11 @@ export function availableReactionExpressions(viewer){
 }
 export default class ReactionExpressions {
     constructor(viewer){this.viewer=viewer;this.entries=[];}
-    begin(text){
-        const v=this.viewer;if(v.vtuberTrackingMode||v.userTracking||!v.model)return false;
+    begin(text,detectedMood=null){
+        const v=this.viewer;if(v.vtuberTrackingMode||v.userTracking||!v.model||v.areAiExpressionsAutomatic?.()===false)return false;
+        if(v.areAiExpressionsAutomatic?.())v.clearManualExpression?.();
         this.clear();this.root=v.live2d||v.model;
-        const available=availableReactionExpressions(v),mood=reactionMood(text);
+        const available=availableReactionExpressions(v),mood=Object.hasOwn(moods,detectedMood)?detectedMood:reactionMood(text);
         const selected=available.find(e=>e.moods.includes(mood))
             ||(mood==='amused'?available.find(e=>e.moods.includes('happy')):null);
         if(!selected)return false;
@@ -41,7 +42,7 @@ export default class ReactionExpressions {
     }
     update(delta){
         const v=this.viewer;
-        if(v.vtuberTrackingMode||v.userTracking||this.root!==(v.live2d||v.model)){this.clear();return;}
+        if(v.vtuberTrackingMode||v.userTracking||v.areAiExpressionsAutomatic?.()===false||this.root!==(v.live2d||v.model)){this.clear();return;}
         for(const e of this.entries){
             e.weight+=(e.target-e.weight)*(1-Math.exp(-Math.min(.1,Math.max(0,delta))/.28));
             // PMX smiles can include mouth vertices. Keep audio vowels clear.

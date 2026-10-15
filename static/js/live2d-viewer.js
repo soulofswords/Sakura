@@ -79,8 +79,13 @@ export default class Live2DViewer {
         if(!this.avatar)return;
         const w=innerWidth,h=innerHeight;const resolution=Math.min(devicePixelRatio*({low:.75,balanced:1.25,high:2}[this.owner.quality]||1),2);
         if(this.app.renderer.resolution!==resolution || this.app.screen.width!==w || this.app.screen.height!==h){this.app.renderer.resolution=resolution;this.app.renderer.resize(w,h);}
-        const m=this.avatar.internalModel;const scale=Math.min(w/m.originalWidth,h/m.originalHeight)*.92*this.owner.camera.zoom;
-        this.avatar.scale.set(scale);this.avatar.anchor.set(.5,.5);this.avatar.position.set(w/2+this.pan.x,h/2+this.pan.y);
+        const m=this.avatar.internalModel;
+        // Live2D is a 2D stage: changing the Three.js camera cannot frame it.
+        // Portrait frames the upper 60% of the authored canvas; full view fits all of it.
+        const full=this.owner.fullModelView || this.owner.desktopMode;
+        const visibleHeight=m.originalHeight*(full?1:.6);
+        const scale=Math.min(w/m.originalWidth,h/visibleHeight)*.92*this.owner.camera.zoom;
+        this.avatar.scale.set(scale);this.avatar.anchor.set(.5,full?.5:.3);this.avatar.position.set(w/2+this.pan.x,h/2+this.pan.y);
     }
     calibrate(){const face=this.owner.userTrackingSample?.face,matrix=face?.matrix;if(matrix)this.neutral=new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().fromArray(matrix),'XYZ');
         this.eyeNeutral={};for(const [side,ids]of [['L',[33,133,159,145]],['R',[362,263,386,374]]]){
@@ -165,9 +170,12 @@ export default class Live2DViewer {
         const core=this.avatar.internalModel.coreModel,o=this.owner;
         const set=(id,value)=>{if(core.getParameterIndex(id)>=0)core.setParameterValueById(id,value);};
         const dt=this.renderDelta??1/60;
-        // Use elapsed time rather than a fixed fraction per rendered frame.
-        // Mouth/blinks need a shorter response than the already filtered head.
-        const smooth=(id,value)=>{const tau=/^Param(?:Eye|Mouth)/.test(id)?.018:.035,alpha=1-Math.exp(-dt/tau);this.filtered[id]=(this.filtered[id]??value)+(value-(this.filtered[id]??value))*alpha;set(id,this.filtered[id]);};
+        // Match the 3D retargeter's user-controlled response. A 12ms head
+        // filter snapped to each camera packet and then held until the next
+        // packet, exposing the 15/24Hz steps in the 60Hz Live2D render loop.
+        const smoothing=THREE.MathUtils.clamp(Number(o.trackingOptions?.smoothing??.25),0,1);
+        const headResponse=.02+smoothing*.2;
+        const smooth=(id,value)=>{const tau=/^ParamAngle[XYZ]$/.test(id)&&o.userTracking?headResponse:/^Param(?:Eye|Mouth)/.test(id)?.018:.035,alpha=1-Math.exp(-dt/tau);this.filtered[id]=(this.filtered[id]??value)+(value-(this.filtered[id]??value))*alpha;set(id,this.filtered[id]);};
         if(o.userTracking){
             const sample=o.userTrackingSample,fresh=sample&&performance.now()-sample.receivedAt<600;
             const face=fresh&&sample.face?.landmarks?.length?sample.face:null;

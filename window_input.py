@@ -1,13 +1,15 @@
 """Native input transparency without recreating the Qt renderer."""
 import ctypes
 
-def restore_window(hwnd):
+def restore_window(hwnd,user=None):
     """Clear Windows' maximize placement without hiding a transparent window."""
     from ctypes import wintypes
-    user = ctypes.WinDLL('user32', use_last_error=True)
-    user.IsZoomed.argtypes = [wintypes.HWND]
-    user.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-    if user.IsZoomed(hwnd):
+    if user is None:
+        user = ctypes.WinDLL('user32', use_last_error=True)
+        user.IsZoomed.argtypes = [wintypes.HWND]
+        user.IsIconic.argtypes = [wintypes.HWND]
+        user.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    if user.IsZoomed(hwnd) or user.IsIconic(hwnd):
         user.ShowWindow(hwnd, 9)  # SW_RESTORE; Qt can miss this on layered windows.
 
 def set_topmost(hwnd, enabled, user=None):

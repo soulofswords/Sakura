@@ -43,7 +43,7 @@ export function installMouthSettings(getViewer,getKey,getMic=()=> '') {
         await stop();const token=generation;
         if(getViewer()?.voiceChangerActive){status.textContent='Voice changer already controls the mouth from its output. Turn it off for direct microphone lip sync.';return;}
         try{
-            const acquired=await navigator.mediaDevices.getUserMedia({audio:{...(getMic()?{deviceId:{exact:getMic()}}:{}),echoCancellation:true,noiseSuppression:true}});
+            const acquired=await navigator.mediaDevices.getUserMedia({audio:{...(getMic()?{deviceId:{exact:getMic()}}:{}),echoCancellation:true,noiseSuppression:true,autoGainControl:false}});
             if(token!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
             stream=acquired;context=new (window.AudioContext||window.webkitAudioContext)();await context.resume();
             const analyser=context.createAnalyser();analyser.fftSize=1024;context.createMediaStreamSource(stream).connect(analyser);

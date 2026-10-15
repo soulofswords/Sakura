@@ -24,6 +24,7 @@ export default class AvatarTracking {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {
                 ...(deviceId ? {deviceId: {exact: deviceId}} : {}),
+                ...(this.cameraFacingMode ? {facingMode:{ideal:this.cameraFacingMode}} : {}),
                 width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: 24, max: 30},
             }});
             if (session !== this.session) { stream.getTracks().forEach(t => t.stop()); return; }
@@ -67,6 +68,7 @@ export default class AvatarTracking {
                     // than the setting captured when that frame began.
                     const sample = this.handTrackingEnabled ? data : {...data, hands: [], pose: null};
                     sample.face=this.headPoseFilter.update(data.face,data.timestamp,data.distanceAssist);
+                    sample.headPoseFiltered=true;
                     sample.handTrackingEnabled = this.handTrackingEnabled;
                     this.viewer.updateUserTracking(sample);
                     const pose = sample.pose?.landmarks;

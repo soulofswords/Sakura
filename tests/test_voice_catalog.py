@@ -12,7 +12,7 @@ class VoiceCatalogTests(unittest.TestCase):
         for gender in ('Male', 'Female'):
             voices = [p for p in VOICE_PRESETS if p.get('gender') == gender and p['language'] == 'English']
             self.assertEqual(len(voices), 10)
-            self.assertTrue(all(p['voice'].startswith('en-') for p in voices))
+            self.assertTrue(all(p['backend']=='kokoro' for p in voices))
             self.assertEqual(len({p['voice'] for p in voices}), 10)
         self.assertEqual(voice_language('swara_hindi'), 'Hindi')
         self.assertEqual(voice_language('neerja_hinglish'), 'Hinglish')
@@ -27,8 +27,13 @@ class VoiceCatalogTests(unittest.TestCase):
                 model.reply_language = language
                 with patch.object(model, '_request_gemini', return_value='test') as request:
                     model._request([{'role': 'user', 'content': 'Namaste'}])
-                    self.assertIn(language, request.call_args.args[0][-1]['content'])
-                    self.assertIn('overrides', request.call_args.args[0][-1]['content'])
+                    sent = request.call_args_list[0].args[0]
+                    language_rules = [m['content'] for m in sent if m['role'] == 'system'
+                                      and 'Selected speech language:' in m['content']]
+                    self.assertEqual(len(language_rules), 1)
+                    self.assertIn(language, language_rules[0])
+                    self.assertIn('overrides', language_rules[0])
+                    self.assertEqual(sent[-1], {'role': 'user', 'content': 'Namaste'})
             with patch.object(model, '_request_gemini', return_value='test') as request:
                 messages = [{'role': 'user', 'content': 'Summarize facts'}]
                 model._request(messages, summarizing=True)
@@ -38,9 +43,9 @@ class VoiceCatalogTests(unittest.TestCase):
         voice = TextToSpeech()
         voice.set_voice_preset('swara_hindi')
         voice.set_voice_preset('rvc_test')
-        self.assertTrue(voice.current_voice.startswith('en-'))
+        self.assertTrue(voice.current_voice=='af_heart')
         voice.set_voice_preset('nanami_japanese')
-        self.assertEqual(voice.current_voice, 'en-GB-LibbyNeural')
+        self.assertEqual(voice.current_voice, 'bf_alice')
 
     def test_wrong_language_gets_one_correction_only(self):
         with tempfile.TemporaryDirectory() as folder:

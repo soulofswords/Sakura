@@ -62,18 +62,34 @@ class Chooser(QDialog):
         super().__init__();self.setWindowTitle('Sakura Companion');self.setMinimumWidth(540)
         self.setStyleSheet(STYLE);self.setWindowIcon(QIcon(str(BASE/'launcher/companion.ico')))
         layout=QVBoxLayout(self);layout.addWidget(QLabel('Welcome to Sakura\nChoose your experience'))
-        self.key=QLineEdit();self.key.setEchoMode(QLineEdit.Password);self.key.setPlaceholderText('Gemini API key — leave blank to use saved key');layout.addWidget(self.key)
-        for mode,label in [('gemini','Gemini — cloud companion'),('local','Local LLM — on this Mac'),('vtuber','VTuber — face and hand tracking, no AI')]:
+        self.provider=QComboBox();self.providers=['auto','gemini','openai','anthropic','deepseek','openrouter','groq','xai']
+        self.provider.addItems(['Auto-detect API key','Google Gemini','OpenAI','Anthropic Claude','DeepSeek','OpenRouter','Groq','xAI']);layout.addWidget(self.provider)
+        self.key=QLineEdit();self.key.setEchoMode(QLineEdit.Password);self.key.setPlaceholderText('Cloud API key — leave blank to use saved provider/key');layout.addWidget(self.key)
+        self.model=QLineEdit();self.model.setPlaceholderText('Model ID (required for OpenRouter/Groq/xAI)');layout.addWidget(self.model)
+        for mode,label in [('gemini','Cloud API — cloud companion'),('local','Local LLM — on this Mac'),('vtuber','VTuber — face and hand tracking, no AI')]:
             button=QPushButton(label);button.clicked.connect(lambda _,m=mode:self.choose(m));layout.addWidget(button)
         feedback=QLabel('This app is currently under development. Your feedback is most important.<br>'
             '<a href="https://discord.gg/kgxeMRFWDw">Join my Discord and DM me</a>')
         feedback.setWordWrap(True);feedback.setOpenExternalLinks(True);layout.addWidget(feedback)
     def choose(self,mode):
         if mode=='gemini' and not self.key.text().strip():
-            from credentials import get_gemini_key
-            try:saved=get_gemini_key()
+            from credentials import get_gemini_key,get_cloud_key
+            import json
+            try:cfg=json.loads((BASE/'settings.json').read_text(encoding='utf-8'))
+            except (OSError,ValueError):cfg={}
+            provider=cfg.get('llm_provider','gemini')
+            if provider=='ollama':provider=cfg.get('last_cloud_provider','gemini')
+            try:saved=get_gemini_key() if provider=='gemini' else get_cloud_key(provider,cfg.get('cloud_endpoint',''))
             except OSError:saved=''
-            if not saved:QMessageBox.information(self,'Gemini key','Enter your Gemini API key to continue.');return
+            if not saved:QMessageBox.information(self,'API key','Enter an API key to continue.');return
+        if mode=='gemini' and self.key.text().strip():
+            from cloud_api import detect_provider
+            try:provider=detect_provider(self.key.text().strip()) if self.provider.currentIndex()==0 else self.providers[self.provider.currentIndex()]
+            except ValueError as error:QMessageBox.information(self,'Choose provider',str(error));return
+            if provider in ('openrouter','groq','xai') and not self.model.text().strip():
+                QMessageBox.information(self,'Model ID','Enter the model ID from your provider.');return
+            os.environ['SAKURA_START_API_PROVIDER']=provider
+            os.environ['SAKURA_START_CLOUD_MODEL']=self.model.text().strip()
         if mode=='local' and not installed():
             if QMessageBox.question(self,'Set up local AI','Are you sure you want to run Local LLM? A runtime and your selected Qwen model will be downloaded.')!=QMessageBox.Yes:return
             if Download().exec()!=QDialog.Accepted:return
