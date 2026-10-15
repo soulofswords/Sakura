@@ -1,4 +1,4 @@
-import Live2DViewer from './live2d-viewer.js?v=framing31';
+import Live2DViewer from './live2d-viewer.js?v=phone-touch73';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
 import * as THREE from 'three';
 import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
@@ -12,12 +12,12 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import AvatarRetarget from './avatar-retarget.js?v=vrm-pitch14';
 import ArmClearance from './arm-clearance.js?v=clearance1';
 import ModelPhysics from './model-physics.js?v=hair-collision31';
-import ModelRigMonitor from './model-rig-monitor.js?v=persistent5';
+import ModelRigMonitor from './model-rig-monitor.js?v=startup68';
 import ModelRepairStore from './model-repair-store.js?v=1';
 import {ModelBones} from './model-bones.js?v=persistent5';
 import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
 import ReactionExpressions from './reaction-expressions.js?v=camera-emotions59';
-import ModelDance from './model-dance.js?v=palms64';
+import ModelDance from './model-dance.js?v=assistant69';
 
 /**
  * Smart loader for .tga textures.
@@ -109,6 +109,7 @@ class SmartTgaLoader extends THREE.Loader {
     }
 }
 
+import {renderPixelRatio} from './render-budget.js?v=startup68';
 export default class ModelViewer {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
@@ -130,8 +131,9 @@ export default class ModelViewer {
             preserveDrawingBuffer: true,
             powerPreference: 'high-performance',
         });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setDrawingBufferSize(window.innerWidth,window.innerHeight,
+            renderPixelRatio(window.innerWidth,window.innerHeight,Math.min(window.devicePixelRatio,2),this.renderer.capabilities.maxTextureSize));
+        Object.assign(this.renderer.domElement.style,{width:'100%',height:'100%'});
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.sortObjects = true; // depth-sort transparent draw calls
         this.container.appendChild(this.renderer.domElement);
@@ -315,12 +317,15 @@ export default class ModelViewer {
             this.camera.aspect = width / height;
             this.camera.updateProjectionMatrix();
             if (this._displayLoading) return;
+            if (this.live2d) { this._renderFrame(); return; }
             const current = this.renderer.getSize(this._resizeSize ||= new THREE.Vector2());
             // Setting canvas dimensions clears its drawing buffer even when
             // unchanged. Native layout notifications can repeat one size.
             if (current.x !== width || current.y !== height) {
                 if (!this.live2d) this._holdPresentedFrame();
-                this.renderer.setSize(width, height);
+                const scale={low:.75,balanced:1.25,high:2}[this.quality]||1;
+                this.renderer.setDrawingBufferSize(width,height,
+                    renderPixelRatio(width,height,Math.min(window.devicePixelRatio*scale,3),this.renderer.capabilities.maxTextureSize));
                 this._resizeBloom();
             }
             this._renderFrame();
@@ -353,8 +358,8 @@ export default class ModelViewer {
             localStorage.setItem('sakura_render_quality', this.quality);
             return;
         }
-        const ratio = Math.min(window.devicePixelRatio * preset.scale, 3);
         const width = Math.max(1, window.innerWidth), height = Math.max(1, window.innerHeight);
+        const ratio = renderPixelRatio(width,height,Math.min(window.devicePixelRatio*preset.scale,3),this.renderer.capabilities.maxTextureSize);
         this._holdPresentedFrame();
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
@@ -584,6 +589,9 @@ export default class ModelViewer {
         this.animationBones={};this.morphMap={};this.morphMeshes=[];this.resolvedVowels={A:'A',I:'I',U:'U',E:'E',O:'O',Blink:'Blink'};this.pmxTextureSlots=[];
         this.allMorphNames=loaded.names;this.physicsInfo=loaded.physicsInfo;
         this.renderer.domElement.style.visibility='hidden';
+        // PIXI owns the visible surface now; release the unused 3D framebuffer.
+        // setQuality restores its dimensions when a 3D model is loaded again.
+        this.renderer.setDrawingBufferSize(1,1,1);
         loaded.render(1/60);
         return {model:this.model,morphs:this.allMorphNames,physics:this.physicsInfo,notice:'Live2D loaded. Hand movement depends on authored parameters; generic 3D arm tracking is not applied.'};
     }
@@ -608,6 +616,7 @@ export default class ModelViewer {
         try {
             const result=await this._loadModelInternal(url, options);
             if(result&&ticket===this._displayLoadTicket){
+                this.lastModelUrl=url;
                 // Imported skinned bounds describe the bind pose. Moving
                 // hair/skirts can escape those cached bounds during dragging.
                 this.model?.traverse(child=>{if(child.isSkinnedMesh)child.frustumCulled=false;});

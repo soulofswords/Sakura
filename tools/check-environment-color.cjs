@@ -1,0 +1,25 @@
+const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
+try{
+ const page=await browser.newPage();
+ await page.route('http://sakura.test/**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><body></body>'}));
+ await page.goto('http://sakura.test/');
+ await page.setContent('<body class="native-library"><input type="color" id="env-color-picker" value="#ff0000"><input type="color" id="env-color-picker-modal" value="#ff0000"><div id="dial"></div></body>');
+ await page.addStyleTag({content:fs.readFileSync('static/css/style.css','utf8')});
+ const app=fs.readFileSync('static/js/app.js','utf8'),start=app.indexOf('function hexToRgb('),end=app.indexOf('// ─────────────────────────── Voice System',start);
+ const bindings=`let currentEnvColor='#ff0000',currentEnvIntensity=1,currentRgbBreathing=false;
+ const viewer={setEnvironmentColor(hex){window.sceneColor=hex;},setRgbBreathing(){}};
+ const envColorPicker=document.getElementById('env-color-picker'),envColorPickerModal=document.getElementById('env-color-picker-modal');
+ const envColorHex=null,envColorHexModal=null,envIntensitySlider=null,envIntensityVal=null,envIntensitySliderModal=null,envIntensityValModal=null,envRgbToggle=null,envRgbToggleModal=null,themeBtn=null,closeThemePopoverBtn=null,themePopover=null,saveThemeBtn=null;
+ window.saved=[];const save_setting_silent=async value=>window.saved.push(value);
+ `;
+ await page.addScriptTag({content:bindings+app.slice(start,end)+fs.readFileSync('static/js/color-dial.js','utf8').replace('export function','function')+"\nsetupThemeEvents();applyEnvironmentTheme('#ff0000');window.dial=installColorDial(envColorPicker,document.getElementById('dial'));"});
+ const before=await page.evaluate(()=>getComputedStyle(document.body).backgroundImage);
+ const rect=await page.locator('#dial canvas').boundingBox();
+ await page.mouse.click(rect.x+224*rect.width/240,rect.y+120*rect.height/240);
+ const state=await page.evaluate(()=>({value:document.getElementById('env-color-picker').value,modal:document.getElementById('env-color-picker-modal').value,scene:window.sceneColor,saved:window.saved,background:getComputedStyle(document.body).backgroundImage}));
+ assert.notEqual(state.background,before);assert.equal(state.value,state.scene);assert.equal(state.value,state.modal);assert.equal(state.saved.at(-1).env_color,state.value);
+ await page.evaluate(()=>document.body.classList.add('transparent-mode'));
+ assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundImage),'none');
+ console.log('PASS: real wheel click updates native background, renderer, both pickers and persisted setting; transparency remains intact');
+}finally{await browser.close();}})().catch(error=>{console.error(error);process.exitCode=1});

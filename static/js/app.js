@@ -1,14 +1,16 @@
 import {installCompanionToolbar} from './companion-toolbar.js?v=1';
-import {finishStartupPresentation} from './startup-presentation.js?v=1';
+import {installButtonFeedback} from './button-feedback.js?v=phone-touch73';
+installButtonFeedback();
+import {finishStartupPresentation} from './startup-presentation.js?v=startup68';
 import {installScreenAudio} from './screen-audio.js?v=2';
 import {installSpoutControls} from './spout-output.js?v=miu-expression-manager6';
-import {installMobileLink} from './mobile-link.js?v=phone-modes67';
+import {installMobileLink} from './mobile-link.js?v=phone-touch73';
 import {installCameraPreview} from './camera-preview.js?v=1';
 import CompanionCamera from './companion-camera.js?v=phone-modes67';
 import {installReminders} from './assistant-reminders.js?v=1';
 import {installExpressionEditor} from './expression-editor.js?v=cloud-providers61';
-import {installModelSettings} from './model-settings.js?v=cloud-providers61';
-import ModelViewer from './model-viewer.js?v=palms64';
+import {installModelSettings} from './model-settings.js?v=assistant69';
+import ModelViewer from './model-viewer.js?v=phone-touch73';
 import AvatarTracking from './avatar-tracking.js?v=distance7';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
@@ -229,6 +231,7 @@ const testAudioBtn  = document.getElementById('test-audio-btn');
 const assistantNameInput = document.getElementById('assistant-name-input');
 const vtuberNameInput = document.getElementById('vtuber-name-input');
 const avatarPresentation = document.getElementById('avatar-presentation');
+const userAddress = document.getElementById('user-address');
 const wakeWordInput      = document.getElementById('wake-word-input');
 const wakeWordToggle     = document.getElementById('wake-word-toggle');
 const computerControlToggle = document.getElementById('computer-control-toggle');
@@ -321,6 +324,7 @@ async function saveAiSettings(clearKey = false) {
 async function testAiConnection() {
     const button = document.getElementById('test-ai-connection');
     button.disabled = true;
+    button.setAttribute('aria-busy','true');
     aiSaveStatus.textContent = 'Testing saved connection…';
     try {
         if (!await saveAiSettings()) return;
@@ -329,7 +333,21 @@ async function testAiConnection() {
         if (!response.ok || !data.ok) throw new Error(data.error || 'Connection failed.');
         flashMsg(aiSaveStatus, data.message, 8000);
     } catch (err) { flashMsg(aiSaveStatus, err.message, 8000); }
-    finally { button.disabled = false; }
+    finally { button.disabled = false;button.removeAttribute('aria-busy'); }
+}
+
+async function findCloudModels(){
+    const button=document.getElementById('find-cloud-models'),select=document.getElementById('available-cloud-models'),status=document.getElementById('cloud-model-status');
+    const provider=llmProvider.value,key=geminiApiKey.value.trim();button.disabled=true;button.setAttribute('aria-busy','true');status.textContent='Finding models from the selected provider…';
+    try{
+        const response=await fetch('/api/llm/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider,api_key:key,model:provider==='gemini'?geminiModel.value.trim():document.getElementById('cloud-model').value.trim(),endpoint:document.getElementById('cloud-endpoint').value.trim()})});
+        const data=await response.json();if(!response.ok)throw Error(data.error||'Model discovery failed.');
+        if(llmProvider.value!==provider)throw Error('Provider changed. Find models again for the selected provider.');
+        select.replaceChildren();const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a model';select.append(placeholder);
+        for(const id of data.models||[]){const option=document.createElement('option');option.value=id;option.textContent=id;select.append(option);}
+        select.dataset.provider=data.provider;status.textContent=data.models.length+' models found. Choose a model, then Test API. Your unsaved key has not been stored.';
+        if(!data.models.length)status.textContent='No compatible models listed. Enter an exact model ID manually or check provider access.';
+    }catch(error){status.textContent=error.message;}finally{button.disabled=false;button.removeAttribute('aria-busy');}
 }
 
 let identityDirty = false;
@@ -699,7 +717,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!response.ok) return;
             const saved = await response.json();
             if (identityDirty || identitySaving) return;
-            const fields = ['assistant_name', 'vtuber_name', 'avatar_presentation', 'wake_word', 'wake_word_enabled', 'computer_control_enabled'];
+            const fields = ['assistant_name', 'vtuber_name', 'avatar_presentation', 'user_address', 'wake_word', 'wake_word_enabled', 'computer_control_enabled'];
             if (fields.some(key => saved[key] !== currentSettings[key])) {
                 for (const key of fields) currentSettings[key] = saved[key];
                 wakeCommandDeadline = 0;
@@ -710,7 +728,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     await finishStartupPresentation(viewer);
 
-    addMessage(`🌸 Konnichiwa! I am ${currentSettings.assistant_name || 'Sakura'}, your desktop companion! Use ⚙️ Settings to pick your voice and 3D character model~`, 'sakura');
+    if(!trackingOnly)try{
+        const greetingGeneration=chatReplyGeneration;
+        const greeting=await(await fetch('/api/assistant/greeting',{method:'POST'})).json();
+        if(greeting.reply){addMessage(greeting.reply,'sakura');await ensureKokoroReady();
+            const speech=await(await fetch('/api/tts/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:greeting.reply})})).json();
+            if(speech.audio&&greetingGeneration===chatReplyGeneration&&!trackingOnly)await lipSync.playWithLipSync(speech.audio);
+        }
+    }catch(error){console.warn('Startup greeting speech unavailable',error);}
     if (isDesktop) await startDesktopListening();
 });
 
@@ -857,6 +882,7 @@ function setupEvents() {
 
     llmProvider.addEventListener('change', () => {
         const provider=llmProvider.value;
+        document.getElementById('available-cloud-models').replaceChildren();document.getElementById('cloud-model-status').textContent='Find models for the selected provider. Test API sends one small generation request.';
         document.getElementById('cloud-model').value=provider===currentSettings.llm_provider?(currentSettings.cloud_model||''):({openai:'gpt-4.1-mini',anthropic:'claude-haiku-4-5',deepseek:'deepseek-flash'}[provider]||'');
         document.getElementById('cloud-endpoint').value=provider===currentSettings.llm_provider?(currentSettings.cloud_endpoint||''):'';
         document.getElementById('cloud-vision').checked=provider===currentSettings.llm_provider?!!currentSettings.cloud_vision:['openai','anthropic'].includes(provider);
@@ -904,6 +930,13 @@ function setupEvents() {
     window.addEventListener('pagehide',()=>{clearInterval(screenMemoryTimer);screenMemory.stop();},{once:true});
     document.getElementById('save-ai-settings').addEventListener('click', () => saveAiSettings());
     document.getElementById('test-ai-connection').addEventListener('click', testAiConnection);
+    document.getElementById('find-cloud-models').addEventListener('click',findCloudModels);
+    document.getElementById('available-cloud-models').addEventListener('change',event=>{
+        const select=event.target;if(!select.value)return;
+        if(llmProvider.value==='auto')llmProvider.value=select.dataset.provider;
+        (llmProvider.value==='gemini'?geminiModel:document.getElementById('cloud-model')).value=select.value;
+        updateProviderFields();document.getElementById('cloud-model-status').textContent='Selected '+select.value+'. Test API saves this selection and checks generation access.';
+    });
     document.getElementById('remove-gemini-key').addEventListener('click', () => saveAiSettings(true));
 
     // Chat
@@ -978,7 +1011,7 @@ function setupEvents() {
             const response = await fetch('/api/refresh-memory', { method: 'POST' });
             const result = await response.json();
             if (!response.ok) throw new Error(result.error || 'Memory refresh failed.');
-            addMessage('Memory refreshed. I will address you as Master now.', 'sakura');
+            addMessage('Memory refreshed. Your saved address preference is unchanged.', 'sakura');
         } catch (error) {
             addMessage(`⚠️ ${error.message}`, 'sakura');
         } finally { refreshMemoryBtn.disabled = false; }
@@ -1030,6 +1063,9 @@ function setupEvents() {
     applySize();
     document.getElementById('dance-btn').onclick=()=>{
         if(!viewer?.dance?.start(document.getElementById('dance-style').value))listeningStatus.textContent='Choose a rigged PMX or VRM in Companion mode to dance.';
+    };
+    document.getElementById('dance-style').onchange=event=>{
+        if(viewer?.dance?.active)viewer.dance.start(event.target.value);
     };
     document.getElementById('dance-stop-btn').onclick=()=>viewer?.dance?.stop();
     document.getElementById('interrupt-btn').addEventListener('click', () => {
@@ -1138,7 +1174,7 @@ function setupEvents() {
 
     // Assistant tab
     if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', saveAppSettings);
-    for (const control of [assistantNameInput, vtuberNameInput, avatarPresentation, wakeWordInput, wakeWordToggle, computerControlToggle]) {
+    for (const control of [assistantNameInput, vtuberNameInput, avatarPresentation, userAddress, wakeWordInput, wakeWordToggle, computerControlToggle]) {
         control?.addEventListener(control.type === 'checkbox' ? 'change' : 'input', () => {
             identityDirty = true;
             clearTimeout(identityTimer);
@@ -1261,6 +1297,7 @@ function applySettingsUI(s) {
         if (assistantNameInput) assistantNameInput.value = s.assistant_name || 'Sakura';
         if (vtuberNameInput) vtuberNameInput.value = s.vtuber_name || 'Sakura';
         if (avatarPresentation) avatarPresentation.value = s.avatar_presentation || 'auto';
+        if (userAddress) userAddress.value=s.user_address||'sir';
         if (wakeWordInput) wakeWordInput.value = s.wake_word || 'hey sakura';
         if (wakeWordToggle) wakeWordToggle.checked = !!s.wake_word_enabled;
         if (computerControlToggle) computerControlToggle.checked = !!s.computer_control_enabled;
@@ -1298,6 +1335,7 @@ async function saveAppSettings() {
     const newName = (assistantNameInput?.value.trim()) || 'Sakura';
     const newVtuberName = (vtuberNameInput?.value.trim()) || 'Sakura';
     const newPresentation = avatarPresentation?.value || 'auto';
+    const newAddress=userAddress?.value||'sir';
     const newWakeWord = (wakeWordInput?.value.trim().toLowerCase()) || 'hey sakura';
     const newWakeEnabled = wakeWordToggle?.checked || false;
     const newComputerControl = computerControlToggle?.checked || false;
@@ -1310,6 +1348,7 @@ async function saveAppSettings() {
                 assistant_name: newName,
                 vtuber_name: newVtuberName,
                 avatar_presentation: newPresentation,
+                user_address:newAddress,
                 wake_word: newWakeWord,
                 wake_word_enabled: newWakeEnabled,
                 computer_control_enabled: newComputerControl,
@@ -1318,7 +1357,7 @@ async function saveAppSettings() {
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save assistant settings.');
         const stillMatches = (assistantNameInput.value.trim() || 'Sakura') === newName && (vtuberNameInput?.value.trim() || 'Sakura') === newVtuberName && (wakeWordInput.value.trim().toLowerCase() || 'hey sakura') === newWakeWord
-            && (avatarPresentation?.value || 'auto') === newPresentation && wakeWordToggle.checked === newWakeEnabled && computerControlToggle.checked === newComputerControl;
+            && (avatarPresentation?.value || 'auto') === newPresentation && (userAddress?.value||'sir')===newAddress && wakeWordToggle.checked === newWakeEnabled && computerControlToggle.checked === newComputerControl;
         if (stillMatches) identityDirty = false;
         else identitySaveQueued = true;
         wakeCommandDeadline = 0;
@@ -2420,7 +2459,7 @@ async function handleSendMessage() {
             signal: controller.signal,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, ai_vtuber:vtuberEnabled, screen_frames: plainGreeting ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
+            body: JSON.stringify({ text, ai_vtuber:vtuberEnabled, screen_frames: plainGreeting ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
         });
         const data = await res.json();
         if (data.reply) {
@@ -2439,7 +2478,10 @@ async function handleSendMessage() {
             };
             if (generation !== chatReplyGeneration) return;
             if(data.avatar_motion==='stop')viewer?.dance?.stop();
-            else if(['groove','step','wave','hands_both','hand_left','hand_right'].includes(data.avatar_motion))viewer?.dance?.start(data.avatar_motion);
+            else if(['groove','step','wave','twist','disco','march','hands_both','hand_left','hand_right'].includes(data.avatar_motion)){
+                viewer?.dance?.start(data.avatar_motion);
+                if(['groove','step','wave','twist','disco','march'].includes(data.avatar_motion))document.getElementById('dance-style').value=data.avatar_motion;
+            }
             // Text and companion expression should not wait for the first
             // local speech generation. Speech starts as soon as its first
             // short phrase arrives below.
@@ -2447,6 +2489,7 @@ async function handleSendMessage() {
             const indicator = document.getElementById('typing-indicator');
             if (indicator) indicator.textContent = 'Preparing voice…';
             try {
+                if(data.performance_audio){await lipSync.playWithLipSync(data.performance_audio);return;}
                 const prepared=await voiceReady;if(prepared.error)throw prepared.error;
                 await speakPhrases(data.reply, async text => {
                     const response = await fetch('/api/tts/speak', {
@@ -2583,7 +2626,7 @@ async function pollVtuberChat() {
         let resumeMic = false;
         try {
             const replyResponse = await fetch('/api/vtuber/reply', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({author: message.author, text: message.text, screen_image: screenShare.enabled ? await screenShare.snapshot() : null, screen_frames: screenShare.recentFrames()})});
+                body: JSON.stringify({author: message.author, text: message.text, avatar_can_dance:!!viewer?.dance?.supported(),avatar_dance_style:viewer?.dance?.active?.style||null,screen_image: screenShare.enabled ? await screenShare.snapshot() : null, screen_frames: screenShare.recentFrames()})});
             const result = await replyResponse.json();
             if (!replyResponse.ok) throw new Error(result.error);
             if (!current() || !result.reply || result.reply.trim() === '[QUIET]') return;
@@ -2591,6 +2634,13 @@ async function pollVtuberChat() {
             addMessage(result.reply, 'sakura');
             resumeMic = continuousMic.enabled;
             if (resumeMic) continuousMic.stop();
+            if(result.avatar_motion==='stop')viewer?.dance?.stop();
+            else if(['groove','step','wave','twist','disco','march'].includes(result.avatar_motion))viewer?.dance?.start(result.avatar_motion);
+            if(result.performance_audio){
+                viewer?.setEmotionFromText(result.reply);
+                await lipSync.playWithLipSync(result.performance_audio);
+                return;
+            }
             await speakPhrases(result.reply, async text => {
                 const audioResponse = await fetch('/api/tts/speak', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
                 const speech = await audioResponse.json();

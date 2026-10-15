@@ -30,6 +30,19 @@ for(const vrm of [false,true])for(const style of ['victory','defeat']){
  v.userTracking=true;assert.equal(dance.start(style),false);
 }
 console.log('PASS: victory jump and defeat head-down on PMX/VRM, bounded motion, automatic neutral return, model-switch cancellation');
+for(const vrm of [false,true]){
+ const signatures=new Set();
+ for(const style of ['groove','step','wave','twist','disco','march']){
+  const model=new THREE.Group(),viewer={model,vrm,physics:{},animationBones:{},_avoidArmClipping(){}};
+  for(const key of ['torso','chest','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist','leftThigh','rightThigh','leftKnee','rightKnee'])viewer.animationBones[key]={bone:new THREE.Bone(),rest:new THREE.Euler()};
+  const dance=new ctx.Dance(viewer);assert.ok(dance.start(style));
+  for(let i=0;i<45;i++)dance.update(1/60);
+  const values=[...model.position.toArray(),...Object.values(viewer.animationBones).flatMap(e=>e.bone.rotation.toArray().slice(0,3))];
+  assert.ok(values.every(Number.isFinite));signatures.add(JSON.stringify(values));
+  dance.stop(true);assert.deepEqual(model.position.toArray(),[0,0,0]);
+ }
+ assert.equal(signatures.size,6,'All six routines must produce different poses and root motion');
+}
 for(const vrm of [false,true])for(const style of ['hands_both','hand_left','hand_right']){
  const model=new THREE.Group(),v={model,vrm,physics:{},animationBones:{},_avoidArmClipping(){}};
  for(const key of ['torso','chest','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist'])

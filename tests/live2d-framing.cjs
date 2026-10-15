@@ -1,5 +1,6 @@
 const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
 const ctx={innerWidth:1200,innerHeight:800,devicePixelRatio:1};
+vm.runInNewContext(fs.readFileSync('static/js/render-budget.js','utf8').replace('export function','function'),ctx);
 vm.runInNewContext(fs.readFileSync('static/js/live2d-viewer.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export default class Live2DViewer','class Live2DViewer')+'\nthis.Live=Live2DViewer;',ctx);
 const v=Object.create(ctx.Live.prototype);let scale,anchor,position;
 v.owner={camera:{zoom:1},quality:'balanced',fullModelView:true};v.pan={x:0,y:0};

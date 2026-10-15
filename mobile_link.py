@@ -12,7 +12,7 @@ from pathlib import Path
 from collections import deque
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,FileResponse
 import uvicorn
 
 class MobileLink:
@@ -28,9 +28,11 @@ class MobileLink:
             and re.fullmatch(r'[0-9a-f]{64}',str(value.get('token_hash','')))}
         self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={}
         self.pc_port=8766;self.port=8772 if EDITION=='vtuber' else 8771;self.code_expires=0;self.thread=None
+        self.model_transfer=None;self.model_package=None;self.transfer_request=None
         self.api=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
         self.api.add_api_route('/pair',self.pair,methods=['POST'])
         self.api.add_api_route('/state',self.phone_state,methods=['GET'])
+        self.api.add_api_route('/model/package/{identifier}',self.download_model,methods=['GET'])
         self.api.add_api_route('/command',self.command,methods=['POST'])
         self.api.add_api_route('/frame',self.tracking_frame,methods=['POST'])
         self.api.add_api_route('/camera',self.camera_frame,methods=['POST'])
@@ -88,7 +90,7 @@ class MobileLink:
         return self.info()
 
     def stop(self):
-        self.enabled=False;self.tokens.clear();self.code='';self.frame=None;self.camera=None;self.commands.clear()
+        self.enabled=False;self.tokens.clear();self.code='';self.frame=None;self.camera=None;self.commands.clear();self.transfer_request=None
         if self.server:self.server.should_exit=True
 
     async def pair(self,request:Request):
@@ -110,10 +112,71 @@ class MobileLink:
         return {'token':token,'name':'Sakura','edition':self.state.get('edition','companion')}
 
     async def phone_state(self):
-        return self.state
+        return {**self.state,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request}
+
+    def transfer_result(self,identifier,status,error=''):
+        if status not in ('preparing','cancelled','failed'):raise ValueError('Invalid transfer status.')
+        with self.lock:
+            if not self.transfer_request or self.transfer_request['id']!=identifier:raise ValueError('This model request has expired.')
+            self.transfer_request.update(status=status,error=str(error)[:240])
+        return {'ok':True}
+
+    def stage_selection(self,source,folder,kind,request_id):
+        if not self.enabled:raise ValueError('Phone connection is off.')
+        from config import BASE_DIR
+        from mobile_models import bundle_selected_folder
+        self.transfer_result(request_id,'preparing')
+        metadata,path=bundle_selected_folder(source,folder,kind,BASE_DIR/'mobile-transfer-cache')
+        with self.lock:
+            if not self.transfer_request or self.transfer_request['id']!=request_id:
+                path.unlink(missing_ok=True);raise ValueError('This model request has expired.')
+            old=self.model_package;self.model_package=path;self.model_transfer=metadata
+            self.transfer_request.update(status='ready',model=metadata)
+        if old:old.unlink(missing_ok=True)
+        return metadata
+
+    def stage_model(self,url):
+        if not self.enabled:raise ValueError('Enable Connect to Phone and pair your phone first.')
+        from config import MODELS_DIR,BASE_DIR
+        from mobile_models import bundle_model
+        metadata,path=bundle_model(url,MODELS_DIR,BASE_DIR/'mobile-transfer-cache')
+        with self.lock:
+            old=self.model_package;self.model_transfer=metadata;self.model_package=path
+        if old:old.unlink(missing_ok=True)
+        return metadata
+
+    async def download_model(self,identifier:str):
+        with self.lock:metadata=self.model_transfer;path=self.model_package
+        if not metadata or identifier!=metadata['id'] or not path or not path.is_file():return JSONResponse({'error':'No current model transfer. Send the model again from the PC.'},404)
+        return FileResponse(path,media_type='application/zip',filename='Sakura-model.zip')
 
     async def command(self,request:Request):
         body=await request.json();kind=body.get('type')
+        if kind=='model-result':
+            with self.lock:
+                current=self.transfer_request
+                if not current or current['id']!=str(body.get('request_id','')) or current.get('model',{}).get('id')!=str(body.get('model_id','')):
+                    return JSONResponse({'error':'The model transfer has expired.'},409)
+                status=body.get('status')
+                if status not in ('received','failed'):return JSONResponse({'error':'Invalid transfer result.'},400)
+                if current.get('status') not in ('ready','received'):return JSONResponse({'error':'This transfer is no longer active.'},409)
+                current.update(status=status,error=str(body.get('error',''))[:240])
+            return {'ok':True}
+        if kind=='cancel-model':
+            with self.lock:
+                identifier=str(body.get('request_id',''))
+                if self.transfer_request and self.transfer_request['id']==identifier:
+                    self.transfer_request.update(status='cancelled')
+                    self.commands=deque((c for c in self.commands if c.get('request_id')!=identifier),maxlen=50)
+            return {'ok':True}
+        if kind=='request-model':
+            with self.lock:
+                if self.transfer_request and self.transfer_request.get('status') in ('waiting','preparing') and time.time()-self.transfer_request.get('created',0)<600:
+                    return JSONResponse({'error':'A model transfer is already pending on the PC.'},409)
+                identifier=secrets.token_hex(16)
+                self.transfer_request={'id':identifier,'status':'waiting','created':time.time()}
+                self.commands.append({'type':'request-model','request_id':identifier})
+            return {'request_id':identifier}
         if kind not in ('expression','clear-expressions','tracking-start','tracking-stop','camera-start','camera-stop','calibrate'):
             return JSONResponse({'error':'Unsupported control'},400)
         if kind.startswith('camera-') and (self.edition=='vtuber' or self.state.get('edition')=='vtuber'):

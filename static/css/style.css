@@ -541,7 +541,7 @@ body.desktop-companion #load-file-btn,
 body.desktop-companion #import-model-folder,
 body.desktop-companion #load-file-modal,
 body.desktop-companion .rvc-upload-section { display: none !important; }
-body.native-library { background: #090713 !important; }
+body.native-library:not(.transparent-mode) { background: radial-gradient(circle at 50% 30%, var(--bg-grad-1, #1e1329) 0%, var(--bg-grad-2, #0d0714) 100%) !important; }
 body.window-maximized .window-resize-handle { display: none !important; }
 .setting-group label { font-size: 0.82rem; font-weight: 600; color: #e5e0f0; }
 .setting-group select,

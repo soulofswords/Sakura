@@ -18,6 +18,15 @@ def voice():
     return tts
 
 class VoiceTests(unittest.TestCase):
+    def test_roleplay_markers_are_not_spoken(self):
+        text='*leans in with a wink* “Here goes:” 🎵 *Lalabie… Lalabie…* *You’re my favorite agent,* *(adjusts mic)* Was that good?'
+        spoken=polish_spoken_text(text)
+        self.assertNotIn('*',spoken)
+        self.assertNotIn('leans in',spoken)
+        self.assertNotIn('adjusts mic',spoken)
+        self.assertIn('You’re my favorite agent',spoken)
+        self.assertIn('Was that good?',spoken)
+        self.assertEqual(polish_spoken_text('Use 2*3 (six) and **Python**.'),'Use 2 times 3 (six) and Python.')
     def test_spoken_text_removes_decoration_preserves_language_and_numbers(self):
         text = '🌸 **Hello!!** How are you~?\n- तापमान 25°C है। Use [Python](https://python.org) at 3.5 GHz.'
         self.assertEqual(polish_spoken_text(text), 'Hello! How are you? तापमान 25°C है। Use Python at 3.5 GHz.')

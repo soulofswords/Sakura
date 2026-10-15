@@ -35,7 +35,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         model.chat.return_value = "Hello, Master."
         with patch.object(server, 'llm', model), patch.object(server, 'get_settings', return_value={}), patch('assistant_commands.run_command', return_value=None):
             result = await server.chat({'text': 'hello', 'defer_audio': True})
-        self.assertEqual(result['reply'], 'Hello, Master.')
+        self.assertEqual(result['reply'], 'Hello, Sir.')
         model.chat.assert_called_once_with('hello', None)
 
     async def test_command_reply_skips_llm_and_screen_validation(self):

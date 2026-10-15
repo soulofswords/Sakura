@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import {applyFaceMappings} from './live2d-face-mapping.js?v=1';
 import {chatReaderLean} from './chat-reader-motion.js?v=1';
+import {renderPixelRatio} from './render-budget.js?v=startup68';
+import {installLive2DControls} from './live2d-controls.js?v=phone-touch73';
 let runtime;
 function script(src){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(Error('Live2D runtime could not load: '+src));document.head.append(s);});}
 async function ensureRuntime(){
@@ -63,21 +65,16 @@ export default class Live2DViewer {
         this.owner=owner;this.expressions=new Map();this.values={};this.filtered={};this.neutral=null;this.pan={x:0,y:0};
         this.gazeTarget=null;this.gazePosition={x:0,y:0};
         this.motion={time:0,talkBlend:0,settle:0,wasTalking:false};
-        this.app=new PIXI.Application({width:innerWidth,height:innerHeight,backgroundAlpha:0,antialias:true,preserveDrawingBuffer:true,autoStart:false,sharedTicker:false,resolution:Math.min(devicePixelRatio,2)});
+        this.app=new PIXI.Application({width:innerWidth,height:innerHeight,backgroundAlpha:0,antialias:true,preserveDrawingBuffer:true,autoStart:false,sharedTicker:false,resolution:renderPixelRatio(innerWidth,innerHeight,Math.min(devicePixelRatio,2))});
         Object.assign(this.app.view.style,{position:'absolute',inset:'0',width:'100%',height:'100%',visibility:'hidden'});
         owner.container.append(this.app.view);
-        let pointer=null;
-        this.app.view.addEventListener('pointerdown',e=>{if(e.button===0){pointer={id:e.pointerId,x:e.clientX,y:e.clientY};this.app.view.setPointerCapture(e.pointerId);}});
-        this.app.view.addEventListener('pointermove',e=>{
-            if(pointer?.id===e.pointerId){this.pan.x+=e.clientX-pointer.x;this.pan.y+=e.clientY-pointer.y;pointer.x=e.clientX;pointer.y=e.clientY;this.fit();}
-        });
-        for(const t of ['pointerup','pointercancel','lostpointercapture'])this.app.view.addEventListener(t,()=>{pointer=null;});
+        installLive2DControls(this.app.view,owner,this);
         this.app.view.addEventListener('wheel',e=>{e.preventDefault();owner.setDisplaySize(owner.camera.zoom*100+(e.deltaY<0?5:-5));},{passive:false});
         this.app.view.addEventListener('dblclick',()=>{this.pan={x:0,y:0};this.fit();});
     }
     fit(){
         if(!this.avatar)return;
-        const w=innerWidth,h=innerHeight;const resolution=Math.min(devicePixelRatio*({low:.75,balanced:1.25,high:2}[this.owner.quality]||1),2);
+        const w=innerWidth,h=innerHeight;const resolution=renderPixelRatio(w,h,Math.min(devicePixelRatio*({low:.75,balanced:1.25,high:2}[this.owner.quality]||1),2));
         if(this.app.renderer.resolution!==resolution || this.app.screen.width!==w || this.app.screen.height!==h){this.app.renderer.resolution=resolution;this.app.renderer.resize(w,h);}
         const m=this.avatar.internalModel;
         // Live2D is a 2D stage: changing the Three.js camera cannot frame it.

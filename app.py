@@ -81,6 +81,8 @@ def get_settings():
         "cloud_model": "", "cloud_endpoint": "", "cloud_vision": False,
         "last_cloud_provider": "gemini",
         "assistant_name": "Sakura",
+        "user_address": "sir",
+        "phone_link_enabled":False,
         "vtuber_name": "Sakura",
         "avatar_presentation": "auto",
         "user_title": "Master",
@@ -224,7 +226,10 @@ async def lifespan(_app: FastAPI):
         llm.set_assistant_name(cfg.get("assistant_name", "Sakura"))
         llm.set_vtuber_name(cfg.get('vtuber_name','Sakura'))
         llm.avatar_presentation=cfg.get('avatar_presentation','auto')
-    _app.state.llm_warmup = None if _app.state.tracking_only else asyncio.create_task(asyncio.to_thread(llm.warmup))
+        llm.user_address=cfg.get('user_address','sir')
+    _app.state.renderer_ready=False
+    # Desktop GPU uploads must finish before local inference reserves VRAM.
+    _app.state.llm_warmup = None if _app.state.tracking_only or os.environ.get('SAKURA_DESKTOP')=='1' else asyncio.create_task(asyncio.to_thread(llm.warmup))
     tts = TextToSpeech()
 
     # Apply saved voice settings
@@ -266,6 +271,9 @@ async def lifespan(_app: FastAPI):
     stt_task = None if os.environ.get('SAKURA_DESKTOP') == '1' or _app.state.tracking_only else asyncio.create_task(asyncio.to_thread(load_stt))
 
     print("\n✅ All systems go!")
+    if cfg.get('phone_link_enabled'):
+        from mobile_link import link as phone_link
+        phone_link.start(gui_server.port)
     print(f"🌐 Open  {gui_server.url()}  in your browser\n")
 
     # Auto-open browser
@@ -528,13 +536,31 @@ async def mobile_link_toggle(payload:dict):
     from mobile_link import link
     if payload.get('forget'):return link.forget_device(str(payload['forget']))
     if payload.get('new'):return link.new_pairing_code()
+    save_settings({'phone_link_enabled':bool(payload.get('enabled'))})
     if payload.get('enabled'):return link.start(gui_server.port)
     link.stop();return link.info()
+
+@app.post('/api/mobile/model')
+async def mobile_model_transfer(payload:dict):
+    from mobile_link import link
+    try:return {'ok':True,'model':await run_in_threadpool(link.stage_model,payload.get('model',''))}
+    except (ValueError,OSError) as error:return JSONResponse({'error':str(error)},400)
 
 @app.post('/api/mobile/poll')
 async def mobile_link_poll(payload:dict):
     from mobile_link import link
     return link.poll(payload)
+
+@app.post('/api/mobile/transfer-status')
+async def mobile_transfer_status(payload:dict):
+    from mobile_link import link
+    try:return link.transfer_result(str(payload.get('request_id','')),str(payload.get('status','')),str(payload.get('error','')))
+    except ValueError as error:return JSONResponse({'error':str(error)},400)
+
+@app.get('/api/mobile/transfer-status')
+async def mobile_transfer_request_info():
+    from mobile_link import link
+    return {'enabled':link.enabled,'request':link.transfer_request}
 
 
 # ── smart 3D model & texture route ─────────────────────────────
@@ -647,6 +673,19 @@ async def status():
         "provider": llm.provider if llm else "ollama",
         "stt": stt is not None,
     }
+
+
+@app.post('/api/renderer/ready')
+async def renderer_ready():
+    if getattr(app.state,'renderer_ready',False):return {'ok':True}
+    app.state.renderer_ready=True
+    if llm and not getattr(app.state,'tracking_only',False) and getattr(llm,'provider',None)=='ollama':
+        async def settled_warmup():
+            await asyncio.sleep(1)
+            if llm and not getattr(app.state,'tracking_only',False):await asyncio.to_thread(llm.warmup)
+        if getattr(app.state,'llm_warmup',None) is None:
+            app.state.llm_warmup=asyncio.create_task(settled_warmup())
+    return {'ok':True}
 
 
 @app.post('/api/models/texture-check')
@@ -1004,6 +1043,8 @@ async def get_app_settings():
 @app.post("/api/settings")
 async def update_app_settings(payload: dict):
     import re
+    if 'user_address' in payload and payload['user_address'] not in ('sir','maam','none'):
+        return JSONResponse({'error':'Choose Sir, Ma’am or No title.'},400)
     if 'avatar_presentation' in payload and payload['avatar_presentation'] not in ('auto','feminine','masculine','neutral'):
         return JSONResponse({'error':'Choose a valid avatar presentation.'},400)
     for field, limit in (('assistant_name', 80), ('vtuber_name',80), ('wake_word', 120)):
@@ -1102,6 +1143,8 @@ async def update_app_settings(payload: dict):
         await run_in_threadpool(llm.set_vtuber_name,payload['vtuber_name'])
     if llm and 'avatar_presentation' in payload:
         llm.avatar_presentation=payload['avatar_presentation']
+    if llm and 'user_address' in payload:
+        llm.user_address=payload['user_address']
     if llm and 'selected_voice' in payload:
         from config import voice_language
         llm.reply_language = voice_language(payload['selected_voice'])
@@ -1137,6 +1180,22 @@ async def local_models(payload: dict):
         return {'models': models}
     except (ValueError, OSError) as exc:
         return JSONResponse({'error': str(exc)}, 400)
+
+@app.post('/api/llm/models')
+async def discover_cloud_models(payload:dict):
+    if EDITION=='vtuber' or getattr(app.state,'tracking_only',False):return JSONResponse({'error':'Cloud model discovery is available in AI modes only.'},409)
+    from cloud_api import detect_provider,PROVIDERS
+    from cloud_diagnostics import discover
+    from credentials import get_cloud_key,get_gemini_key
+    try:
+        settings=get_settings();provider=str(payload.get('provider') or settings['llm_provider']);key=str(payload.get('api_key') or '').strip()
+        if provider=='auto':provider=detect_provider(key) if key else settings['llm_provider']
+        if provider!='gemini' and provider not in PROVIDERS:raise ValueError('Choose a cloud provider first.')
+        endpoint=str(payload.get('endpoint') or '')
+        if not key:key=get_gemini_key() if provider=='gemini' else get_cloud_key(provider,endpoint)
+        models=await run_in_threadpool(discover,provider,key,str(payload.get('model') or ''),endpoint)
+        return {'ok':True,'provider':provider,'models':models,'message':'Model listing does not verify generation quota or image support. Select a model and use Test API.'}
+    except ValueError as error:return JSONResponse({'error':str(error)},400)
 
 @app.post("/api/llm/test")
 async def test_llm_connection():
@@ -1240,6 +1299,25 @@ def validate_screen_frames(frames, screen_image):
     return frames
 
 
+async def short_singing_reply(text,cfg):
+    from singing import make_vocalise,named_song
+    if not tts:return JSONResponse({'error':'Select an available voice first.'},503)
+    import uuid
+    from config import AUDIO_DIR,voice_language
+    try:
+        source=await tts.speak_to_file_async('La.')
+        target=AUDIO_DIR/('sing-'+uuid.uuid4().hex+'.wav')
+        await run_in_threadpool(make_vocalise,source,target)
+        language=voice_language(cfg.get('selected_voice','kokoro_af_heart'))
+        reply={'Hindi':'यह रही एक छोटी सी नई ला-ला धुन।','Hinglish':'Yeh rahi ek chhoti si original la-la dhun.'}.get(language,'Here is a short original la-la tune.')
+        if named_song(text):
+            reply={'Hindi':'मैं अभी उस गाने को नहीं गा सकती। इसकी जगह एक छोटी सी अपनी धुन सुनाती हूँ।',
+                   'Hinglish':'Main abhi woh gaana perform nahi kar sakti. Uski jagah ek chhoti original dhun sunati hoon.'}.get(language,"I can’t perform that named song yet. Here’s a short original tune instead.")
+        return {'reply':reply,'audio':None,'performance_audio':'/audio/'+target.name,'voice_error':None}
+    except Exception:
+        return JSONResponse({'error':'The short tune could not be generated with this voice. Try a local Kokoro voice.'},503)
+
+
 @app.post('/api/vtuber/reply')
 async def reply_vtuber(payload: dict):
     if not llm:
@@ -1247,6 +1325,19 @@ async def reply_vtuber(payload: dict):
     author, text = payload.get('author', ''), payload.get('text', '')
     if not isinstance(author, str) or not isinstance(text, str) or not text.strip() or len(text) > 500 or len(author) > 80:
         return JSONResponse({'error': 'Invalid viewer message.'}, 400)
+    # Bounded entertainment actions only. Viewer text never enters private
+    # conversation memory or the computer-control command dispatcher.
+    from dance_commands import dance_action,dance_style_followup,dance_reply
+    from singing import requested as singing_requested
+    from user_address import address_text
+    from config import voice_language
+    cfg=get_settings()
+    if singing_requested(text):return await short_singing_reply(text,cfg)
+    motion=dance_style_followup(text,payload.get('avatar_dance_style')) or dance_action(text)
+    if motion:
+        if motion=='unsupported':return {'reply':'I have Groove, Side step, Arm wave, Twist, Disco and March. Which would you like?','avatar_motion':None}
+        supported=payload.get('avatar_can_dance') is True
+        return {'reply':address_text(dance_reply(motion,voice_language(cfg.get('selected_voice','kokoro_af_heart')),supported),'none'),'avatar_motion':motion if supported else None}
     try:
         from screen_audio import listener
         image = payload.get('screen_image')
@@ -1319,8 +1410,13 @@ async def chat(payload: dict):
             except (ValueError,TypeError,AttributeError):
                 reply='[QUIET]'
         return {'reply':reply,'emotion':emotion,'audio':None,'voice_error':None}
-    from dance_commands import dance_action, dance_reply, hand_action, hand_reply
-    hand=hand_action(text) if not payload.get('screen_reaction') and not payload.get('ai_vtuber') else None
+    from dance_commands import dance_action, dance_reply, hand_action, hand_reply, dance_style_followup
+    from singing import requested as singing_requested
+    if not payload.get('screen_reaction') and singing_requested(text):
+        result=await short_singing_reply(text,cfg)
+        if isinstance(result,dict) and llm:await run_in_threadpool(llm.remember_exchange,text,result['reply'])
+        return result
+    hand=hand_action(text) if not payload.get('screen_reaction') else None
     if hand and not getattr(app.state,'tracking_only',False):
         from config import voice_language
         supported=payload.get('avatar_can_dance') is True
@@ -1328,15 +1424,22 @@ async def chat(payload: dict):
         app.state.last_avatar_action=None
         if llm:await run_in_threadpool(llm.remember_exchange,text,reply)
         return {'reply':reply,'audio':None,'voice_error':None,'avatar_motion':hand if supported else None}
-    motion=dance_action(text) if not payload.get('screen_reaction') and not payload.get('ai_vtuber') else None
+    motion=dance_action(text) if not payload.get('screen_reaction') else None
+    if not payload.get('screen_reaction'):
+        current=payload.get('avatar_dance_style') or (getattr(app.state,'last_dance_style',None) if getattr(app.state,'last_avatar_action',None)=='dance' else None)
+        motion=dance_style_followup(text,current) or motion
     if not motion and getattr(app.state,'last_avatar_action',None)=='dance' and not payload.get('screen_reaction'):
         import re
         if re.search(r'\b(?:just do|show me|want to see|do what (?:you|u) have)\b',text,re.I):motion='groove'
     if motion and not getattr(app.state,'tracking_only',False):
         from config import voice_language
         supported=payload.get('avatar_can_dance') is True
-        reply=dance_reply(motion,voice_language(cfg.get('selected_voice','kokoro_af_heart')),supported)
+        from user_address import address_text
+        if motion=='unsupported':
+            return {'reply':'I have Groove, Side step, Arm wave, Twist, Disco and March. Which would you like?','audio':None,'avatar_motion':None}
+        reply=address_text(dance_reply(motion,voice_language(cfg.get('selected_voice','kokoro_af_heart')),supported),'none' if payload.get('ai_vtuber') else cfg.get('user_address','sir'))
         app.state.last_avatar_action='dance' if supported and motion!='stop' else None
+        app.state.last_dance_style=motion if supported and motion!='stop' else None
         if llm:await run_in_threadpool(llm.remember_exchange,text,reply)
         return {'reply':reply,'audio':None,'voice_error':None,'avatar_motion':motion if supported else None}
     if not payload.get('screen_reaction'):app.state.last_avatar_action=None
@@ -1409,6 +1512,8 @@ async def chat(payload: dict):
         if payload.get('ai_vtuber'):live_context['cohost']=True
         reply = await run_in_threadpool(llm.chat, text, screen_image, avatar_image, **live_context) if avatar_image or live_context else await run_in_threadpool(llm.chat, text, screen_image)
 
+    from user_address import address_text
+    if isinstance(reply,str):reply=address_text(reply,'none' if payload.get('ai_vtuber') else cfg.get('user_address','sir'))
     if not reply:
         from llm import LLM
         language=getattr(llm,'reply_language','English')
@@ -1447,6 +1552,13 @@ async def generate_reply_speech(payload: dict):
         return {'audio': f'/audio/{os.path.basename(path)}' if path else None, 'voice_notice': speech_notice(path)}
     except Exception as exc:
         return JSONResponse({'error': str(exc)}, 503)
+
+
+@app.post('/api/assistant/greeting')
+async def assistant_greeting():
+    if getattr(app.state,'tracking_only',False):return {'reply':'','audio':None}
+    from user_address import greeting
+    return {'reply':greeting(get_settings().get('user_address','sir')),'audio':None}
 
 
 @app.get('/api/tts/kokoro')

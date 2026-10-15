@@ -115,6 +115,37 @@ sealed class Installer : Form {
   else fresh["preserve_configuration_on_reinstall"]=false;
   return parser.Serialize(fresh);
  }
+ sealed class Payload : IDisposable {
+  public Stream Stream;
+  string temporary;
+  public Payload() {
+   temporary=Path.Combine(Path.GetTempPath(),"Sakura-unpack-"+Guid.NewGuid().ToString("N"));
+   Directory.CreateDirectory(temporary);
+   try {
+    using(var resource=Assembly.GetExecutingAssembly().GetManifestResourceStream("SakuraBootstrap"))
+    using(var bootstrap=new ZipArchive(resource,ZipArchiveMode.Read))
+     foreach(var entry in bootstrap.Entries) {
+      string target=Path.GetFullPath(Path.Combine(temporary,entry.FullName));
+      if(!target.StartsWith(temporary+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException("Invalid decoder path.");
+      using(var input=entry.Open())using(var output=File.Create(target))input.CopyTo(output);
+     }
+    // Isolated embedded Python is already part of the app runtime. It only
+    // decodes our bundled XZ container; no system Python or internet needed.
+    File.WriteAllText(Path.Combine(temporary,"python312._pth"),"python312.zip\n.\n");
+    using(var input=Assembly.GetExecutingAssembly().GetManifestResourceStream("SakuraPayload"))
+    using(var output=File.Create(Path.Combine(temporary,"payload.xz")))input.CopyTo(output);
+    var start=new ProcessStartInfo(Path.Combine(temporary,"python.exe"),"-I -S -c \"import lzma,shutil; a=lzma.open('payload.xz','rb'); b=open('payload.zip','wb'); shutil.copyfileobj(a,b,1048576); b.close(); a.close()\"") {
+     WorkingDirectory=temporary,UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true
+    };
+    using(var decoder=Process.Start(start)) {
+     string error=decoder.StandardError.ReadToEnd();decoder.WaitForExit();
+     if(decoder.ExitCode!=0)throw new IOException("Package decompression failed: "+error);
+    }
+    Stream=File.OpenRead(Path.Combine(temporary,"payload.zip"));
+   }catch{Dispose();throw;}
+  }
+  public void Dispose(){if(Stream!=null)Stream.Dispose();try{if(Directory.Exists(temporary))Directory.Delete(temporary,true);}catch(IOException){}catch(UnauthorizedAccessException){}}
+ }
  internal static void Extract(string directory,Action<int> progress=null) {
   directory=Path.GetFullPath(directory);
   Directory.CreateDirectory(directory);
@@ -126,8 +157,9 @@ sealed class Installer : Form {
   string manifest=Path.Combine(directory,"Sakura","installed-files.tsv");
   if(File.Exists(manifest))foreach(string row in File.ReadAllLines(manifest)) {var fields=row.Split('\t');if(fields.Length==2)artwork[fields[1]]=fields[0];}
   // The payload is an allowlisted base app; never overwrite an existing user's settings.
-  using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("SakuraPayload"))
-  using(var zip=new ZipArchive(stream,ZipArchiveMode.Read)) {
+  if(progress!=null)progress(1);
+  using(var payload=new Payload())
+  using(var zip=new ZipArchive(payload.Stream,ZipArchiveMode.Read)) {
    int done=0;
    foreach(var entry in zip.Entries) {
     string target=Path.GetFullPath(Path.Combine(directory,entry.FullName.Replace('/',Path.DirectorySeparatorChar)));

@@ -7,7 +7,8 @@ export default class ModelDance {
         if(!this.supported())return false;
         this.stop(true);
         const v=this.viewer;
-        this.active={style:['groove','step','wave','victory','defeat','hands_both','hand_left','hand_right'].includes(style)?style:'groove',time:0,root:v.model,blend:0,stopping:false,
+        if(!['groove','step','wave','twist','disco','march','victory','defeat','hands_both','hand_left','hand_right'].includes(style))return false;
+        this.active={style,time:0,root:v.model,blend:0,stopping:false,
             basePosition:v.model.position.clone(),baseRotation:v.model.rotation.clone()};
         // Always start from a finite pose. A previous idle gesture supplies
         // the blend-in; the physics solver keeps hair/clothing inertia.
@@ -70,6 +71,24 @@ export default class ModelDance {
             pose('leftElbow',0,win?-.75:-.18,0);pose('rightElbow',0,win?.75:.18,0);
             pose('leftThigh',jump*.04,0,0);pose('rightThigh',jump*.04,0,0);
             pose('leftKnee',-jump*.07,0,0);pose('rightKnee',-jump*.07,0,0);
+            v.physics.allowIdleSleep=false;v._avoidArmClipping?.();return true;
+        }
+        if(['twist','disco','march'].includes(a.style)){
+            const twist=a.style==='twist',disco=a.style==='disco';
+            a.root.position.copy(a.basePosition);a.root.position.y+=(disco?.035:twist?.015:.07)*bounce*t;
+            a.root.rotation.copy(a.baseRotation);a.root.rotation.y+=twist?pulse*.20*t:0;
+            pose('torso',0,twist?pulse*.16:0,disco?sway*.10:0);
+            pose('chest',0,twist?-pulse*.20:0,0);pose('head',0,twist?-pulse*.08:0,disco?-sway*.06:0);
+            const left=disco?.95+.35*pulse:twist?.30:.20+.15*pulse;
+            const right=disco?.18:twist?.30:.20-.15*pulse;
+            pose('leftArm',disco?-.35:-pulse*.12,-.15,vrm?1.35-left:-.72+left);
+            pose('rightArm',pulse*.12,.15,vrm?-1.35+right:.72-right);
+            pose('leftElbow',0,twist?-.9:-.35,0);pose('rightElbow',0,twist?.9:.35,0);
+            pose('leftWrist',disco?pulse*.25:0,0,0);pose('rightWrist',0,0,0);
+            const lift=a.style==='march'?.32:0;
+            pose('leftThigh',Math.max(0,pulse)*lift,twist?pulse*.12:0,0);
+            pose('rightThigh',Math.max(0,-pulse)*lift,twist?pulse*.12:0,0);
+            pose('leftKnee',-Math.max(0,pulse)*lift*.6,0,0);pose('rightKnee',-Math.max(0,-pulse)*lift*.6,0,0);
             v.physics.allowIdleSleep=false;v._avoidArmClipping?.();return true;
         }
         pose('torso',pulse*.035,sway*.1,sway*.075);pose('chest',-.025, -sway*.06,-sway*.035);pose('head',bounce*.035,-sway*.08,-sway*.04);

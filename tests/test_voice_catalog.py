@@ -53,7 +53,7 @@ class VoiceCatalogTests(unittest.TestCase):
             for language,corrected in [('Hindi','हाँ मास्टर, मैं आपकी मदद कर सकती हूँ।'),('Hinglish','Haan Master, main aapki help kar sakti hoon.')]:
                 model.reply_language=language
                 with patch.object(model,'_request_raw',side_effect=['Hello, how can I help you?',corrected]) as request:
-                    self.assertEqual(model._request([{'role':'user','content':'hello'}]),corrected)
+                    self.assertEqual(model._request([{'role':'user','content':'hello'}]),corrected.replace('मास्टर','Sir').replace('Master','Sir'))
                     self.assertEqual(request.call_count,2)
                     self.assertIn('Rewrite',request.call_args.args[0][0]['content'])
                 with patch.object(model,'_request_raw',return_value=corrected) as request:

@@ -24,7 +24,7 @@
             color: #b9fbff; background: #151021; font: 14px 'Segoe UI', sans-serif;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/style.css?v=cloud-providers61">
+    <link rel="stylesheet" href="/static/css/style.css?v=assistant69">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -134,7 +134,8 @@
             <button id="theme-btn" title="Environment Color Wheel &amp; Aura">🎨</button>
             <button id="quality-btn" title="Cycle model quality: Low, Balanced, High">Balanced</button>
             <button id="full-model-btn" type="button" aria-pressed="false">Full model</button>
-            <select id="dance-style" aria-label="Dance routine" class="no-drag"><option value="groove">Groove</option><option value="step">Side step</option><option value="wave">Arm wave</option></select>
+            <select id="dance-style" aria-label="Dance routine" class="no-drag"><option value="groove">Groove</option><option value="step">Side step</option><option value="wave">Arm wave</option><option value="twist">Twist</option><option value="disco">Disco</option><option value="march">March</option></select>
+            <button id="send-model-mobile" type="button">Send model to mobile</button>
             <button id="dance-btn" type="button">Dance</button>
             <button id="dance-stop-btn" type="button">Stop dance</button>
             <button id="pmx-editor-btn" type="button" class="hidden" title="Open the selected PMX in its native editor">PMX Editor</button>
@@ -803,11 +804,16 @@
                     </div>
                     <div class="modal-hint">Cloud mode sends messages and conversation context to your selected provider or custom endpoint. Camera images, screen frames and audio transcripts are included only when the corresponding access is enabled. Review the selected endpoint before saving.</div>
                     <div class="modal-hint">Your saved key uses Windows encryption or macOS Keychain. Leave the key field blank to keep it.</div>
+                    <div class="setting-group">
+                        <button id="find-cloud-models" type="button">Find available models</button>
+                        <label for="available-cloud-models">Available chat models:</label><select id="available-cloud-models"><option value="">Find models to populate this list</option></select>
+                        <span id="cloud-model-status" class="modal-hint" role="status">Listing models does not verify quota. Test API sends one small generation request, which may use API credit. It does not test voice or image support.</span>
+                    </div>
                     <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get a Gemini API key in Google AI Studio</a>
                 </div>
                 <div class="save-actions">
                     <button id="save-ai-settings" type="button" class="accent-btn save-btn">Save AI settings</button>
-                    <button id="test-ai-connection" type="button">Test saved connection</button>
+                    <button id="test-ai-connection" type="button">Test API / local connection</button>
                     <span id="ai-save-status" class="save-status-msg" role="status"></span>
                 </div>
             </div>
@@ -827,6 +833,12 @@
                 <div class="setting-group">
                     <label for="assistant-name-input">🌸 Assistant Name:</label>
                     <input type="text" id="assistant-name-input" placeholder="e.g. Sakura, Jarvis, Friday, Miku" autocomplete="off">
+                </div>
+
+                <div class="setting-group">
+                    <label for="user-address">Address me as:</label>
+                    <select id="user-address"><option value="sir">Sir</option><option value="maam">Ma’am</option><option value="none">No title</option></select>
+                    <p class="modal-hint">Used in Companion greetings and replies. Independent of the avatar’s gender.</p>
                 </div>
 
                 <div class="setting-group">
@@ -888,7 +900,7 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=phone-game67"></script>
+    <script type="module" src="/static/js/app.js?v=cloud-check74"></script>
 </body>
 </html>
 

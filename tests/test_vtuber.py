@@ -32,11 +32,11 @@ class VTuberTests(unittest.TestCase):
                 self.assertNotIn('private secret', str(messages))
                 self.assertIn('untrusted', messages[0]['content'])
                 self.assertEqual(len(llm.history), 1)
-                self.assertIn('Never address anyone as Master', messages[0]['content'])
+                self.assertIn('Never address anyone as Master', '\n'.join(m['content'] for m in messages if m['role']=='system'))
 
     def test_cohost_screen_prompt_uses_audience_address(self):
         with tempfile.TemporaryDirectory() as folder:
             llm=LLM(Path(folder)/'memory.json')
             with patch.object(llm,'_request',return_value='Nice play!') as request:
                 llm.screen_reaction('image',cohost=True)
-                self.assertIn('Never say Master or Beta',request.call_args.args[0][0]['content'])
+                self.assertIn('Never say Master or Beta','\n'.join(m['content'] for m in request.call_args.args[0] if m['role']=='system'))

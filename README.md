@@ -6,9 +6,12 @@ Sakura is a desktop character companion and webcam VTuber application under acti
 
 - PMX, VRM and Live2D model loading, expressions and model settings.
 - Webcam face and optional hand tracking, physics, and streaming controls.
-- Companion conversations using a Gemini API key or an optional local Qwen model.
+- Companion conversations through selected cloud providers or an optional local Qwen model, with provider-bound model discovery and small API generation checks.
+- Sakura Mobile: separate PC-controller and phone-local model/chat workflows, with authenticated model transfer and saved phone models.
 - Built-in speech voices and optional RVC voice conversion.
 - Optional NVIDIA Broadcast camera selection and NVIDIA AR SDK setup guidance. Native NVIDIA AR facial inference is not connected yet.
+
+See [15 October 2026 update notes](docs/UPDATE-2026-10-15.md) for mobile setup, cloud diagnostics, animation, rendering and installer changes, including testing limitations. Source stays private; compiled/obfuscated tester builds are published separately in [Sakura Downloads](https://github.com/soulofswords/Sakura-Downloads/releases/tag/beta-2026-10-15).
 
 ## Run from source on Windows
 

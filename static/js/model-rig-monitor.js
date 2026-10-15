@@ -2,7 +2,7 @@
 // classifier: only sustained, measured corruption can freeze a physics bone.
 function stableSignature(value){return JSON.stringify(value,(_,number)=>typeof number==='number'&&Number.isFinite(number)?Math.round(number*100000)/100000:number);}
 export default class ModelRigMonitor {
-    constructor(viewer){this.viewer=viewer;this.run=0;this.lastSample=0;this.vrmRest=new WeakMap();}
+    constructor(viewer){this.viewer=viewer;this.run=0;this.lastSample=0;this.vrmRest=new WeakMap();this.nodes=[];this.samples=new Map();this.finished=true;}
     key(){return 'sakura_rig_analysis:'+this.url;}
     start(url){
         this.viewer.rigAnalysis=null;this.viewer.rigDiagnosticImage=null;

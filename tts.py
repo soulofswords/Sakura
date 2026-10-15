@@ -34,9 +34,12 @@ def _run_coroutine_safely(fn, *args, **kwargs):
 
 def polish_spoken_text(text):
     """Keep linguistic punctuation; remove visual decoration before synthesis."""
+    from spoken_text import clean_performance_markup
+    text=clean_performance_markup(text)
+    text=re.sub(r'(?<=\d)\s*\*\s*(?=\d)',' times ',text)
     text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
     text = re.sub(r'^\s*(?:#{1,6}\s+|[-*•]\s+)', '', text, flags=re.MULTILINE)
-    text = text.replace('**', '').replace('__', '').replace('`', '').replace('~', '')
+    text = text.replace('*', '').replace('__', '').replace('`', '').replace('~', '')
     text = re.sub(r'[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]', '', text)
     text = re.sub(r'!{2,}', '!', text)
     text = re.sub(r'\?{2,}', '?', text)

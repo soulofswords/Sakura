@@ -51,6 +51,16 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
     };
     for(const id of ['connect-phone-btn','tracking-connect-phone-btn','settings-connect-phone-btn'])document.getElementById(id)?.addEventListener('click',connectPhone);
     let state={};
+    document.getElementById('send-model-mobile')?.addEventListener('click',async()=>{
+        const button=document.getElementById('send-model-mobile');button.disabled=true;
+        try{
+            const response=await fetch('/api/mobile/transfer-status'),data=await response.json();if(!response.ok)throw Error(data.error);
+            if(!data.enabled)throw Error('Enable Connect to Phone, then on the phone choose Local → Add model.');
+            if(!data.request||data.request.status!=='waiting')throw Error('On your phone choose Local → Add model. The PMX/Live2D folder or VRM file picker will open here automatically.');
+            const {openMobileModelTransfer}=await import('./mobile-model-transfer.js?v=phone-touch73');await openMobileModelTransfer(data.request.id);
+        }catch(error){status.textContent=error.message;openSettings();document.querySelector('.tab-btn[data-tab="general"]')?.click();}
+        finally{button.disabled=false;}
+    });
     async function poll(){
         if(!enabled||busy||!getViewer())return;
         busy=true;const viewer=getViewer();
@@ -63,7 +73,9 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
             if(!response.ok)return;
             const data=await response.json();if(!data.enabled){enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
             for(const command of data.commands||[]){
-                if(command.type==='tracking-start'){
+                if(command.type==='request-model'){
+                    void import('./mobile-model-transfer.js?v=phone-touch73').then(module=>module.openMobileModelTransfer(command.request_id)).catch(error=>{status.textContent=error.message;});
+                }else if(command.type==='tracking-start'){
                     getTracker()?.stop();remote=true;filter=new HeadPoseFilter();
                     window.dispatchEvent(new CustomEvent('sakura-phone-tracking',{detail:true}));
                     viewer.setVtuberTrackingMode(true);viewer.setUserTracking(true);

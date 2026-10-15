@@ -4,6 +4,7 @@ const context={performance:{now:()=>now},localStorage:{getItem:k=>saved.get(k),s
 vm.runInNewContext(fs.readFileSync('static/js/model-rig-monitor.js','utf8').replace('export default class ModelRigMonitor','class ModelRigMonitor')+'\nthis.Monitor=ModelRigMonitor;',context);
 const bone=new THREE.Bone();bone.name='hair';const node={index:7,bone,restLocal:new THREE.Vector3(),restQuat:new THREE.Quaternion()};
 const viewer={physics:{nodes:[node],mode:'normal'},captureSpoutFrame(){return null;},loadGeneration:1};const monitor=new context.Monitor(viewer);
+monitor.sample(1000);assert.equal(viewer.rigAnalysis,undefined,'Placeholder frames must not diagnose an unloaded rig');
 monitor.start('/models/test.pmx');for(let i=0;i<81;i++){now=i*100;monitor.sample(now);}assert.equal(viewer.rigAnalysis.frozen.length,0,'Valid hair never frozen');
 monitor.start('/models/test.pmx');for(let i=1;i<82;i++){now+=100;bone.position.set(5,0,0);monitor.sample(now);}assert.deepEqual(Array.from(viewer.rigAnalysis.frozen),[7]);assert.ok(!node.diagnosticStatic,'First load reports only');
 bone.position.set(0,0,0);monitor.start('/models/test.pmx');assert.equal(node.diagnosticStatic,true,'Next load freezes only identified node');

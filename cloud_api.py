@@ -61,8 +61,8 @@ def request(provider,model,key,messages,endpoint='',vision=False,summarizing=Fal
     except requests.RequestException:
         raise ValueError(f'{provider} could not be reached. Check your connection and endpoint.') from None
     if not response.ok:
-        reason={401:'API key rejected',403:'access denied',404:'model or endpoint not found',429:'rate limit or billing quota reached',503:'service temporarily unavailable'}.get(response.status_code,'request rejected')
-        raise ValueError(f'{provider}: {reason} (HTTP {response.status_code}). Check provider, model, key and billing.')
+        from cloud_diagnostics import provider_error
+        raise ValueError(provider_error(provider,response,key))
     try:
         data=response.json()
         if provider=='anthropic':reply=''.join(part.get('text','') for part in data.get('content',[]) if part.get('type')=='text')

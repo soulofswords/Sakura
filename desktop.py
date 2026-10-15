@@ -262,6 +262,42 @@ class DesktopApi:
         except Exception as error:
             return {'error': str(error)}
 
+    def choose_mobile_model_package(self,kind):
+        """The local user selects the complete folder; the phone cannot specify PC paths."""
+        import secrets
+        if kind not in ('pmx','vrm','live2d'):return {'error':'Choose PMX, VRM or Live2D.'}
+        win=self.holder.get('window')
+        if not win:return {'error':'The desktop window is not ready.'}
+        try:
+            win.show();win.restore()
+            selection=win.create_file_dialog(webview.FileDialog.OPEN if kind=='vrm' else webview.FileDialog.FOLDER,
+                allow_multiple=False,file_types=('VRM models (*.vrm)',) if kind=='vrm' else ())
+            if not selection:return {'cancelled':True}
+            folder=Path(selection[0]).resolve()
+            entries=[folder] if kind=='vrm' else sorted(p for p in folder.rglob('*') if p.is_file() and (p.suffix.lower()=='.pmx' if kind=='pmx' else p.name.lower().endswith('.model3.json')))
+            if not entries:raise ValueError('No '+kind.upper()+' model was found in that folder.')
+            identifier=secrets.token_hex(16);self._mobile_selection=(identifier,folder,kind,entries)
+            return {'selection':identifier,'entries':[p.name if kind=='vrm' else p.relative_to(folder).as_posix() for p in entries],
+                    'folder':folder.name,'format':kind}
+        except Exception as error:return {'error':str(error)}
+
+    def send_mobile_model_package(self,selection,index,request_id):
+        from mobile_link import link
+        try:
+            chosen=getattr(self,'_mobile_selection',None)
+            if not chosen or chosen[0]!=selection:raise ValueError('Choose the model folder again.')
+            _,folder,kind,entries=chosen
+            if not isinstance(index,int) or not 0<=index<len(entries):raise ValueError('Choose a model from the selected folder.')
+            result=link.stage_selection(entries[index],folder,kind,request_id);self._mobile_selection=None
+            return {'model':result}
+        except Exception as error:return {'error':str(error)}
+
+    def show_phone_transfer(self):
+        win=self.holder.get('window')
+        if win:
+            win.show();win.restore()
+        return True
+
     def open_library(self):
         return self.set_library_mode(True)
 

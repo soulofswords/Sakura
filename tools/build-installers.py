@@ -4,6 +4,7 @@ Only allowlisted application files are included, never user models, keys or memo
 """
 import hashlib
 import io
+import lzma
 import json
 from pathlib import Path
 import plistlib
@@ -33,15 +34,16 @@ DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'k
             'ollama_models_folder': 'llm-models', 'computer_control_enabled': False,
             'screen_enabled': False, 'screen_reactions_enabled': False,
             'vtuber_tracking_only': False, 'rvc_model': '', 'rvc_index': '',
-            'assistant_name': 'Sakura', 'wake_word': 'hey sakura', 'preserve_configuration_on_reinstall': True,
+            'assistant_name': 'Sakura', 'user_address':'sir', 'wake_word': 'hey sakura', 'preserve_configuration_on_reinstall': True,
             'model_quality': 'balanced', 'physics_mode': 'custom', 'physics_boost': 0,
             'physics_enabled': True, 'physics_wind': 0, 'pmx_texture_reference': False}
-def compile_cs(output, files, references=(), resource=None):
+def compile_cs(output, files, references=(), resource=None, bootstrap=None):
     args = [str(CSC), '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
             '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
             f'/win32icon:{BASE / "launcher/companion.ico"}', f'/out:{output}']
     args += [f'/reference:{ref}.dll' for ref in references]
     if resource: args += [f'/resource:{resource},SakuraPayload']
+    if bootstrap: args += [f'/resource:{bootstrap},SakuraBootstrap']
     subprocess.run(args + [str(CS_DIR / file) for file in files], check=True)
 
 def app_files():
@@ -80,7 +82,9 @@ def windows():
     compile_cs(BUILD/LAUNCHER_FILE, ['Launcher.cs','StartupDialog.cs','LocalModelDialog.cs'], ['System.Web.Extensions'])
     compile_cs(BUILD/'Uninstall.exe',['Uninstall.cs'])
     payload=BUILD/'windows-payload.zip'; manifest=[]
-    with zipfile.ZipFile(payload,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as output:
+    # Solid compression sees repeated code/data across packages; ZIP remains
+    # the extraction manifest container, with every original file retained.
+    with zipfile.ZipFile(payload,'w',compression=zipfile.ZIP_STORED) as output:
         def add(path,name):
             output.write(path,name);manifest.append(hashlib.sha256(path.read_bytes()).hexdigest()+'\t'+name)
         for path,name in records: add(path,name)
@@ -116,7 +120,12 @@ def windows():
         output.writestr('Sakura/installed-files.tsv','\n'.join(manifest))
         output.writestr('Sakura/INSTALLATION.txt','Imported characters and RVC voices are empty. Kokoro speech voices are included. Qwen is optional and downloaded on request.\nPython and third-party library licenses are in runtime/ and each package dist-info/licenses directory.\n')
     print('Compiling Windows installer…',flush=True)
-    compile_cs(OUT/INSTALLER_FILE,['Installer.cs'],['System.IO.Compression','System.IO.Compression.FileSystem','System.Web.Extensions'],payload)
+    compressed=BUILD/'windows-payload.xz'
+    with payload.open('rb') as source,lzma.open(compressed,'wb',preset=6,check=lzma.CHECK_CRC64) as target:
+        shutil.copyfileobj(source,target,1024*1024)
+    bootstrap=BASE/'tools/packaging-cache/python-3.12.10-embed-amd64.zip'
+    print(f'Solid payload: {payload.stat().st_size:,} → {compressed.stat().st_size:,} bytes; offline decoder included',flush=True)
+    compile_cs(OUT/INSTALLER_FILE,['Installer.cs'],['System.IO.Compression','System.IO.Compression.FileSystem','System.Web.Extensions'],compressed,bootstrap)
 
 MAC_INSTALL = r'''#!/bin/bash
 set -euo pipefail

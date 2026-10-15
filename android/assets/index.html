@@ -1,8 +1,30 @@
 <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta charset="utf-8">
 <title>Sakura Mobile</title><style>
+.local-setup-dialog{box-sizing:border-box;width:calc(100% - 24px);max-width:520px;max-height:90dvh;overflow:auto;background:#151023;color:#f5f2ff;border:1px solid #655080;border-radius:20px;padding:20px}.local-setup-dialog::backdrop{background:#05030bbb}.local-setup-dialog h2{font-size:22px;color:#7df7ee}.local-setup-dialog p{white-space:pre-wrap;line-height:1.5}
 :root{color-scheme:dark;font:16px system-ui;background:#0b0914;color:#f5f2ff}body{margin:0;padding:24px 18px}h1{font-size:26px;color:#7df7ee}section{padding:18px;border:1px solid #36304a;border-radius:20px;background:#151023;margin:14px 0}input,button,select,textarea{box-sizing:border-box;padding:13px;border-radius:12px;border:1px solid #49405d;background:#21192f;color:white;font:inherit;margin:5px 0;width:100%}button{background:#38285a}button.active{background:#126661;border-color:#79eee7}label{font-size:14px;color:#cec2e3}nav{display:flex;gap:6px}nav button{font-size:13px}#status{color:#8af2de;white-space:pre-wrap}#avatar{max-height:240px;max-width:100%;display:block;margin:auto}video{width:100%;border-radius:14px;transform:scaleX(-1)}.hidden{display:none}#expressions{display:grid;grid-template-columns:1fr 1fr;gap:8px}#conversation{white-space:pre-wrap;max-height:260px;overflow:auto;line-height:1.5}small{color:#c1b5d7}#send:disabled{opacity:.5}
 </style><script type="importmap">{"imports":{"three":"/static/vendor/three/build/three.module.js"}}</script></head><body>
-<h1>🌸 Sakura Mobile</h1><p>One character. PC rendering. Phone controls.</p>
+<h1>🌸 Sakura Mobile</h1><p id="mode-description">Your character, on PC or on your phone.</p>
+<!-- LOCAL-START -->
+<section id="app-modes"><h2>How would you like to use Sakura?</h2><button id="mode-pc"><b>Connect to PC</b><br><small>Control your PC avatar, expressions and phone tracking.</small></button><button id="mode-local"><b>Local</b><br><small>Run your saved model and assistant on this phone. Use it anywhere with internet. No PC connection needed.</small></button></section>
+<button id="change-mode" class="hidden">Change mode</button>
+<main id="local-mode" class="hidden">
+<p id="local-status" role="status">Local · runs on this phone · PC connection not required</p>
+<iframe id="local-avatar" title="Your model" style="width:100%;height:42vh;border:0;border-radius:16px" sandbox="allow-scripts allow-same-origin"></iframe>
+<details><summary>Local settings and models</summary><section>
+<label for="local-provider">API provider</label><select id="local-provider"><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option></select>
+<label for="local-key">API key</label><input id="local-key" type="password" autocomplete="off">
+<label for="local-model-id">AI model ID</label><input id="local-model-id" value="gemini-flash-latest">
+<label for="local-voice">Voice</label><select id="local-voice"><option value="female">Female</option><option value="male">Male</option></select>
+<label for="local-address">Address me as</label><select id="local-address"><option value="sir">Sir</option><option value="maam">Ma’am</option><option value="none">No title</option></select>
+<button id="local-save">Save settings</button><small>API replies and voices use internet and your provider’s quota. Keys are encrypted in this phone’s private storage. Female and Male voices are saved for your next launch.</small>
+<label for="local-format">Model type</label><select id="local-format"><option value="live2d">Live2D</option><option value="pmx">PMX</option><option value="vrm">VRM</option></select>
+<p>At least one model must be saved on this phone. Adding a model connects to the PC and opens its folder/file picker automatically. Once received, the model loads from phone storage wherever you are.</p><button id="local-receive">Add model from PC</button><button id="local-choose-model">Choose saved model</button>
+<label for="local-models">Saved phone models</label><select id="local-models"></select><small>After transfer, the model stays on this phone. The PC can be disconnected. Large desktop models may exceed your phone’s memory.</small>
+</section></details>
+<section><div id="local-conversation" style="max-height:220px;overflow:auto;white-space:pre-wrap" aria-live="polite"></div><textarea id="local-message" maxlength="10000" placeholder="Chat, ask the time, set a timer, or open an installed app"></textarea><label><input id="local-speech" type="checkbox" checked style="width:auto"> Speak replies</label><nav><button id="local-dictate">Dictate</button><button id="local-send">Send</button></nav><small>Dictation uses your phone’s speech service. Review the words before sending.</small><nav><button id="local-stop">Stop speaking</button><button id="local-clear">Clear conversation</button></nav></section>
+</main>
+<!-- LOCAL-END -->
+<div id="pc-mode" class="hidden">
 <section id="pair"><nav><button id="existing-device">Existing devices</button><button id="new-device">New device</button></nav><div id="remembered-devices"></div><div id="new-pair"><label>PC address from Settings → General → Phone connection</label><input id="address" placeholder="http://192.168.1.10:8771" inputmode="url"><label>Pairing code</label><input id="code" inputmode="numeric" maxlength="6" placeholder="6 digits"><button id="connect">Connect to Sakura</button></div><small>Both devices must use the same trusted home Wi-Fi. The PC app must stay open. Known devices reconnect without another code until forgotten on the PC.</small></section>
 <p id="status" role="status">Not connected</p>
 <button id="disconnect" class="hidden">Disconnect from PC</button>
@@ -12,4 +34,4 @@
 <section id="phone-camera-section"><h2>Companion camera</h2><p>Let the PC assistant see you or an object. This does not start VTuber tracking.</p><video id="phone-camera-preview" autoplay muted playsinline></video><button id="camera-share">Share camera with Companion</button><small>Uses the camera selected in the VTuber tab (front/rear). JPEG images go to the paired PC and, when used for a reply, its selected AI provider. Off by default.</small></section>
 <section id="expression" class="hidden"><h2>Expressions</h2><div id="expressions"></div><button id="clear">Clear expressions</button></section>
 <section id="vtuber" class="hidden"><h2>Phone face tracking</h2><label for="camera-facing">Tracking camera</label><select id="camera-facing"><option value="user">Front camera</option><option value="environment">Rear camera</option></select><video id="camera" autoplay muted playsinline></video><button id="tracking">Start camera tracking</button><button id="calibrate">Calibrate neutral face</button><small>Uses your selected camera for head, eyes and mouth. Face measurements are sent to the PC; camera video is not uploaded. Hand tracking is not included in this first phone build.</small></section>
-</main><script type="module" src="/mobile.js"></script></body></html>
+</main></div><script type="module" src="/mobile.js"></script></body></html>

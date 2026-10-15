@@ -19,6 +19,7 @@ for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss
 set "SAKURA_BUILD_LOG=%SAKURA_RELEASE_REPORTS%\Build-%SAKURA_BUILD_STAMP%.log"
 echo Building updated protected Companion and VTuber installers. Please wait.
 echo Character models and personal data are excluded.
+echo Solid compression keeps all runtime features; packing and unpacking may take longer.
 echo Build log: %SAKURA_BUILD_LOG%
 echo Protected macOS DMGs require a Mac build host; existing DMGs will remain unchanged.
 "%SAKURA_BUILD_PYTHON%" -u "tools\build-split-installers.py" --output "%SAKURA_RELEASE_OUTPUT%" >"%SAKURA_BUILD_LOG%" 2>&1

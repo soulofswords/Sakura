@@ -20,12 +20,37 @@ def hand_reply(action,language='English',supported=True):
 
 def dance_action(text):
     lower=text.strip().lower()
-    if not re.search(r'\bdanc(?:e|ing)\b|नाच|डांस|\bnaach|\bnach[o]?\b',lower):return None
+    if not re.search(r'\bdanc(?:e|ing)\b|नाच|डांस|\bnaach|\bnach[o]?\b',lower):
+        named=re.search(r'\b(twist|disco|march|moonwalk|ballet|tango|salsa|breakdance|waltz|twerk)\b',lower)
+        if named and re.search(r'\b(?:can|could|please|do|try|show|switch|change)\b',lower):
+            return named.group(1) if named.group(1) in ('twist','disco','march') else 'unsupported'
+        return None
     if re.search(r'\b(?:stop|cancel|don\x27t|do not|mat|band)\b|बंद|मत',lower):return 'stop'
-    if not re.search(r'can (?:you|u)|could (?:you|u)|will (?:you|u)|please|show|do (?:a|the)|make (?:you|u)|for me|करो|कर सकती|नाचो|\b(?:karo|dikhao|sakti|sakte|naacho|nacho)\b',lower) and not re.fullmatch(r'(?:sakura[, ]+)?(?:dance|naach|nacho|डांस|नाचो)(?:[!. ]*)',lower):return None
+    for style,pattern in [('twist',r'\btwist\b'),('disco',r'\bdisco\b'),('march',r'\bmarch(?:ing)?\b')]:
+        if re.search(pattern,lower):return style
+    if not re.search(r'change|switch|can (?:you|u)|could (?:you|u)|will (?:you|u)|please|show|do (?:a|the)|make (?:you|u)|for me|करो|कर सकती|नाचो|\b(?:karo|dikhao|sakti|sakte|naacho|nacho)\b',lower) and not re.fullmatch(r'(?:sakura[, ]+)?(?:dance|naach|nacho|डांस|नाचो)(?:[!. ]*)',lower):return None
     if 'wave' in lower:return 'wave'
     if re.search(r'step|side|shuffle',lower):return 'step'
+    if 'groove' in lower:return 'groove'
+    # Only generic dance requests default to Groove. An unknown named move
+    # must not be presented as though it were a supported routine.
+    generic={'can','could','would','will','you','u','please','show','me','us','do','a','the','make','your','for','dance','dancing','little','bit','some','sakura','now','here','one','to','style','change','switch','routine','other','another','different','moves','move','kya','tum','kar','sakti','sakte','ho','karo','dikhao','naach','nacho','i','want','see','it'}
+    if set(re.findall(r'[a-z]+',lower))-generic:return 'unsupported'
     return 'groove'
+
+def dance_style_followup(text,current=None):
+    if not current:return None
+    lower=text.strip().lower()
+    if not re.search(r'\b(?:change|switch|try|another|different)\b',lower):return None
+    for style in ['twist','disco','march']:
+        if re.search(r'\b'+style+r'\b',lower):return style
+    if re.search(r'\bwave\b',lower):return 'wave'
+    if re.search(r'\b(?:step|shuffle)\b',lower):return 'step'
+    if 'groove' in lower:return 'groove'
+    if re.search(r'\b(?:style|dance|move|routine)\b',lower) or re.fullmatch(r'(?:please )?(?:try|do|show me|switch to) (?:another(?: one)?|a different one|something different)[.!? ]*',lower):
+        styles=['groove','step','wave','twist','disco','march']
+        return styles[(styles.index(current)+1)%len(styles)] if current in styles else 'groove'
+    return None
 
 def dance_reply(action,language='English',supported=True):
     if not supported:
@@ -33,4 +58,6 @@ def dance_reply(action,language='English',supported=True):
                 'Hinglish':'Master, dance ke liye pehle ek rig wala PMX ya VRM model select karo.'}.get(language,'Master, select a rigged PMX or VRM model first so I can dance.')
     if action=='stop':
         return {'Hindi':'ठीक है मास्टर, नृत्य रोक रही हूँ।','Hinglish':'Theek hai Master, dance rok rahi hoon.'}.get(language,'Okay, Master, stopping the dance.')
-    return {'Hindi':'हाँ मास्टर, देखिए मेरा छोटा सा नृत्य!','Hinglish':'Haan Master, dekho mera chhota sa dance!'}.get(language,'Of course, Master! Here comes a little dance.')
+    label={'groove':'Groove','step':'Side step','wave':'Arm wave','twist':'Twist','disco':'Disco','march':'March'}[action]
+    hindi={'groove':'ग्रूव','step':'साइड स्टेप','wave':'आर्म वेव','twist':'ट्विस्ट','disco':'डिस्को','march':'मार्च'}[action]
+    return {'Hindi':f'हाँ, अब {hindi} नृत्य कर रही हूँ।','Hinglish':f'Haan, ab {label} dance kar rahi hoon.'}.get(language,f'Here comes {label}.')

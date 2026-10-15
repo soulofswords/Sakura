@@ -6,6 +6,52 @@ import httpx
 from mobile_link import MobileLink
 
 class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_requested_complete_folder_reaches_authenticated_download(self):
+        import zipfile
+        import io
+        from unittest.mock import patch
+        await self.pair()
+        request_id=(await self.client.post('/command',json={'type':'request-model'})).json()['request_id']
+        folder=Path(self.directory.name)/'selected';(folder/'nested').mkdir(parents=True)
+        model=folder/'nested/model.pmx';model.write_bytes(b'pmx')
+        (folder/'extra.custom').write_bytes(b'keep this asset too')
+        with patch('config.BASE_DIR',Path(self.directory.name)):
+            metadata=self.link.stage_selection(model,folder,'pmx',request_id)
+        state=(await self.client.get('/state')).json()['transfer_request']
+        self.assertEqual(state['status'],'ready');self.assertEqual(state['model'],metadata)
+        response=await self.client.get('/model/package/'+metadata['id']);self.assertEqual(response.status_code,200)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertEqual(archive.read('nested/model.pmx'),b'pmx')
+            self.assertEqual(archive.read('extra.custom'),b'keep this asset too')
+        result={'type':'model-result','request_id':request_id,'model_id':metadata['id'],'status':'received'}
+        self.assertEqual((await self.client.post('/command',json={**result,'model_id':'wrong'})).status_code,409)
+        self.assertEqual((await self.client.post('/command',json=result)).status_code,200)
+        self.assertEqual((await self.client.get('/state')).json()['transfer_request']['status'],'received')
+    async def test_phone_requests_picker_and_cancel_is_not_tracking(self):
+        self.assertEqual((await self.client.post('/command',json={'type':'request-model'})).status_code,401)
+        await self.pair()
+        response=await self.client.post('/command',json={'type':'request-model'})
+        request_id=response.json()['request_id']
+        self.assertEqual(self.link.poll({})['commands'],[{'type':'request-model','request_id':request_id}])
+        self.assertEqual((await self.client.get('/state')).json()['transfer_request']['status'],'waiting')
+        self.assertEqual((await self.client.post('/command',json={'type':'request-model'})).status_code,409)
+        self.link.transfer_result(request_id,'preparing')
+        self.assertEqual((await self.client.get('/state')).json()['transfer_request']['status'],'preparing')
+        await self.client.post('/command',json={'type':'cancel-model','request_id':request_id})
+        self.assertEqual((await self.client.get('/state')).json()['transfer_request']['status'],'cancelled')
+        self.assertEqual((await self.client.post('/command',json={'type':'request-model'})).status_code,200)
+        with self.assertRaises(ValueError):self.link.transfer_result(request_id,'preparing')
+    async def test_model_package_requires_pairing_and_exact_active_identifier(self):
+        archive=Path(self.directory.name)/'model.zip';archive.write_bytes(b'zip')
+        self.link.model_package=archive;self.link.model_transfer={'id':'a'*32,'name':'Test'}
+        self.assertEqual((await self.client.get('/model/package/'+'a'*32)).status_code,401)
+        await self.pair()
+        self.assertEqual((await self.client.get('/state')).json()['model_transfer']['name'],'Test')
+        self.link.poll({'edition':'companion'})
+        self.assertEqual((await self.client.get('/state')).json()['model_transfer']['name'],'Test')
+        self.assertEqual((await self.client.get('/model/package/'+'b'*32)).status_code,404)
+        response=await self.client.get('/model/package/'+'a'*32)
+        self.assertEqual(response.content,b'zip')
     async def test_pairing_does_not_start_tracking_and_camera_is_separate(self):
         import base64
         await self.pair();self.assertEqual(self.link.poll({'edition':'companion'})['commands'],[])

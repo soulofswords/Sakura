@@ -18,10 +18,10 @@ export function installColorDial(input,host) {
     function sync(){const channels=input.value.slice(1).match(/../g).map(n=>parseInt(n,16)/255),max=Math.max(...channels),min=Math.min(...channels),difference=max-min;value=max;saturation=max?difference/max:0;if(difference){const i=channels.indexOf(max);hue=((i===0?(channels[1]-channels[2])/difference:i===1?2+(channels[2]-channels[0])/difference:4+(channels[0]-channels[1])/difference)*60+360)%360;}draw();}
     function move(event){if(!dragging)return;const rect=canvas.getBoundingClientRect(),x=(event.clientX-rect.left)*240/rect.width,y=(event.clientY-rect.top)*240/rect.height;
         if(dragging==='hue')hue=(Math.atan2(y-120,x-120)*180/Math.PI+450)%360;
-        else{saturation=Math.max(0,Math.min(1,(x-58)/124));value=1-Math.max(0,Math.min(1,(y-58)/124));}draw();
+        else{saturation=Math.max(0,Math.min(1,(x-58)/124));value=1-Math.max(0,Math.min(1,(y-58)/124));}draw();input.dispatchEvent(new Event('input',{bubbles:true}));
     }
     canvas.onpointerdown=event=>{const rect=canvas.getBoundingClientRect(),x=(event.clientX-rect.left)*240/rect.width,y=(event.clientY-rect.top)*240/rect.height;const distance=Math.hypot(x-120,y-120);dragging=distance>=91&&distance<=116?'hue':x>=58&&x<=182&&y>=58&&y<=182?'square':null;if(dragging){canvas.setPointerCapture(event.pointerId);move(event);}};
     canvas.onpointermove=move;canvas.onpointerup=canvas.onpointercancel=()=>dragging=null;
-    fields.forEach(field=>field.oninput=()=>{input.value=hex(fields.map(f=>Math.max(0,Math.min(255,Number(f.value)||0))));sync();});
+    fields.forEach(field=>field.oninput=()=>{input.value=hex(fields.map(f=>Math.max(0,Math.min(255,Number(f.value)||0))));sync();input.dispatchEvent(new Event('input',{bubbles:true}));});
     input.addEventListener('input',sync);sync();return {sync};
 }

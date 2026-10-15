@@ -1,4 +1,5 @@
 import os
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 from fastapi.testclient import TestClient
@@ -28,6 +29,9 @@ class StartupModeTests(unittest.TestCase):
                 self.assertEqual(client.get('/api/tracking/mode').json()['tracking_only'], tracking)
                 self.assertEqual(client.get('/api/tracking/mode').json()['startup_mode'], mode)
                 self.assertEqual(model.configure_local.call_count, 1 if mode=='local' else 0)
+                model.warmup.assert_not_called()
+                self.assertIsNone(app.app.state.llm_warmup,
+                                  'Desktop startup waits for the first avatar frame')
                 if tracking:
                     self.assertIsNone(app.app.state.llm_warmup)
                     self.assertEqual(client.post('/api/chat', json={'text':'hello'}).status_code, 409)
@@ -46,4 +50,36 @@ class StartupModeTests(unittest.TestCase):
 
     def test_vtuber_never_warms_local_model_and_blocks_ai(self):
         self.check_mode('vtuber', 'ollama', True)
+
+
+class RendererReadyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_warmup_is_deferred_and_idempotent(self):
+        model = Mock(provider='ollama')
+        gate = asyncio.Event()
+        async def settle(_seconds):
+            await gate.wait()
+        with patch.object(app, 'llm', model), \
+             patch.object(app.app.state, 'renderer_ready', False, create=True), \
+             patch.object(app.app.state, 'tracking_only', False, create=True), \
+             patch.object(app.app.state, 'llm_warmup', None, create=True), \
+             patch.object(app.asyncio, 'sleep', side_effect=settle):
+            await app.renderer_ready()
+            task = app.app.state.llm_warmup
+            await app.renderer_ready()
+            self.assertIs(task, app.app.state.llm_warmup)
+            model.warmup.assert_not_called()
+            gate.set()
+            await task
+            model.warmup.assert_called_once_with()
+
+    async def test_tracking_and_cloud_do_not_load_qwen(self):
+        for provider, tracking in [('ollama', True), ('gemini', False)]:
+            model = Mock(provider=provider)
+            with patch.object(app, 'llm', model), \
+                 patch.object(app.app.state, 'renderer_ready', False, create=True), \
+                 patch.object(app.app.state, 'tracking_only', tracking, create=True), \
+                 patch.object(app.app.state, 'llm_warmup', None, create=True):
+                await app.renderer_ready()
+                self.assertIsNone(app.app.state.llm_warmup)
+                model.warmup.assert_not_called()
 
