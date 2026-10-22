@@ -27,3 +27,39 @@ export default class CompanionCamera {
     remoteFrame(image){if(this.remote&&this.enabled&&typeof image==='string'&&image.startsWith('/9j/')){this.remoteImage=image;this.remoteAt=Date.now();}}
     stop(){this.generation++;this.enabled=false;this.remote=false;this.remoteImage=null;this.remoteAt=0;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;if(this.video){this.video.pause();this.video.srcObject=null;}this.video=null;this.onChange(false);}
 }
+
+// Companion mode offers either image perception or local avatar tracking.
+// Keep the paths mutually exclusive so tracking frames are never uploaded to
+// the assistant and object images never start the tracking worker.
+export class CompanionCameraModes {
+    constructor({objectCamera, avatarTracking, viewer}) {
+        this.objectCamera=objectCamera;
+        this.avatarTracking=avatarTracking;
+        this.viewer=viewer;
+        this.mode='';
+    }
+    async start(mode, deviceId='') {
+        if(!['objects','tracking'].includes(mode))throw new Error('Choose object recognition or face tracking.');
+        this.stop();
+        this.mode=mode;
+        try {
+            if(mode==='objects') await this.objectCamera.start(deviceId);
+            else {
+                this.viewer?.setVtuberTrackingMode(true);
+                await this.avatarTracking.start(deviceId);
+            }
+        } catch(error) {
+            this.stop();
+            throw error;
+        }
+    }
+    stop() {
+        const wasTracking=this.mode==='tracking'||!!this.avatarTracking?.enabled;
+        this.objectCamera.stop();
+        if(wasTracking){
+            this.avatarTracking.stop();
+            this.viewer?.setVtuberTrackingMode(false);
+        }
+        this.mode='';
+    }
+}

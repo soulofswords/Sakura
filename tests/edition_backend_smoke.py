@@ -22,6 +22,18 @@ for line in (root/'installed-files.tsv').read_text(encoding='utf-8').splitlines(
  digest,name=line.split('\t');assert hashlib.sha256((root.parent/name).read_bytes()).hexdigest()==digest,name
 assert subprocess.run([str(root.parent/LAUNCHER_NAME),'--check']).returncode==0
 
+# Verify newly added modules and command behavior in the compiled release,
+# rather than accidentally relying on development sources.
+from hindi_conversation import common_reply
+assert common_reply('appko hindi ati hai','Hindi')=='हाँ, हम हिंदी में बात कर सकते हैं।'
+from assistant_reminders import Reminders
+import tempfile
+with tempfile.TemporaryDirectory() as folder:
+    store=Reminders(Path(folder)/'timers.json')
+    reply=store.command('start a timer for 2 mins')
+    assert '2 min 0 sec' in reply
+    assert store.list()[0]['id'] not in reply
+
 async def check():
  async with app.lifespan(app.app):
   if edition=='vtuber':assert app.llm is None and 'llm' not in sys.modules

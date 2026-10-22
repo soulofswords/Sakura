@@ -22,6 +22,8 @@ bone.position.set(0,0,0);bone.quaternion.identity();node.params={maxAngle:50};mo
 for(let i=1;i<82;i++){now+=100;bone.rotation.z=70*Math.PI/180;monitor.sample(now);}
 assert.deepEqual(Array.from(viewer.rigAnalysis.frozen),[7],'Sustained authored-limit violation is detected');assert.equal(captures,2);assert.equal(imageWrites,1);assert.ok(viewer.rigDiagnosticReference&&viewer.rigDiagnosticImage);assert.equal(node.diagnosticStatic,false);
 monitor.start('/models/limits.pmx?cache=second');assert.equal(node.diagnosticStatic,true,'Cache busting cannot lose automatic freeze');
+bone.rotation.z=1;monitor.enforce();
+assert.ok(bone.quaternion.angleTo(node.restQuat)<1e-6,'PMX freeze is enforced every frame, just like VRM');
 monitor.unfreezeBone(bone);assert.equal(node.diagnosticStatic,false,'User can restore diagnosed bone');assert.equal(viewer.diagnosticFrozenBones.size,0);
 // Brief legitimate movements are retained even when temporarily past a limit.
 monitor.reset();for(let i=1;i<82;i++){now+=100;bone.rotation.z=i<15?70*Math.PI/180:0;monitor.sample(now);}assert.equal(viewer.rigAnalysis.frozen.length,0);

@@ -55,7 +55,9 @@ class VoiceCatalogTests(unittest.TestCase):
                 with patch.object(model,'_request_raw',side_effect=['Hello, how can I help you?',corrected]) as request:
                     self.assertEqual(model._request([{'role':'user','content':'hello'}]),corrected.replace('मास्टर','Sir').replace('Master','Sir'))
                     self.assertEqual(request.call_count,2)
-                    self.assertIn('Rewrite',request.call_args.args[0][0]['content'])
+                    self.assertIn('latest user question',request.call_args.args[0][0]['content'])
+                    import json
+                    self.assertEqual(json.loads(request.call_args.args[0][1]['content'])['latest_user_question'],'hello')
                 with patch.object(model,'_request_raw',return_value=corrected) as request:
                     model._request([{'role':'user','content':'hello'}]);self.assertEqual(request.call_count,1)
                 with patch.object(model,'_request_raw',return_value='[QUIET]') as request:

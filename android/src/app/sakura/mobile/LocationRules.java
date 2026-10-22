@@ -1,0 +1,13 @@
+package app.sakura.mobile;
+import java.util.Locale;
+
+final class LocationRules {
+ static boolean nearby(String text){String t=text.toLowerCase(Locale.ROOT);return t.matches("(?s).*(?:near(?:by| me| here| us)|around (?:me|here|us)|closest|nearest|aas ?paas|पास|नज़दीक|नजदीक).*");}
+ static boolean asksLocation(String text){String t=text.toLowerCase(Locale.ROOT);return nearby(t)||t.matches("(?s).*(?:where am i|where i am|my (?:current )?location|current city|which city|moved|travel(?:led|ing)|out of mumbai|मैं कहाँ|मेरी लोकेशन|मेरी जगह).*");}
+ static boolean restaurants(String text){return text.toLowerCase(Locale.ROOT).matches("(?s).*(?:restaurant|cafe|café|food|eat|lunch|dinner|breakfast|खाना|रेस्टोरेंट|कैफे).*");}
+ static boolean restaurantSearch(String text){String t=text.toLowerCase(Locale.ROOT);if(t.matches("(?s).*(?:recipe|cook|meaning of|define |what is a restaurant|how to open a restaurant).*")&&!nearby(t))return false;return nearby(t)&&restaurants(t)||t.matches("(?s).*(?:suggest|recommend|find|search|look for|check|show|where|address|rating|review|open now|अच्छा|ढूंढ|सुझा).*")&&(restaurants(t)||t.matches("(?s).*(?:barbeque nation|barbecue nation|mcdonald'?s|starbucks|domino'?s|pizza hut|burger king|kfc).*"));}
+ static String restaurantName(String text){String t=text.trim().replaceAll("[?!.,]+$","");java.util.regex.Matcher brand=java.util.regex.Pattern.compile("(?i)(barbe?cue nation|barbeque nation|mcdonald'?s|starbucks|domino'?s|pizza hut|burger king|kfc)").matcher(t);if(brand.find())return brand.group(1);java.util.regex.Matcher named=java.util.regex.Pattern.compile("(?i)(?:restaurant|cafe|café) (?:called |named )(.{2,100})").matcher(t);if(named.find())return named.group(1).replaceAll("(?i) (?:near|in|around) .*$","").trim();named=java.util.regex.Pattern.compile("(?i)(?:find|check|search for|where is|address of|reviews? (?:of|for)) (?:the )?(.{2,100}?) (?:restaurant|cafe|café)(?: (?:near|in|around) .*)?$").matcher(t);if(named.find()){String name=named.group(1).trim();if(!name.matches("(?i).*(?:good|best|nice|nearby|a |me |some ).*"))return name;}return "";}
+ static boolean localWeather(String text){return WeatherRules.current(text)&&WeatherRules.city(text).isEmpty();}
+ static boolean fresh(long now,long fix,float accuracy){return fix>0&&now>=fix&&now-fix<=60000&&Float.isFinite(accuracy)&&accuracy>0&&accuracy<=5000;}
+ static double distance(double lat,double lon,double a,double b){double x=Math.toRadians(a-lat),y=Math.toRadians(b-lon);double h=Math.sin(x/2)*Math.sin(x/2)+Math.cos(Math.toRadians(lat))*Math.cos(Math.toRadians(a))*Math.sin(y/2)*Math.sin(y/2);return 6371000*2*Math.asin(Math.sqrt(Math.min(1,h)));}
+}

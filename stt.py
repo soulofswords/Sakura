@@ -97,6 +97,8 @@ class SpeechToText:
         if peak < 0.20:
             audio = np.clip(audio * (0.20 / peak), -1.0, 1.0)
 
+        # Short command names need a modest domain vocabulary, not a guessed
+        # transcript. Language is explicit for microphone input; system audio stays auto.
         # Short Hindi phrases are often misdetected as English by tiny Whisper.
         # Pin Hindi/Hinglish microphone input to Hindi; system audio keeps auto.
         segments, info = self.model.transcribe(
@@ -107,10 +109,20 @@ class SpeechToText:
             vad_parameters=dict(min_silence_duration_ms=400),
             beam_size=5,
             condition_on_previous_text=False,
+            temperature=0.0,
+            initial_prompt=('Sakura. Delhi, New Delhi, Mumbai, Bengaluru, Chennai, Hyderabad, Kolkata, Pune, India. '
+                            'News, weather, time, timer, alarm, open an app, hello, laugh, stop, wait.'),
         )
-        text = " ".join(seg.text for seg in segments
-                        if getattr(seg, 'no_speech_prob', 0) < .6
-                        and getattr(seg, 'avg_logprob', 0) > -1.0).strip()
+        accepted=[]
+        for seg in segments:
+            score=getattr(seg,'avg_logprob',0);silence=getattr(seg,'no_speech_prob',0)
+            if silence>=.6 or score<=-1.0:continue
+            # Short uncertain fragments are especially likely to become an
+            # invented name. Ask for repetition rather than confidently send it.
+            if len(seg.text.split())<=4 and (score<-.85 or (score<-.65 and silence>.35)):continue
+            if getattr(seg,'compression_ratio',0)>2.4:continue
+            accepted.append(seg.text)
+        text=' '.join(accepted).strip()
         if text:
             return text
 

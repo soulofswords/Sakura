@@ -1,0 +1,4 @@
+# Supported SDK v1 transport API used by agent_connections.py.
+mcp==1.30.0
+jsonschema>=4.20,<5
+python-docx>=1.1,<2.0

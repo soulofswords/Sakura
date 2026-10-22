@@ -1,15 +1,17 @@
 export function splitSpeech(text) {
     const normalized = text.trim().replace(/\s+/gu, ' ');
     if (!normalized) return [];
+    // Never merge the first short sentence with later details: a CPU status
+    // answer should start speaking the CPU value while RAM/GPU speech prepares.
     // Keep the opening small so local TTS can start before the entire reply
     // finishes rendering. Prefer sentence boundaries over arbitrary cuts.
-    if (normalized.length <= 72) return [normalized];
+    if (normalized.length <= 48) return [normalized];
     const sentences = normalized.split(/(?<=[.!?।])\s+/u).filter(Boolean);
     const chunks = [];
     for (const sentence of sentences) {
         let part = '';
         for (const word of sentence.split(/\s+/u)) {
-            if (part && part.length + word.length + 1 > 72) {
+            if (part && part.length + word.length + 1 > (chunks.length === 0 ? 48 : 72)) {
                 chunks.push(part);
                 part = '';
             }
@@ -20,7 +22,7 @@ export function splitSpeech(text) {
     const phrases = [];
     for (const chunk of chunks) {
         const last = phrases.length - 1;
-        if (last >= 0 && phrases[last].length < 36 && phrases[last].length + chunk.length + 1 <= 72) phrases[last] += ' ' + chunk;
+        if (last > 0 && phrases[last].length < 36 && phrases[last].length + chunk.length + 1 <= 72) phrases[last] += ' ' + chunk;
         else phrases.push(chunk);
     }
     return phrases;

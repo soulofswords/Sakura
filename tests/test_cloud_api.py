@@ -56,8 +56,8 @@ class CloudTests(unittest.TestCase):
             with patch('cloud_api.requests.post') as post:
                 post.return_value=Mock(ok=True);post.return_value.json.return_value={'choices':[{'message':{'content':'Hello!'}}]}
                 self.assertEqual(model.chat('hello'),'Hello!')
-                self.assertEqual(model.history[-1]['content'],'Hello!')
-                self.assertIn('api.openai.com',post.call_args.args[0])
+                self.assertEqual(model.history,[])
+                post.assert_not_called()
 
     def test_settings_detect_route_save_and_redact(self):
         from fastapi.testclient import TestClient

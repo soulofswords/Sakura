@@ -1,43 +1,90 @@
+import { appendEvidence } from './response-evidence.js?v=medium103';
+import {installChatAttachments} from './chat-attachments.js?v=files105';
+import {installSystemTools} from './system-tools.js?v=metrics93';
+installSystemTools();
+document.getElementById('open-agent-panel')?.addEventListener('click',async()=>{
+    const status=document.getElementById('agent-panel-status');
+    status.textContent='Opening Agent mode in Sakura Companion…';
+    window.sakuraSetAgentMode?.(true);
+});
 import {installCompanionToolbar} from './companion-toolbar.js?v=1';
+import {updateAppBrand} from './app-branding.js?v=branding79';
+import {playGameLaughter} from './game-laughter.js?v=fbx89';
 import {installButtonFeedback} from './button-feedback.js?v=phone-touch73';
 installButtonFeedback();
-import {finishStartupPresentation} from './startup-presentation.js?v=startup68';
-import {installScreenAudio} from './screen-audio.js?v=2';
+import {finishStartupPresentation} from './startup-presentation.js?v=startup106';
+import {installScreenAudio} from './screen-audio.js?v=media90';
 import {installSpoutControls} from './spout-output.js?v=miu-expression-manager6';
 import {installMobileLink} from './mobile-link.js?v=phone-touch73';
 import {installCameraPreview} from './camera-preview.js?v=1';
-import CompanionCamera from './companion-camera.js?v=phone-modes67';
+import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes106';
 import {installReminders} from './assistant-reminders.js?v=1';
-import {installExpressionEditor} from './expression-editor.js?v=cloud-providers61';
-import {installModelSettings} from './model-settings.js?v=assistant69';
-import ModelViewer from './model-viewer.js?v=phone-touch73';
+import {installExpressionEditor} from './expression-editor.js?v=irida101';
+import {installModelSettings} from './model-settings.js?v=irida102';
+import ModelViewer from './model-viewer.js?v=startup106';
 import AvatarTracking from './avatar-tracking.js?v=distance7';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
-import LipSync from './lip-sync.js?v=audio-route7';
+import LipSync from './lip-sync.js?v=fbx89';
 import RvcVoiceChanger from './rvc-voice-changer.js?v=audio-route5';
 import EyeTracking from './eye-tracking.js?v=vtuber-eyes1';
 import ScreenShare from './screen-share.js?v=timeline63';
 import ScreenMemory from './screen-memory.js?v=timeline63';
-import ContinuousMic from './continuous-mic.js?v=noise-gate53';
-import { speakPhrases } from './speech-pipeline.js?v=fast2';
+import {utilityRequest} from './utility-request.js?v=1';
+import {desktopWakeControls} from './desktop-wake-controls.js?v=1';
+import ContinuousMic from './continuous-mic.js?v=interrupt104';
+import {createSpeechInterrupt,isSpeechInterrupt} from './speech-interrupt.js?v=interrupt104';
+import { speakPhrases } from './speech-pipeline.js?v=latency94';
 import {createVoiceRuntime} from './voice-runtime.js?v=1';
 
 const continuousMicBtn = document.getElementById('continuous-mic-btn');
 const listeningStatus = document.getElementById('listening-status');
+const chatAttachments=installChatAttachments({notice:text=>addMessage(text,'sakura')});
 let lastMicActivity = Date.now();
 let lastDirectReplyAt = 0;
-const continuousMic = new ContinuousMic(blob => sendAudioForSTT(blob, { continuous: true }), status => {
+const continuousMic = new ContinuousMic(blob => {
+    if(chatBusy||lipSync?.isPlaying)return;
+    return sendAudioForSTT(blob, { continuous: true });
+}, status => {
     if (status !== 'Listening…') lastMicActivity = Date.now();
     listeningStatus.textContent = status;
     continuousMicBtn.setAttribute('aria-pressed', String(continuousMic.enabled));
     continuousMicBtn.textContent = continuousMic.enabled ? '🎤 Pause mic' : '🎤 Listen';
 });
 window.addEventListener('pagehide', () => continuousMic.stop());
+let speechInputUsed=false, interruptFollowupUntil=0, interruptFollowupTimer=null, temporaryFollowupMic=false;
+const speechInterrupt=createSpeechInterrupt({
+    createMic:(...args)=>new ContinuousMic(...args),
+    allowed:()=>!trackingOnly&&!vtuberEnabled&&!aiVtuberStarting&&(speechInputUsed||continuousMic.enabled||nativeWake.enabled()),
+    wakePhrase:()=>currentSettings.wake_word||'hey sakura',
+    recognize:async blob=>{
+        const form=new FormData();form.append('audio',blob,'interrupt.webm');
+        const response=await fetch('/api/stt',{method:'POST',body:form});
+        if(!response.ok)return '';
+        return (await response.json()).text||'';
+    },
+    interrupt:async()=>{
+        document.getElementById('interrupt-btn').click();
+        interruptFollowupUntil=Date.now()+15000;
+        listeningStatus.textContent='Paused. Ask your next question.';
+        if(!continuousMic.enabled){
+            if(nativeWake.enabled())await nativeWake.pause(true);
+            temporaryFollowupMic=true;
+            try{await continuousMic.start(selectedMicId);}
+            catch(error){temporaryFollowupMic=false;interruptFollowupUntil=0;await nativeWake.pause(false);listeningStatus.textContent='Speech stopped. Click the microphone to ask your next question.';return;}
+            clearTimeout(interruptFollowupTimer);
+            interruptFollowupTimer=setTimeout(()=>{
+                interruptFollowupUntil=0;temporaryFollowupMic=false;continuousMic.stop();void nativeWake.pause(false);
+            },15000);
+        }
+    },
+});
+window.addEventListener('pagehide',()=>{speechInterrupt.stop();clearTimeout(interruptFollowupTimer);});
 
 async function startDesktopListening() {
     if (trackingOnly) return;
     if (vtuberEnabled || aiVtuberStarting) return;
+    if(currentSettings.wake_word_enabled&&window.pywebview?.api?.set_wake_listener){await nativeWake.sync();return;}
     try { await continuousMic.start(selectedMicId); }
     catch (err) {
         continuousMic.stop();
@@ -232,6 +279,7 @@ const assistantNameInput = document.getElementById('assistant-name-input');
 const vtuberNameInput = document.getElementById('vtuber-name-input');
 const avatarPresentation = document.getElementById('avatar-presentation');
 const userAddress = document.getElementById('user-address');
+const newsArea = document.getElementById('news-area');
 const wakeWordInput      = document.getElementById('wake-word-input');
 const wakeWordToggle     = document.getElementById('wake-word-toggle');
 const computerControlToggle = document.getElementById('computer-control-toggle');
@@ -356,6 +404,9 @@ let identitySaveQueued = false;
 let identityTimer = null;
 let currentSettings = { assistant_name: 'Sakura', wake_word: 'hey sakura', wake_word_enabled: false };
 let wakeCommandDeadline = 0;
+const nativeWake=desktopWakeControls({continuousMic,settings:()=>currentSettings,blocked:()=>trackingOnly||vtuberEnabled||aiVtuberStarting,
+    receive:async text=>{wakeCommandDeadline=0;chatInput.value=text;await handleSendMessage();},status:text=>{listeningStatus.textContent=text;}});
+
 
 // ─────────────────────────── Custom Dropdown System ───────────────────────────
 function initCustomDropdown(dropdownId, selectEl) {
@@ -535,6 +586,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (viewer.model) viewer._autoFrame(viewer.model);
     });
     const uploadSplash = document.getElementById('model-upload-splash');
+    updateAppBrand(new URLSearchParams(window.location.search).has('tracking'));
     if (new URLSearchParams(window.location.search).has('upload') && uploadSplash) {
         uploadSplash.classList.remove('hidden');
         const closeSplash = () => uploadSplash.classList.add('hidden');
@@ -550,6 +602,57 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     const isLibrary = new URLSearchParams(window.location.search).has('library');
     const isDesktop = !isLibrary && (new URLSearchParams(window.location.search).has('desktop') || !!window.pywebview);
+    const agentFrame=document.getElementById('agent-workspace-frame');
+    const agentModeButton=document.getElementById('agent-mode-toggle');
+    const isAgentMode=new URLSearchParams(window.location.search).has('agent');
+    let agentSpeechQueue=Promise.resolve();
+    const setAgentMode=async enabled=>{
+        enabled=Boolean(enabled);
+        if(enabled&&trackingOnly)return;
+        const active=document.body.classList.contains('agent-mode');
+        if(active===enabled)return;
+        document.body.classList.toggle('agent-mode',enabled);
+        agentModeButton.textContent=enabled?'Companion mode':'Agent mode';
+        agentModeButton.setAttribute('aria-pressed',String(enabled));
+        if(enabled){
+            if(agentFrame.src==='about:blank')agentFrame.src='/agent?embedded=1';
+            document.body.classList.remove('transparent-mode');document.documentElement.classList.remove('transparent-mode');
+        }else{
+            agentFrame.src='about:blank';
+            // Agent expands the window. Return to the full Companion layout;
+            // the compact desktop layout intentionally hides text chat.
+            await window.applyLibraryMode?.(true);
+            chatPanel.classList.remove('minimized');
+            chatBubbleBtn.classList.add('hidden');
+        }
+        if(window.pywebview?.api?.set_library_mode){
+            try{
+                if(enabled){
+                    // Entering Agent mode expands the floating companion into
+                    // the full application window.
+                    await window.pywebview.api.set_library_mode(true);
+                }else{
+                    // Returning to Companion changes the page layout only.
+                    // Keep the full window open; the title-bar minimize button
+                    // remains the explicit way to return to the floating view.
+                    await window.applyLibraryMode?.(true);
+                    window.updateMaximizeControl?.(true);
+                    winMinBtn.title='Shrink to desktop companion';
+                }
+            }catch(error){console.warn('Agent window mode change failed:',error);}
+        }
+        requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
+    };
+    window.sakuraSetAgentMode=setAgentMode;
+    agentModeButton.textContent=isAgentMode?'Companion mode':'Agent mode';
+    agentModeButton.setAttribute('aria-pressed',String(isAgentMode));
+    if(isAgentMode)agentFrame.src='/agent?embedded=1';
+    agentModeButton.addEventListener('click',()=>void setAgentMode(!document.body.classList.contains('agent-mode')));
+    window.addEventListener('message',event=>{
+        if(event.origin!==location.origin||event.source!==agentFrame.contentWindow)return;
+        if(event.data?.type==='sakura-agent-companion-mode')void setAgentMode(false);
+        if(event.data?.type==='sakura-agent-speech'&&typeof event.data.text==='string')void window.sakuraAgentSpeak?.(event.data.text);
+    });
     const setCompanionDragRegion = enabled => {
         const titlebar = document.getElementById('top-bar');
         const dragTargets = [titlebar, ...document.querySelectorAll('#top-bar .brand, #top-bar .logo, #top-bar .title, #top-bar .badge')];
@@ -603,9 +706,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             document.body.appendChild(handle);
         }
         document.body.classList.add('desktop-companion');
-        setTransparency(localStorage.getItem('sakura_transparency') !== 'false', false);
+        setTransparency(!isAgentMode&&localStorage.getItem('sakura_transparency') !== 'false', false);
         winControls.style.display = 'flex';
-        continuousMicBtn.style.display = 'inline-flex';
+        continuousMicBtn.style.display = isAgentMode ? 'none' : 'inline-flex';
     } else {
         setTransparency(localStorage.getItem('sakura_transparency') === 'true', false);
     }
@@ -628,27 +731,58 @@ window.addEventListener('DOMContentLoaded', async () => {
         updatePhysicsUI(viewer.physics.mode);
         updateGlitchFixUI();
         lipSync = new LipSync(viewer);
+        window.sakuraAgentSpeak=text=>{
+            const safe=String(text||'').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,'').trim().slice(0,420);
+            if(!safe)return Promise.resolve();
+            agentSpeechQueue=agentSpeechQueue.catch(()=>{}).then(async()=>{
+                const response=await fetch('/api/tts/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:safe})});
+                const speech=await response.json();if(!response.ok)throw Error(speech.error||'Speech is unavailable.');
+                if(speech.audio&&lipSync)await lipSync.playWithLipSync(speech.audio);
+            });
+            return agentSpeechQueue;
+        };
+        lipSync.onAudioActive=async value=>{
+            await nativeWake.audioActive(value);
+            if(value)void speechInterrupt.start(selectedMicId);
+            else if(!chatBusy)speechInterrupt.stop();
+        };
         rvcVoiceChanger = new RvcVoiceChanger(lipSync, message => {
             const status = document.getElementById('vtuber-rvc-changer-status');
             if (status) status.textContent = message;
         }, () => currentVoiceId);
     } catch (err) {
         console.error('Failed to initialize 3D viewer / lip sync:', err);
+        const startupStatus=document.getElementById('startup-render-status');
+        if(startupStatus)startupStatus.textContent='3D renderer unavailable. Companion controls remain available.';
     }
     setupEvents();
     setupAvatarTracking();
+    const companionCameraModes=new CompanionCameraModes({objectCamera:companionCamera,avatarTracking,viewer});
     installCameraPreview(()=>avatarTracking,()=>viewer);
     installReminders(()=>!trackingOnly&&!vtuberEnabled,()=>selectedSpeakerId);
     const cameraToggle=document.getElementById('companion-camera-enabled');
-    cameraToggle.addEventListener('change',async()=>{
-        if(!cameraToggle.checked){companionCamera.stop();return;}
-        if(trackingOnly||vtuberEnabled){companionCamera.stop();return;}
-        document.getElementById('companion-camera-status').textContent='Requesting camera permission…';
+    const companionCameraMode=document.getElementById('companion-camera-mode');
+    const setCompanionCameraMode=async enabled=>{
+        const status=document.getElementById('companion-camera-status');
+        if(!enabled){
+            if(!trackingOnly&&!vtuberEnabled)companionCameraModes.stop();
+            else companionCamera.stop();
+            cameraToggle.checked=false;status.textContent='Camera access off';return;
+        }
+        if(trackingOnly||vtuberEnabled){companionCamera.stop();cameraToggle.checked=false;status.textContent='Stop VTuber mode before enabling Companion camera access.';return;}
+        const mode=companionCameraMode.value;
+        status.textContent=mode==='tracking'?'Requesting camera permission for local face tracking…':'Requesting camera permission for object recognition…';
         try{
-            await companionCamera.start(document.getElementById('settings-tracking-camera').value);
-        }catch(error){companionCamera.stop();document.getElementById('companion-camera-status').textContent=`Camera unavailable: ${error.message}. Select another camera above, close apps using it, or connect your Camo phone, then retry.`;}
+            await companionCameraModes.start(mode,document.getElementById('settings-tracking-camera').value);
+            cameraToggle.checked=true;
+            status.textContent=mode==='tracking'?'Face tracking on · processed locally · avatar follows your head and hands':'Object recognition on · camera images are shared with your selected AI provider';
+        }catch(error){companionCameraModes.stop();cameraToggle.checked=false;status.textContent=`Camera unavailable: ${error.message}. Select another camera above, close apps using it, or connect your Camo phone, then retry.`;}
+    };
+    cameraToggle.addEventListener('change',()=>void setCompanionCameraMode(cameraToggle.checked));
+    companionCameraMode.addEventListener('change',()=>{if(cameraToggle.checked)void setCompanionCameraMode(true);});
+    document.getElementById('settings-tracking-camera').addEventListener('change',()=>{
+        if(cameraToggle.checked)void setCompanionCameraMode(true);
     });
-    document.getElementById('settings-tracking-camera').addEventListener('change',()=>companionCamera.stop());
     document.getElementById('companion-camera-comments').addEventListener('change',event=>{
         if(!event.target.checked&&cameraReactionController){cameraReactionController.abort();lipSync?.stop();}
     });
@@ -674,19 +808,22 @@ window.addEventListener('DOMContentLoaded', async () => {
             localStorage.setItem(key, String(Number(slider.value) / (id === 'gloss-boost' ? 100 : 1)));
             document.getElementById(`${id}-value`).textContent = slider.value + unit;
             viewer?.setLightAngles(document.getElementById('light-angle-slider').value, document.getElementById('light-elevation-slider').value);
-            viewer?.setGlossBoost(Number(document.getElementById('gloss-boost-slider').value) / 100);
+            viewer?.setGlossBoost(Number(document.getElementById('gloss-boost-slider').value) / 100,
+                viewer?.vrm?.scene||viewer?.model,viewer?.characterLightingTarget||null);
         };
         slider.addEventListener('input', update);
         document.getElementById(`${id}-value`).textContent = slider.value + unit;
     }
     viewer?.setLightAngles(document.getElementById('light-angle-slider').value, document.getElementById('light-elevation-slider').value);
-    viewer?.setGlossBoost(Number(document.getElementById('gloss-boost-slider').value) / 100);
+    viewer?.setGlossBoost(Number(document.getElementById('gloss-boost-slider').value) / 100,
+        viewer?.vrm?.scene||viewer?.model,viewer?.characterLightingTarget||null);
 
     // Read the saved character before the models list chooses an initial model.
     try {
         await loadAppSettings();
         updateTransparencyShortcut();
         trackingOnly = !!currentSettings.vtuber_tracking_only;
+        updateAppBrand(trackingOnly);
         document.body.classList.toggle('tracking-only', trackingOnly);
         viewer?.setVtuberTrackingMode(trackingOnly);
         await Promise.all([
@@ -717,7 +854,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!response.ok) return;
             const saved = await response.json();
             if (identityDirty || identitySaving) return;
-            const fields = ['assistant_name', 'vtuber_name', 'avatar_presentation', 'user_address', 'wake_word', 'wake_word_enabled', 'computer_control_enabled'];
+            const fields = ['assistant_name', 'vtuber_name', 'avatar_presentation', 'user_address', 'news_area', 'wake_word', 'wake_word_enabled', 'computer_control_enabled'];
             if (fields.some(key => saved[key] !== currentSettings[key])) {
                 for (const key of fields) currentSettings[key] = saved[key];
                 wakeCommandDeadline = 0;
@@ -736,7 +873,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if(speech.audio&&greetingGeneration===chatReplyGeneration&&!trackingOnly)await lipSync.playWithLipSync(speech.audio);
         }
     }catch(error){console.warn('Startup greeting speech unavailable',error);}
-    if (isDesktop) await startDesktopListening();
+    if (isDesktop && !isAgentMode) await startDesktopListening();
 });
 
 // ─────────────────────────── Tab System ───────────────────────────
@@ -838,9 +975,15 @@ function setupEvents() {
         const modes = ['low', 'balanced', 'high'];
         applyModelQuality(modes[(modes.indexOf(viewer?.quality || 'balanced') + 1) % modes.length]);
     });
-    continuousMicBtn.addEventListener('click', () => {
-        if (continuousMic.enabled) continuousMic.stop();
-        else startDesktopListening();
+    continuousMicBtn.addEventListener('click', async () => {
+        speechInterrupt.stop();clearTimeout(interruptFollowupTimer);interruptFollowupUntil=0;
+        speechInputUsed=false;
+        const wasTemporary=temporaryFollowupMic;
+        if(wasTemporary)continuousMic.stop();
+        temporaryFollowupMic=false;
+        if (nativeWake.enabled()){wakeWordToggle.checked=false;await saveAppSettings();}
+        else if (continuousMic.enabled) continuousMic.stop();
+        else if(!wasTemporary)startDesktopListening();
     });
     setupTabs();
 
@@ -1005,13 +1148,19 @@ function setupEvents() {
     });
     setInterval(checkGameMode, 2000);
     document.getElementById('clear-memory-desktop').addEventListener('click', handleClearChat);
+    window.addEventListener('sakura-chat-session-ended',()=>{
+        document.getElementById('interrupt-btn').click();
+        cameraReactionController?.abort();
+        messagesEl.innerHTML='';
+        void fetch('/api/clear',{method:'POST',keepalive:true}).catch(error=>console.warn('Session reset unavailable:',error));
+    });
     refreshMemoryBtn.addEventListener('click', async () => {
         refreshMemoryBtn.disabled = true;
         try {
             const response = await fetch('/api/refresh-memory', { method: 'POST' });
             const result = await response.json();
             if (!response.ok) throw new Error(result.error || 'Memory refresh failed.');
-            addMessage('Memory refreshed. Your saved address preference is unchanged.', 'sakura');
+            addMessage(result.message || 'Chat lasts only for this app session and clears when you exit.', 'sakura');
         } catch (error) {
             addMessage(`⚠️ ${error.message}`, 'sakura');
         } finally { refreshMemoryBtn.disabled = false; }
@@ -1069,6 +1218,7 @@ function setupEvents() {
     };
     document.getElementById('dance-stop-btn').onclick=()=>viewer?.dance?.stop();
     document.getElementById('interrupt-btn').addEventListener('click', () => {
+        speechInterrupt.stop();
         viewer?.dance?.stop();
         ++chatReplyGeneration;
         replyController?.abort();
@@ -1078,6 +1228,7 @@ function setupEvents() {
         hideSpeechBubble();
         viewer?.setActivity('idle');
         lastMicActivity = Date.now();
+        void nativeWake.pause(false);
     });
     const chooseModelPackage=async(input,kind)=>{
         if(!window.pywebview?.api.import_model_package){document.getElementById(input).click();return;}
@@ -1174,7 +1325,7 @@ function setupEvents() {
 
     // Assistant tab
     if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', saveAppSettings);
-    for (const control of [assistantNameInput, vtuberNameInput, avatarPresentation, userAddress, wakeWordInput, wakeWordToggle, computerControlToggle]) {
+    for (const control of [assistantNameInput, vtuberNameInput, avatarPresentation, userAddress, newsArea, wakeWordInput, wakeWordToggle, computerControlToggle]) {
         control?.addEventListener(control.type === 'checkbox' ? 'change' : 'input', () => {
             identityDirty = true;
             clearTimeout(identityTimer);
@@ -1298,9 +1449,11 @@ function applySettingsUI(s) {
         if (vtuberNameInput) vtuberNameInput.value = s.vtuber_name || 'Sakura';
         if (avatarPresentation) avatarPresentation.value = s.avatar_presentation || 'auto';
         if (userAddress) userAddress.value=s.user_address||'sir';
+        if (newsArea) newsArea.value=s.news_area||'';
         if (wakeWordInput) wakeWordInput.value = s.wake_word || 'hey sakura';
         if (wakeWordToggle) wakeWordToggle.checked = !!s.wake_word_enabled;
         if (computerControlToggle) computerControlToggle.checked = !!s.computer_control_enabled;
+        for(const [id,key]of [['system-tools-permission','computer_control_enabled'],['phone-system-access','phone_system_access_enabled'],['phone-clipboard-access','phone_clipboard_enabled']]){const input=document.getElementById(id);if(input&&!input.disabled)input.checked=!!s[key];}
     }
     if (brandTitle)         brandTitle.textContent = s.assistant_name || 'Sakura';
     if (panelTitleText)     panelTitleText.textContent = `💬 Chat with ${s.assistant_name || 'Sakura'}`;
@@ -1336,6 +1489,7 @@ async function saveAppSettings() {
     const newVtuberName = (vtuberNameInput?.value.trim()) || 'Sakura';
     const newPresentation = avatarPresentation?.value || 'auto';
     const newAddress=userAddress?.value||'sir';
+    const newNewsArea=newsArea?.value.trim()||'';
     const newWakeWord = (wakeWordInput?.value.trim().toLowerCase()) || 'hey sakura';
     const newWakeEnabled = wakeWordToggle?.checked || false;
     const newComputerControl = computerControlToggle?.checked || false;
@@ -1349,6 +1503,7 @@ async function saveAppSettings() {
                 vtuber_name: newVtuberName,
                 avatar_presentation: newPresentation,
                 user_address:newAddress,
+                news_area:newNewsArea,
                 wake_word: newWakeWord,
                 wake_word_enabled: newWakeEnabled,
                 computer_control_enabled: newComputerControl,
@@ -1357,12 +1512,13 @@ async function saveAppSettings() {
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save assistant settings.');
         const stillMatches = (assistantNameInput.value.trim() || 'Sakura') === newName && (vtuberNameInput?.value.trim() || 'Sakura') === newVtuberName && (wakeWordInput.value.trim().toLowerCase() || 'hey sakura') === newWakeWord
-            && (avatarPresentation?.value || 'auto') === newPresentation && (userAddress?.value||'sir')===newAddress && wakeWordToggle.checked === newWakeEnabled && computerControlToggle.checked === newComputerControl;
+            && (newsArea?.value.trim()||'')===newNewsArea && (avatarPresentation?.value || 'auto') === newPresentation && (userAddress?.value||'sir')===newAddress && wakeWordToggle.checked === newWakeEnabled && computerControlToggle.checked === newComputerControl;
         if (stillMatches) identityDirty = false;
         else identitySaveQueued = true;
         wakeCommandDeadline = 0;
         currentSettings = data.settings;
         applySettingsUI(currentSettings);
+        await nativeWake.sync();
         flashMsg(saveStatusMsg, newWakeEnabled ? `Saved · Say "${newWakeWord}" before a command.` : 'Saved · Wake phrase is off; all speech is accepted.');
     } catch (err) { flashMsg(saveStatusMsg, err.message, 8000); }
     finally {
@@ -2359,6 +2515,7 @@ function setTransparency(enabled, persist = true) {
 }
 
 window.addEventListener('pywebviewready', () => {
+    updateAppBrand(trackingOnly);
     window.pywebview?.api?.set_surface_transparency?.(
         document.body.classList.contains('transparent-mode'));
 });
@@ -2430,11 +2587,16 @@ async function playTestAudioTone() {
 // ─────────────────────────── Chat & AI ───────────────────────────
 async function handleSendMessage() {
     if (trackingOnly) return;
-    const text = chatInput.value.trim();
+    if(chatAttachments.busy()){listeningStatus.textContent='Wait for the file to finish loading.';return;}
+    const attachedIds=chatAttachments.ids();
+    const text = chatInput.value.trim()||(attachedIds.length?'What is this file? Please summarize its contents.':'');
     if (!text) return;
+    clearTimeout(interruptFollowupTimer);interruptFollowupUntil=0;
+    if(temporaryFollowupMic){temporaryFollowupMic=false;continuousMic.stop();}
     lastDirectReplyAt = Date.now();
     cameraReactionController?.abort();
     chatBusy = true;
+    await nativeWake.pause(true);
     await voiceSaveQueue;
     const generation = ++chatReplyGeneration;
     // Load/verify local speech while the AI generates the answer, not after.
@@ -2450,33 +2612,37 @@ async function handleSendMessage() {
 
     try {
         const plainGreeting = /^(?:hello|hi|hey|hii+|hiya|namaste|नमस्ते)[!.\s]*$/iu.test(text);
-        const screenImage = plainGreeting ? null : await screenShare.snapshot();
+        const noVision=attachedIds.length>0||plainGreeting||utilityRequest(text);
+        const screenImage = noVision ? null : await screenShare.snapshot();
         const appearanceQuestion = /\b(?:your|ur|hair|eyes?|clothes|outfit|avatar|appearance|that girl)\b|बाल|आँख|कपड़े/iu.test(text);
         const avatarImage = screenImage && (appearanceQuestion || currentSettings.avatar_presentation==='auto' || !currentSettings.avatar_presentation) ? viewer?.captureAvatar() : null;
-        const cameraImage = !trackingOnly && !vtuberEnabled ? companionCamera.snapshot() : null;
+        const cameraImage = !noVision && !trackingOnly && !vtuberEnabled && document.getElementById('companion-camera-mode')?.value==='objects' ? companionCamera.snapshot() : null;
         if (generation !== chatReplyGeneration) return;
         const res  = await fetch('/api/chat', {
             signal: controller.signal,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, ai_vtuber:vtuberEnabled, screen_frames: plainGreeting ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
+            body: JSON.stringify({ text, attachments:attachedIds, ai_vtuber:vtuberEnabled, screen_frames: noVision ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), avatar_can_greet:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_can_chest_tap:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
         });
         const data = await res.json();
+        if(generation!==chatReplyGeneration)return;
         if (data.reply) {
             let presented = false;
             const presentReply = () => {
                 if (presented) return;
                 presented = true;
-                addMessage(data.reply, 'sakura');
+                addMessage(data.reply, 'sakura', data);
                 if (generation === chatReplyGeneration) {
                     removeTypingIndicator();
                     viewer?.setEmotionFromText(data.reply);
-                    if(viewer?.areAiExpressionsAutomatic?.())viewer.reactionExpressions?.begin(data.reply);
+                    if(viewer?.areAiExpressionsAutomatic?.())viewer.reactionExpressions?.begin(data.reply,data.emotion);
                     if (!lipSync?.isPlaying) viewer?.setActivity('idle');
                     if (chatPanel.classList.contains('minimized')) showSpeechBubble(data.reply);
                 }
             };
             if (generation !== chatReplyGeneration) return;
+            let speechGestureStarted=false;
+            const startSpeechGesture=()=>{if(!speechGestureStarted&&['chest_tap','greeting_wave'].includes(data.avatar_motion)&&generation===chatReplyGeneration){speechGestureStarted=true;viewer?.dance?.start(data.avatar_motion);}};
             if(data.avatar_motion==='stop')viewer?.dance?.stop();
             else if(['groove','step','wave','twist','disco','march','hands_both','hand_left','hand_right'].includes(data.avatar_motion)){
                 viewer?.dance?.start(data.avatar_motion);
@@ -2489,9 +2655,17 @@ async function handleSendMessage() {
             const indicator = document.getElementById('typing-indicator');
             if (indicator) indicator.textContent = 'Preparing voice…';
             try {
+                if(['laugh','laugh_bend'].includes(data.avatar_motion)){
+                    const played=await playGameLaughter(data.avatar_motion,viewer,lipSync,()=>generation===chatReplyGeneration&&!trackingOnly&&!viewer?.vtuberTrackingMode);
+                    if(!played&&generation===chatReplyGeneration)addMessage('The laugh needs an active rigged 3D model with face tracking off.','sakura');
+                    return;
+                }
                 if(data.performance_audio){await lipSync.playWithLipSync(data.performance_audio);return;}
+                // Animation asset preparation must not hold up speech synthesis.
+                const gestureReady=Promise.resolve().then(()=>viewer?.dance?.prepare?.(data.avatar_motion)).catch(error=>console.warn('Speech gesture unavailable',error));
+                if(generation!==chatReplyGeneration)return;
                 const prepared=await voiceReady;if(prepared.error)throw prepared.error;
-                await speakPhrases(data.reply, async text => {
+                await speakPhrases(data.speech_reply ?? data.reply, async text => {
                     const response = await fetch('/api/tts/speak', {
                         signal: controller.signal,
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2505,12 +2679,13 @@ async function handleSendMessage() {
                     }
                     return speech.audio;
                 }, async (audio, first) => {
-                    if (audio) await lipSync.playWithLipSync(audio, first ? presentReply : undefined);
-                    else if (first) presentReply();
+                    if (audio) await lipSync.playWithLipSync(audio, first ? ()=>{presentReply();void gestureReady.then(()=>{if(generation===chatReplyGeneration&&lipSync?.isPlaying)startSpeechGesture();});} : undefined);
+                    else if (first){presentReply();startSpeechGesture();}
                 }, () => generation === chatReplyGeneration);
             } catch (err) {
                 if (generation !== chatReplyGeneration) return;
                 presentReply();
+                if (generation === chatReplyGeneration)startSpeechGesture();
                 if (generation === chatReplyGeneration) addMessage(`⚠️ Speech unavailable: ${err.message}`, 'sakura');
             }
             if (generation === chatReplyGeneration) hideSpeechBubble();
@@ -2522,7 +2697,7 @@ async function handleSendMessage() {
         removeTypingIndicator();
         if (generation === chatReplyGeneration && err.name !== 'AbortError') addMessage(`⚠️ ${err.message || 'Could not connect to the backend server.'}`, 'sakura');
     } finally {
-        if (generation === chatReplyGeneration) chatBusy = false;
+        if (generation === chatReplyGeneration){chatBusy = false;speechInputUsed=false;speechInterrupt.stop();await nativeWake.pause(false);}
         if (generation === chatReplyGeneration) lastDirectReplyAt = Date.now();
         if (generation === chatReplyGeneration && !lipSync?.isPlaying) viewer?.setActivity('idle');
         if (generation === chatReplyGeneration) viewer?.reactionExpressions?.stop();
@@ -2687,9 +2862,10 @@ async function reactToScreen(initialCheck = false) {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Screen viewing is unavailable.');
-        if(gameWatch&&generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!trackingOnly&&!viewer?.vtuberTrackingMode&&['victory','defeat'].includes(data.game_result)){
-            viewer?.dance?.start(data.game_result);
-            viewer?.reactionExpressions?.begin(data.reply,data.game_result==='victory'?'happy':'concerned');
+        if(['laugh','laugh_bend'].includes(data.game_result)&&(!viewer?.dance?.supported()||viewer.live2d))return;
+        if(gameWatch&&generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!trackingOnly&&!viewer?.vtuberTrackingMode&&['victory','defeat','laugh','laugh_bend'].includes(data.game_result)){
+            if(!['laugh','laugh_bend'].includes(data.game_result))viewer?.dance?.start(data.game_result);
+            viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':'concerned');
         }
         if (!data.reply || data.reply.trim() === '[QUIET]' || generation !== chatReplyGeneration ||
             (!initialCheck && Date.now() - lastDirectReplyAt < 30000) ||
@@ -2698,14 +2874,18 @@ async function reactToScreen(initialCheck = false) {
         if (!initialCheck && normalizedReaction === lastReactionText) return;
         lastReactionText = normalizedReaction;
         if(!gameWatch&&!initialCheck&&!trackingOnly&&!viewer?.vtuberTrackingMode&&
-            (reactionsEnabled||vtuberScreens)&&['victory','defeat'].includes(data.game_result)){
-            viewer?.dance?.start(data.game_result);
-            viewer?.reactionExpressions?.begin(data.reply,data.game_result==='victory'?'happy':'concerned');
+            (reactionsEnabled||vtuberScreens)&&['victory','defeat','laugh','laugh_bend'].includes(data.game_result)){
+            if(!['laugh','laugh_bend'].includes(data.game_result))viewer?.dance?.start(data.game_result);
+            viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':'concerned');
         }
         listeningStatus.textContent = 'Live screen connected · recent frames analyzed';
-        addMessage(data.reply, 'sakura');
+        addMessage(data.reply, 'sakura', data);
         resumeMic = continuousMic.enabled;
         if (resumeMic) continuousMic.stop();
+        if(['laugh','laugh_bend'].includes(data.game_result)){
+            try{await playGameLaughter(data.game_result,viewer,lipSync,()=>generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!chatBusy&&!trackingOnly&&!viewer?.vtuberTrackingMode);}
+            catch(error){viewer?.dance?.stop();console.warn('Recorded laughter unavailable:',error);}
+        }
         await ensureKokoroReady();
         await speakPhrases(data.reply, async text => {
             const res = await fetch('/api/tts/speak', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
@@ -2716,7 +2896,7 @@ async function reactToScreen(initialCheck = false) {
             showSpeechBubble(data.reply);
             viewer?.setEmotionFromText(data.reply);
             if(!expressionStarted&&reactionsEnabled&&!trackingOnly&&!viewer?.vtuberTrackingMode){
-                viewer?.reactionExpressions?.begin(data.reply,data.game_result==='victory'?'happy':data.game_result==='defeat'?'concerned':null);expressionStarted=true;
+                viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':data.game_result==='defeat'?'concerned':null);expressionStarted=true;
             }
             if (audio) await lipSync.playWithLipSync(audio);
         }, () => (reactionsEnabled || (vtuberEnabled && document.getElementById('vtuber-screen-enabled').checked) || initialCheck) && screenShare.enabled && generation === chatReplyGeneration);
@@ -2732,7 +2912,7 @@ async function reactToScreen(initialCheck = false) {
 }
 
 async function reactToCamera() {
-    const ready=()=>companionCamera.enabled&&!trackingOnly&&!vtuberEnabled&&!aiVtuberStarting&&
+    const ready=()=>companionCamera.enabled&&document.getElementById('companion-camera-mode')?.value==='objects'&&!trackingOnly&&!vtuberEnabled&&!aiVtuberStarting&&
         document.getElementById('companion-camera-comments').checked&&!chatBusy&&!isRecording&&
         !lipSync?.isPlaying&&Date.now()-lastDirectReplyAt>=60000&&Date.now()-lastMicActivity>=10000;
     if(!ready()||reactionBusy)return;
@@ -2771,6 +2951,7 @@ async function handleClearChat() {
         document.getElementById('interrupt-btn').click();
         const response = await fetch('/api/clear', { method: 'POST' });
         if (!response.ok) throw new Error('Could not clear memory. Please try again.');
+        chatAttachments.clear();
         messagesEl.innerHTML = '';
         addMessage('🌸 Memory cleared! What would you like to talk about next?', 'sakura');
     } catch (err) { addMessage(err.message, 'sakura'); }
@@ -2780,6 +2961,7 @@ async function handleClearChat() {
 async function handleToggleMic() {
     if (vtuberEnabled || aiVtuberStarting) { listeningStatus.textContent = "AI VTuber uses computer audio and chat; microphone is excluded."; return; }
     if (!isRecording) {
+        await nativeWake.pause(true);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {...(selectedMicId ? {deviceId:{exact:selectedMicId}} : {}),autoGainControl:false},
@@ -2790,12 +2972,12 @@ async function handleToggleMic() {
             mediaRecorder.onstop = async () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 stream.getTracks().forEach(t => t.stop());
-                await sendAudioForSTT(audioBlob);
+                try{await sendAudioForSTT(audioBlob);}finally{await nativeWake.pause(false);}
             };
             mediaRecorder.start();
             isRecording = true;
             micBtn.classList.add('recording');
-        } catch (err) { alert('Could not access microphone: ' + err.message); }
+        } catch (err) { await nativeWake.pause(false);alert('Could not access microphone: ' + err.message); }
     } else {
         if (mediaRecorder?.state !== 'inactive') mediaRecorder.stop();
         isRecording = false;
@@ -2826,21 +3008,39 @@ async function sendAudioForSTT(blob, options = {}) {
         if (vtuberEnabled || aiVtuberStarting) return;
         if (data.text?.trim()) {
             const raw = data.text.trim();
-            if (currentSettings.wake_word_enabled) {
-                const query = extractWakeCommand(raw, currentSettings.wake_word || '');
+            if(isSpeechInterrupt(raw,currentSettings.wake_word||'hey sakura')&&(chatBusy||lipSync?.isPlaying)){
+                document.getElementById('interrupt-btn').click();
+                interruptFollowupUntil=Date.now()+15000;
+                listeningStatus.textContent='Paused. Ask your next question.';
+                return;
+            }
+            if(Date.now()<interruptFollowupUntil){
+                interruptFollowupUntil=0;clearTimeout(interruptFollowupTimer);
+                if(temporaryFollowupMic){temporaryFollowupMic=false;continuousMic.stop();}
+                speechInputUsed=true;chatInput.value=raw;await handleSendMessage();return;
+            }
+            speechInputUsed=!continuous;
+            // Speaker playback can reach the microphone despite browser echo cancellation.
+            // Automatic listening needs explicit address while media audio is active.
+            const mediaWake = continuous && screenAudio.playbackActive();
+            if (currentSettings.wake_word_enabled || mediaWake) {
+                const query = extractWakeCommand(raw, currentSettings.wake_word || 'hey sakura');
                 if (query !== null) {
                     if (!query) {
-                        wakeCommandDeadline = Date.now() + 15000;
-                        listeningStatus.textContent = 'Ready—say your command';
+                        wakeCommandDeadline = mediaWake ? 0 : Date.now() + 15000;
+                        listeningStatus.textContent = mediaWake ? 'Say the wake phrase and your command together while video audio is on' : 'Ready—say your command';
                         return;
                     }
                     wakeCommandDeadline = 0;
                     chatInput.value = query;
                     await handleSendMessage();
-                } else if (continuous && Date.now() < wakeCommandDeadline) {
+                } else if (continuous && !mediaWake && Date.now() < wakeCommandDeadline) {
                     wakeCommandDeadline = 0;
                     chatInput.value = raw;
                     await handleSendMessage();
+                } else if (mediaWake) {
+                    wakeCommandDeadline = 0;
+                    listeningStatus.textContent = `Video audio is context · say ${currentSettings.wake_word || 'hey sakura'} or use the mic button`;
                 } else if (!continuous) {
                     addMessage(`*(Wake word "${currentSettings.wake_word}" not heard — say it first)*`, 'sakura');
                 }
@@ -2859,10 +3059,11 @@ async function sendAudioForSTT(blob, options = {}) {
 }
 
 // ─────────────────────────── UI Helpers ───────────────────────────
-function addMessage(text, sender) {
+function addMessage(text, sender, evidence = null) {
     const msg = document.createElement('div');
     msg.className = `message ${sender}`;
     msg.textContent = text;
+    if (sender === 'sakura') appendEvidence(msg, evidence || {});
     messagesEl.appendChild(msg);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -2982,7 +3183,7 @@ function setupAvatarTracking() {
     const trackingSliders = {'tracking-smoothing':'smoothing', 'tracking-range':'range', 'tracking-hand-range':'handRange',
         'tracking-blink-gain':'blinkGain', 'tracking-gaze-strength':'gaze'};
     const applyTrackingOptions = () => {
-        viewer.trackingOptions = trackingOptions;
+        if (viewer) viewer.trackingOptions = trackingOptions;
         avatarTracking.frameRate = [15,24,30].includes(Number(trackingOptions.fps)) ? Number(trackingOptions.fps) : 15;
         for (const [id,key] of Object.entries(trackingSliders)) {
             const control = document.getElementById(id);
@@ -3128,6 +3329,7 @@ function setupAvatarTracking() {
     document.getElementById('settings-calibrate-tracking').addEventListener('click', () => { document.getElementById('tracking-calibrate').click(); cameraStatus.textContent = status.textContent; });
     const setUI = enabled => {
         trackingOnly = enabled;
+        updateAppBrand(enabled);
         if(enabled)companionCamera.stop();
         document.body.classList.toggle('tracking-only', enabled);
         if (!enabled && rvcVoiceChanger?.active) void stopVtuberVoiceChanger();
@@ -3143,6 +3345,19 @@ function setupAvatarTracking() {
         document.getElementById('vtuber-start-btn').disabled = enabled;
     };
     window.addEventListener('sakura-phone-camera-frame',event=>companionCamera.remoteFrame(event.detail?.image));
+    window.addEventListener('sakura-phone-companion-tracking',event=>{
+        if(event.detail?.enabled){
+            companionCamera.stop();
+            avatarTracking.stop();
+            viewer.setVtuberTrackingMode(true);
+            viewer.setUserTracking(true);
+            document.getElementById('companion-camera-status').textContent='Phone face tracking on · measurements stay on the phone · Companion AI remains available';
+        }else{
+            viewer.setUserTracking(false);
+            viewer.setVtuberTrackingMode(false);
+            document.getElementById('companion-camera-status').textContent='Phone face tracking off';
+        }
+    });
     window.addEventListener('sakura-phone-camera',async event=>{
         if(event.detail?.type==='camera-stop'){if(companionCamera.remote)companionCamera.stop();return;}
         if(window.SAKURA_EDITION==='vtuber')return;

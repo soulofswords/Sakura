@@ -1,0 +1,13 @@
+Sakura optional offline wake detection
+
+Vosk Android 0.3.75: Copyright Alpha Cephei Inc.
+https://github.com/alphacep/vosk-api — Apache License 2.0
+
+JNA 5.18.1: Copyright JNA contributors
+https://github.com/java-native-access/jna — used under Apache License 2.0 (dual licensed).
+
+Optional Vosk small English US model 0.15: Alpha Cephei, Apache License 2.0.
+https://alphacephei.com/vosk/models
+The 40 MB model is not bundled; download is opt-in.
+
+See Apache-2.0.txt for the license.

@@ -3,7 +3,7 @@ let stopped=0,captured=0,constraints;
 const track={stop(){stopped++;},addEventListener(){}},stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
 let acquire=async c=>{constraints=c;return stream;};
 const ctx={navigator:{mediaDevices:{getUserMedia:c=>acquire(c)}},document:{createElement:type=>type==='video'?{play:async()=>{},pause(){},readyState:2,videoWidth:1280,videoHeight:720}:{getContext:()=>({drawImage(){captured++;},clearRect(){}}),toDataURL:()=> 'data:image/jpeg;base64,/9j/'}}};
-vm.runInNewContext(fs.readFileSync('static/js/companion-camera.js','utf8').replace('export default class','class')+'\nthis.Camera=CompanionCamera;',ctx);
+vm.runInNewContext(fs.readFileSync('static/js/companion-camera.js','utf8').replace('export default class','class').replace('export class','class')+'\nthis.Camera=CompanionCamera;this.CameraModes=CompanionCameraModes;',ctx);
 (async()=>{
  const camera=new ctx.Camera();assert.equal(camera.enabled,false);assert.equal(camera.snapshot(),null);
  await camera.start('chosen');assert.equal(constraints.audio,false);assert.equal(constraints.video.deviceId.exact,'chosen');
@@ -13,5 +13,12 @@ vm.runInNewContext(fs.readFileSync('static/js/companion-camera.js','utf8').repla
  camera.startRemote();assert.equal(camera.enabled,true);assert.equal(camera.remote,true);assert.equal(camera.snapshot(),null);
  camera.remoteFrame('/9j/phone');assert.equal(camera.snapshot(),'/9j/phone');
  camera.stop();camera.remoteFrame('/9j/stale');assert.equal(camera.snapshot(),null);
+ const calls=[], objectCamera={start:async id=>calls.push(['objects',id]),stop:()=>calls.push(['object-stop'])};
+ const avatarTracking={start:async id=>calls.push(['tracking',id]),stop:()=>calls.push(['tracking-stop'])};
+ const viewer={setVtuberTrackingMode:value=>calls.push(['viewer-mode',value])};
+ const modes=new ctx.CameraModes({objectCamera,avatarTracking,viewer});
+ await modes.start('objects','cam1');assert.equal(modes.mode,'objects');assert(calls.some(c=>c[0]==='objects'&&c[1]==='cam1'));assert(!calls.some(c=>c[0]==='tracking'&&c[1]==='cam1'));
+ calls.length=0;await modes.start('tracking','cam2');assert.equal(modes.mode,'tracking');assert(calls.some(c=>c[0]==='tracking'&&c[1]==='cam2'));assert(calls.some(c=>c[0]==='viewer-mode'&&c[1]===true));assert(!calls.some(c=>c[0]==='objects'&&c[1]==='cam2'));
+ modes.stop();assert.equal(modes.mode,'');assert(calls.some(c=>c[0]==='tracking-stop'));assert(calls.some(c=>c[0]==='viewer-mode'&&c[1]===false));
  console.log('PASS: explicit camera enable, JPEG capture, no mic, selected device, shutdown and permission race');
 })().catch(e=>{console.error(e);process.exitCode=1;});

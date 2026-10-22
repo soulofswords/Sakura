@@ -27,7 +27,7 @@ class VTuberTests(unittest.TestCase):
             llm = LLM(Path(folder) / 'memory.json')
             llm.history = [{'role': 'user', 'content': 'private secret'}]
             with patch.object(llm, '_request', return_value='Hi viewer!') as request:
-                self.assertEqual(llm.viewer_reply('viewer', 'hello'), 'Hi viewer!')
+                self.assertEqual(llm.viewer_reply('viewer', 'tell me a joke'), 'Hi viewer!')
                 messages = request.call_args.args[0]
                 self.assertNotIn('private secret', str(messages))
                 self.assertIn('untrusted', messages[0]['content'])

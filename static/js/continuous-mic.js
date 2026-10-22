@@ -1,9 +1,10 @@
 export default class ContinuousMic {
-    constructor(onUtterance, onStatus) {
+    constructor(onUtterance, onStatus, options = {}) {
         this.onUtterance = onUtterance;
         this.onStatus = onStatus;
         this.generation = 0;
         this.enabled = false;
+        this.options = options;
     }
 
     async start(deviceId = '') {
@@ -34,13 +35,16 @@ export default class ContinuousMic {
         let speechMs = 0, lastVoice = 0, consecutiveVoice = 0;
         let noiseFloor = .003;
         const started = performance.now();
+        const minimumSpeech = this.options.minimumSpeechMs ?? 350;
+        const pauseMs = this.options.pauseMs ?? 700;
+        const maximumMs = this.options.maximumMs ?? 20000;
         const samples = new Float32Array(this.analyser.fftSize);
         this.onStatus('Listening…');
         recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
         recorder.onstop = async () => {
             clearInterval(this.timer);
             if (!this.enabled || generation !== this.generation) return;
-            if (speechMs >= 350 && chunks.length) {
+            if (speechMs >= minimumSpeech && chunks.length) {
                 this.onStatus('Preparing reply…');
                 // No recorder runs while recognizing/generating/playing a reply.
                 try { await this.onUtterance(new Blob(chunks, { type: recorder.mimeType })); }
@@ -66,8 +70,8 @@ export default class ContinuousMic {
                 noiseFloor += (Math.min(rms,.02)-noiseFloor)*.04;
             }
             // Wait for a full pause, not the gaps between individual words.
-            if ((speechMs >= 350 && now - lastVoice > 700) ||
-                (now - started > 5000 && speechMs < 350) || now-started>20000) recorder.stop();
+            if ((speechMs >= minimumSpeech && now - lastVoice > pauseMs) ||
+                (now - started > 5000 && speechMs < minimumSpeech) || now-started>maximumMs) recorder.stop();
         }, 50);
     }
 

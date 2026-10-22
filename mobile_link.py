@@ -32,6 +32,7 @@ class MobileLink:
         self.api=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
         self.api.add_api_route('/pair',self.pair,methods=['POST'])
         self.api.add_api_route('/state',self.phone_state,methods=['GET'])
+        self.api.add_api_route('/tools',self.device_tools,methods=['POST'])
         self.api.add_api_route('/model/package/{identifier}',self.download_model,methods=['GET'])
         self.api.add_api_route('/command',self.command,methods=['POST'])
         self.api.add_api_route('/frame',self.tracking_frame,methods=['POST'])
@@ -111,6 +112,17 @@ class MobileLink:
             self.save_devices()
         return {'token':token,'name':'Sakura','edition':self.state.get('edition','companion')}
 
+    async def device_tools(self,request:Request):
+        body=await request.json()
+        if body.get('action') not in ('system.status','audio.volume','clipboard.read','clipboard.write'):
+            return JSONResponse({'error':'Unsupported PC tool.'},400)
+        payload={k:body[k] for k in ('action','operation','value','text') if k in body};payload['phone']=True
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/assistant-tools/device',json=payload)
+                return JSONResponse(response.json(),response.status_code)
+        except (httpx.HTTPError,ValueError):return JSONResponse({'error':'PC tool unavailable. Retry when Sakura is ready.'},503)
+
     async def phone_state(self):
         return {**self.state,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request}
 
@@ -177,8 +189,10 @@ class MobileLink:
                 self.transfer_request={'id':identifier,'status':'waiting','created':time.time()}
                 self.commands.append({'type':'request-model','request_id':identifier})
             return {'request_id':identifier}
-        if kind not in ('expression','clear-expressions','tracking-start','tracking-stop','camera-start','camera-stop','calibrate'):
+        if kind not in ('expression','clear-expressions','tracking-start','tracking-stop','companion-tracking-start','companion-tracking-stop','camera-start','camera-stop','calibrate'):
             return JSONResponse({'error':'Unsupported control'},400)
+        if kind.startswith('companion-tracking-') and (self.edition=='vtuber' or self.state.get('edition')=='vtuber'):
+            return JSONResponse({'error':'Companion camera tracking needs Sakura Companion.'},409)
         if kind.startswith('camera-') and (self.edition=='vtuber' or self.state.get('edition')=='vtuber'):
             return JSONResponse({'error':'Companion camera viewing needs Sakura Companion.'},409)
         if kind=='expression' and body.get('name') not in self.state.get('expressions',[]):

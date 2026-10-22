@@ -28,16 +28,15 @@ class ReactionRepeatTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             model=LLM(Path(folder)/'memory.json');model.set_vtuber_name('Luna Star')
             with patch.object(model,'_request',return_value='Hello!') as infer:
-                model.viewer_reply('Viewer','What is your name?')
-                prompt=infer.call_args.args[0][1]['content']
-                self.assertIn('"Luna Star"',prompt)
-                self.assertIn('not the streamer name',prompt)
+                self.assertIn('Luna Star',model.viewer_reply('Viewer','What is your name?'))
+                infer.assert_not_called()
                 model._screen_reaction_request('image',cohost=True)
                 self.assertIn('"Luna Star"',infer.call_args.args[0][1]['content'])
                 model._screen_reaction_request('image',cohost=False)
                 self.assertNotIn('"Luna Star"',infer.call_args.args[0][1]['content'])
-                model.chat('What is your name?',cohost=True)
-                self.assertTrue(any('"Luna Star"' in m['content'] and 'AI VTuber co-hosting mode' in m['content'] for m in infer.call_args.args[0]))
+                infer.reset_mock()
+                self.assertIn('Luna Star',model.chat('What is your name?',cohost=True))
+                infer.assert_not_called()
             self.assertEqual(model.assistant_name,'Sakura')
     def test_background_repeated_paragraph_is_silent(self):
         repeated="I'm just here to help you keep it going. I've been working on the code cleanup and model switching. "*2
@@ -46,7 +45,7 @@ class ReactionRepeatTests(unittest.TestCase):
             with patch.object(model,'_screen_reaction_request',return_value=repeated):
                 self.assertEqual(model.screen_reaction('image'),'[QUIET]')
             with patch.object(model,'_request',return_value=repeated):
-                self.assertEqual(model.viewer_reply('Viewer','Hello'),'[QUIET]')
+                self.assertEqual(model.viewer_reply('Viewer','Hello'),'Hello!')
     def test_game_result_is_structured_once_per_visible_event(self):
         with tempfile.TemporaryDirectory() as folder:
             model=LLM(Path(folder)/'memory.json')

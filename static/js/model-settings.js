@@ -65,6 +65,8 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         if(!identity){status.textContent='Load a model to customize its appearance.';return;}
         if(root!==identity||key!==modelKey){
             stopPicking();
+            lightingTargetId=null;
+            viewer?.setCharacterLightingTarget(null);
             mouth.refresh();
             const generation=++revision;root=identity;modelKey=key;
             controller=new ModelMaterials(viewer);viewer.materialEditor=controller;controller.attach(key);
@@ -78,6 +80,7 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
             for(const [id,config]of Object.entries(colors))try{current.setColor(id,config);}catch(error){status.textContent=error.message;}
         }
         fill(part,controller.colorTargets());fill(texture,controller.remapTargets());updateColor();
+        updateLightingTarget();
         document.getElementById('model-color-hint').textContent=viewer.live2d
             ? 'Choose a Live2D ArtMesh to tint. Names come from the imported rig. Tint preserves its masks and transparency.'
             : 'Choose a material for hair, clothing or another part. Coloring preserves texture detail and transparency.';
@@ -104,12 +107,18 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         const id=texture.value,key=modelKey;await current.setRemap(id,blob);await storedRemap(key,id,blob);file.value='';
     });
     document.getElementById('model-remap-reset').onclick=()=>action(async current=>{const id=texture.value;await current.setRemap(id,null);await storedRemap(modelKey,id,null);});
-    let picking=false,lastHover=0;
+    let picking=false,lastHover=0,pickMode='color',lightingTargetId=null;
     const pickButton=document.getElementById('model-pick-part');
-    const stopPicking=()=>{picking=false;document.body.classList.remove('model-part-picking');controller?.setHover(null);const viewer=getViewer();if(viewer?.controls)viewer.controls.enabled=true;pickButton.textContent='Pick part on model';};
-    pickButton.onclick=()=>{if(picking){stopPicking();return;}if(!controller)return;tab('coloring');picking=true;document.body.classList.add('model-part-picking');getViewer().controls.enabled=false;pickButton.textContent='Cancel picking';status.textContent='Hover over the model to highlight a part. Click to select it. Escape cancels.';};
+    const lightingPick=document.getElementById('model-lighting-pick'),lightingWhole=document.getElementById('model-lighting-whole');
+    const lightingStatus=document.getElementById('model-lighting-target-status');
+    const updateLightingTarget=()=>{const entry=controller?.entry(lightingTargetId);lightingStatus.textContent=entry?'Target: '+entry.name+'. Gloss and bloom apply only to this material.':'Target: full model. Gloss and bloom apply across the model.';};
+    const stopPicking=()=>{picking=false;document.body.classList.remove('model-part-picking');controller?.setHover(null);const viewer=getViewer();if(viewer?.controls)viewer.controls.enabled=true;pickButton.textContent='Pick part on model';lightingPick.textContent='Pick part for gloss and bloom';};
+    const startPicking=mode=>{if(picking){stopPicking();return;}if(!controller)return;pickMode=mode;tab('coloring');picking=true;document.body.classList.add('model-part-picking');getViewer().controls.enabled=false;if(mode==='lighting')lightingPick.textContent='Cancel picking';else pickButton.textContent='Cancel picking';status.textContent='Hover over the model to highlight a part. Click to select it. Escape cancels.';};
+    pickButton.onclick=()=>startPicking('color');
+    lightingPick.onclick=()=>startPicking('lighting');
+    lightingWhole.onclick=()=>{lightingTargetId=null;getViewer()?.setCharacterLightingTarget(null);updateLightingTarget();status.textContent='Gloss and bloom now affect the full model.';};
     window.addEventListener('pointermove',event=>{if(!picking||event.target.closest?.('#expression-modal .modal-card'))return;if(performance.now()-lastHover<45)return;lastHover=performance.now();const id=controller.pick(event.clientX,event.clientY);controller.setHover(id);status.textContent=id?'Highlighted: '+controller.entry(id).name:'Hover over hair, clothing or another model part.';},true);
-    window.addEventListener('pointerdown',event=>{if(!picking||event.target.closest?.('#expression-modal .modal-card'))return;event.preventDefault();event.stopImmediatePropagation();const id=controller.pick(event.clientX,event.clientY);if(!id)return;part.value=id;updateColor();const name=controller.entry(id).name;stopPicking();status.textContent='Selected: '+name;},true);
+    window.addEventListener('pointerdown',event=>{if(!picking||event.target.closest?.('#expression-modal .modal-card'))return;event.preventDefault();event.stopImmediatePropagation();const id=controller.pick(event.clientX,event.clientY);if(!id)return;const entry=controller.entry(id);part.value=id;updateColor();const name=entry.name;if(pickMode==='lighting'){if(!entry.material){status.textContent='Gloss and bloom targeting is available for 3D model materials.';return;}lightingTargetId=id;getViewer()?.setCharacterLightingTarget(entry.material);updateLightingTarget();}stopPicking();status.textContent='Selected: '+name;},true);
     window.addEventListener('keydown',event=>{if(picking&&event.code==='Escape'){event.preventDefault();stopPicking();}},true);
     const close=document.getElementById('close-expression-modal'),closeOriginal=close.onclick;close.onclick=()=>{stopPicking();bones.stop();textureDiagnostics.stop();faceMapping.stop();closeOriginal?.();};
     tab(activeTab);return {refresh,stopMicrophone:mouth.stop};

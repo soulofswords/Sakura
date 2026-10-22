@@ -52,6 +52,18 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get('/model/package/'+'b'*32)).status_code,404)
         response=await self.client.get('/model/package/'+'a'*32)
         self.assertEqual(response.content,b'zip')
+    async def test_pc_tool_route_authentication_and_fixed_forwarding(self):
+        self.assertEqual((await self.client.post('/tools',json={'action':'system.status'})).status_code,401)
+        await self.pair()
+        self.assertEqual((await self.client.post('/tools',json={'action':'shell','code':'anything'})).status_code,400)
+        response=httpx.Response(200,json={'ok':True,'reply':'CPU usage is 10 percent.'})
+        from unittest.mock import AsyncMock,patch
+        with patch('mobile_link.httpx.AsyncClient') as client:
+            post=AsyncMock(return_value=response);client.return_value.__aenter__.return_value.post=post
+            result=await self.client.post('/tools',json={'action':'system.status','phone':False,'code':'ignored'})
+            self.assertEqual(result.status_code,200)
+            self.assertEqual(post.call_args.kwargs['json'],{'action':'system.status','phone':True})
+
     async def test_pairing_does_not_start_tracking_and_camera_is_separate(self):
         import base64
         await self.pair();self.assertEqual(self.link.poll({'edition':'companion'})['commands'],[])
@@ -63,9 +75,14 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data['commands'],[{'type':'camera-start'}]);self.assertIsNone(data['frame'])
         self.assertEqual(data['camera']['image'],image)
         self.assertIsNone(self.link.poll({})['camera'])
+        self.assertEqual((await self.client.post('/command',json={'type':'companion-tracking-start'})).status_code,200)
+        self.assertEqual((await self.client.post('/command',json={'type':'companion-tracking-stop'})).status_code,200)
+        self.assertEqual(self.link.poll({'edition':'companion'})['commands'],[
+            {'type':'companion-tracking-start'},{'type':'companion-tracking-stop'}])
         self.assertEqual((await self.client.post('/camera',json={'image':'bad'})).status_code,400)
         self.link.state={'edition':'vtuber'}
         self.assertEqual((await self.client.post('/camera',json={'image':image})).status_code,409)
+        self.assertEqual((await self.client.post('/command',json={'type':'companion-tracking-start'})).status_code,409)
     async def asyncSetUp(self):
         self.directory=tempfile.TemporaryDirectory();self.store=Path(self.directory.name)/'devices.json'
         self.link=MobileLink(self.store);self.link.enabled=True;self.link.code='123456';self.link.code_expires=time.time()+300

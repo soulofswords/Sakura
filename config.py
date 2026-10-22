@@ -30,7 +30,7 @@ OLLAMA_VISION_MODEL = "qwen3-vl:4b-instruct"
 # Other good options:  "mistral:7b", "qwen2.5:7b", "phi3:mini", "gemma2:9b"
 
 # ──────────────────────── STT (Faster-Whisper) ────────────────────────
-WHISPER_MODEL = "tiny"          # tiny (fast CPU) | base | small | medium | large-v3
+WHISPER_MODEL = "base"          # tiny (fast CPU) | base | small | medium | large-v3
 WHISPER_DEVICE = "cpu"          # "cuda" for GPU (requires PyTorch+CUDA), "cpu" for CPU-only
 WHISPER_COMPUTE = "int8"        # "float16" for GPU, "int8" for CPU
 SAMPLE_RATE = 16000

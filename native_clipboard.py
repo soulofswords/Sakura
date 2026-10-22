@@ -46,3 +46,35 @@ def copy_text(text):
         if opened:user.CloseClipboard()
         if not transferred:kernel.GlobalFree(handle)
         user.DestroyWindow(owner)
+
+
+def read_text():
+    """Read plain Unicode text only after an explicit request; never watch clipboard."""
+    if sys.platform!='win32':raise RuntimeError('PC clipboard reading currently supports Windows only.')
+    from ctypes import wintypes as w
+    user=ctypes.WinDLL('user32',use_last_error=True);kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    user.OpenClipboard.argtypes=[w.HWND];user.OpenClipboard.restype=w.BOOL
+    user.GetClipboardData.argtypes=[w.UINT];user.GetClipboardData.restype=w.HANDLE
+    user.CloseClipboard.restype=w.BOOL
+    kernel.GlobalLock.argtypes=[w.HGLOBAL];kernel.GlobalLock.restype=ctypes.c_void_p
+    kernel.GlobalUnlock.argtypes=[w.HGLOBAL];kernel.GlobalSize.argtypes=[w.HGLOBAL];kernel.GlobalSize.restype=ctypes.c_size_t
+    opened=False
+    try:
+        for _ in range(10):
+            if user.OpenClipboard(None):opened=True;break
+            time.sleep(.02)
+        if not opened:raise RuntimeError('Clipboard is busy. Try again.')
+        handle=user.GetClipboardData(13)
+        if not handle:return ''
+        size=kernel.GlobalSize(handle)
+        if size>8194:raise ValueError('Clipboard text exceeds the 4096 character limit.')
+        pointer=kernel.GlobalLock(handle)
+        if not pointer:raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            raw=ctypes.string_at(pointer,size)
+            text=raw.decode('utf-16-le',errors='strict').split('\0',1)[0]
+            if len(text)>4096:raise ValueError('Clipboard text exceeds the 4096 character limit.')
+            return text
+        finally:kernel.GlobalUnlock(handle)
+    finally:
+        if opened:user.CloseClipboard()

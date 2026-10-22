@@ -1,4 +1,5 @@
 const moods={
+    sparkle:/sparkl|twinkl|star.?eyes|キラ|きら|星目|星星眼/i,
     happy:/happy|joy|smile|cheer|笑|嬉|喜|开心|にこ/i,
     surprised:/surpris|shock|wow|驚|びっくり|惊|吃惊/i,
     concerned:/sad|worr|concern|困|悲|哀|心配|难过/i,
@@ -27,7 +28,7 @@ export default class ReactionExpressions {
         this.clear();this.root=v.live2d||v.model;
         const available=availableReactionExpressions(v),mood=Object.hasOwn(moods,detectedMood)?detectedMood:reactionMood(text);
         const selected=available.find(e=>e.moods.includes(mood))
-            ||(mood==='amused'?available.find(e=>e.moods.includes('happy')):null);
+            ||(['amused','sparkle'].includes(mood)?available.find(e=>e.moods.includes('happy')):null);
         if(!selected)return false;
         this.entries=[{name:selected.name,weight:0,target:1}];
         v.reactionExpressionInfo={mood,name:selected.name,available:available.length};return true;

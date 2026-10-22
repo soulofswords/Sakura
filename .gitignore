@@ -59,6 +59,12 @@
 **/*-key.bin
 **/settings.json
 **/conversation-memory.json
+**/learned-answers.json
+**/learned-answers.tmp
+**/agent-connections.json
+**/agent-connections.tmp
+**/agent-task-history.json
+**/agent-task-history.tmp
 **/steam-shortcuts.json
 **/reminders.json
 **/reminders.tmp

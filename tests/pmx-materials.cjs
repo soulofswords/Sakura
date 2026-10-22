@@ -40,8 +40,12 @@ prepare({NormalBlending:1},{traverse(fn){fn({material:unrelatedHair})}});
 assert.equal(unrelatedHair.transparent,true,'Other hair atlases retain their alpha behavior');
 const preservedHair={...fringe,transparent:true,alphaTest:.01};
 prepare.call({pmxReferenceMode:true},{NormalBlending:1},{traverse(fn){fn({material:preservedHair})}});
-assert.equal(preservedHair.transparent,true,'Explicit authored-material reference remains unchanged');
-console.log('PASS: Taffy opaque strand cutouts; other models, authored translucency and reference mode preserved');
+assert.equal(preservedHair.transparent,false,'Reference/fallback loading must also retain opaque Taffy bangs');
+assert.equal(preservedHair.alphaTest,.2);assert.equal(preservedHair.depthWrite,true);
+const translucentTaffy={...fringe,opacity:.5,transparent:true};
+prepare.call({pmxReferenceMode:true},{NormalBlending:1},{traverse(fn){fn({material:translucentTaffy})}});
+assert.equal(translucentTaffy.transparent,true,'Authored translucent Taffy surfaces remain translucent');
+console.log('PASS: Taffy opaque strand cutouts; other models and authored translucency preserved, including reference/fallback loads');
 function skinMaterial(name, file) {
  return {name,isMMDToonMaterial:true,map:{},opacity:1,gradientMap:{},
   userData:{MMD:{mapFileName:file}},fragmentShader:'outgoingLight += matcapColor.rgb;',

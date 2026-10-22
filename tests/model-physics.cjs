@@ -90,6 +90,14 @@ const large = new Physics(); large.attach(authoredRig(521));
 assert.equal(large.info.source, 'model rig');
 assert.equal(large.info.bones, 521, 'Every dynamic rig bone is retained, including accessories without recognized names');
 large.update(1/60);
+const fitted=authoredRig(2),shape=new THREE.Bone();shape.name='LeftBreastAdjustment';shape.position.set(.1,0,0);
+fitted.add(shape);fitted.bind(new THREE.Skeleton([...fitted.skeleton.bones,shape]));
+fitted.geometry.userData.MMD.bones.push({name:shape.name,parent:-1,rigidBodyType:0});
+const fittedPhysics=new Physics();fittedPhysics.attach(fitted);
+assert.equal(fittedPhysics.nodes.length,2,'Authored dynamics must not acquire extra name-matched chest shape springs');
+assert.ok(!fittedPhysics.nodes.some(n=>n.bone===shape));
+for(let i=0;i<240;i++)fittedPhysics.update(1/60);
+assert.ok(shape.quaternion.angleTo(new THREE.Quaternion())<1e-6,'Fitted top adjustment bone retains its authored pose');
 const malformed = new Physics(); malformed.attach(authoredRig(3, true));
 assert.equal(malformed.info.source, 'name match'); assert.equal(malformed.info.bones, 1);
 context.validBulletRig = () => true;
@@ -263,3 +271,22 @@ jitterGuard.setStrength(0);
 assert.ok(jitterBones.every((bone,i)=>bone.position.distanceTo(new THREE.Vector3(i+1,0,0))<1e-9&&bone.quaternion.angleTo(new THREE.Quaternion())<1e-9),
     'Turning physics Off after fallback restores the original bone pose');
 console.log('PASS: repeated hair/skirt bone jumps automatically switch Bullet rigs to safer spring chains');
+
+// Upper garments must not inherit the loose accessory/hair-sized swing range.
+const garmentModel=new THREE.Group(),garment=new THREE.Bone(),garmentTip=new THREE.Bone();
+garment.name='RightClothArmR2';garmentTip.name='garmentEnd';garmentTip.position.set(.1,0,0);
+garmentModel.add(garment);garment.add(garmentTip);
+const garmentPhysics=new Physics();garmentPhysics.attach(garmentModel);
+const garmentNode=garmentPhysics.nodes.find(n=>n.bone===garment);
+assert.equal(garmentNode.category,'cloth');
+for(let i=0;i<240;i++){
+    garmentPhysics.update(1/60);
+    assert.ok(garment.quaternion.angleTo(garmentNode.restQuat)<=18*Math.PI/180+1e-6);
+}
+garmentPhysics.disabledBones=new Set([garment]);
+for(let i=0;i<120;i++)garmentPhysics.update(1/60);
+assert.ok(garment.quaternion.angleTo(garmentNode.restQuat)<1e-6);
+assert.equal(garmentNode.pos.distanceTo(garmentNode.prev),0,'Frozen garment cannot accumulate hidden spring velocity');
+garmentPhysics.disabledBones.clear();garmentPhysics.update(1/60);
+assert.ok(garment.quaternion.angleTo(garmentNode.restQuat)>0,'Restoring garment re-enables its simulation');
+console.log('PASS: garment swing bound, true simulation exclusion and unfreeze');

@@ -20,12 +20,24 @@ import java.security.KeyStore;
 public class MainActivity extends Activity {
  private boolean localAvailable=true;
  private CallController calls;
- void callState(boolean active){if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraCallState?.("+active+")",null));}
+ private static java.lang.ref.WeakReference<MainActivity> current=new java.lang.ref.WeakReference<>(null);
+ private volatile boolean assistantReady;private String wakePermissionId;private boolean wakePermissionPending;
+ static boolean deliverWakeCommand(String text){MainActivity a=current.get();if(a==null||!a.phoneForeground||!a.assistantReady||WakeService.uiBusy)return false;java.util.concurrent.CountDownLatch ready=new java.util.concurrent.CountDownLatch(1);java.util.concurrent.atomic.AtomicBoolean accepted=new java.util.concurrent.atomic.AtomicBoolean();a.runOnUiThread(()->{if(!a.phoneForeground||!a.assistantReady){ready.countDown();return;}a.web.evaluateJavascript("window.sakuraWakeCommand?.("+JSONObject.quote(text)+")==true",result->{accepted.set("true".equals(result));ready.countDown();});});try{ready.await(2,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException ignored){Thread.currentThread().interrupt();}return accepted.get();}
+ private String wakeState(){try{android.content.SharedPreferences p=getSharedPreferences("paired-pcs",0);return new JSONObject().put("download_active",WakeAssets.downloading).put("download_status",WakeAssets.downloadStatus).put("download_bytes",new File(getCacheDir(),"wake-model.download").length()).put("installed",WakeAssets.ready(this)).put("enabled",WakeService.live!=null&&!WakeService.live.stopped).put("phrase",p.getString("wake-phrase","hey sakura")).put("status",p.getString("wake-status","Wake phrase off")).toString();}catch(Exception error){return "{}";}}
+ private void startWake(String id){try{if(!phoneForeground)throw new Exception("Open Sakura before enabling the wake microphone.");if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new Exception("Microphone permission is required.");if(!getSystemService(android.app.NotificationManager.class).areNotificationsEnabled())throw new Exception("Enable Sakura notifications in Android settings so the wake listener has a visible Stop control.");microphone.stop();WakeService.manual=false;startForegroundService(new Intent(this,WakeService.class).setAction("START"));web.postDelayed(()->new Bridge().complete(id,wakeState()),300);}catch(Exception error){try{new Bridge().complete(id,new JSONObject().put("error",error.getMessage()).toString());}catch(Exception ignored){}}}
+
+ private PhoneMicrophone microphone;private boolean modelFullscreen;private int microphoneGeneration;private boolean dictationPending;
+ void microphoneEvent(boolean on,String message,String text){if(!on&&!dictationPending)WakeService.pauseManual(false);if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraMicrophone?.("+on+","+JSONObject.quote(message)+","+(text==null?"null":JSONObject.quote(text))+")",null));}
+ private void fullscreen(boolean enabled){modelFullscreen=enabled;android.view.View decor=getWindow().getDecorView();if(android.os.Build.VERSION.SDK_INT>=30){getWindow().setDecorFitsSystemWindows(!enabled);android.view.WindowInsetsController controller=decor.getWindowInsetsController();if(controller!=null){controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);if(enabled)controller.hide(android.view.WindowInsets.Type.systemBars());else controller.show(android.view.WindowInsets.Type.systemBars());}}else decor.setSystemUiVisibility(enabled?android.view.View.SYSTEM_UI_FLAG_FULLSCREEN|android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE:android.view.View.SYSTEM_UI_FLAG_VISIBLE);}
+ @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus&&modelFullscreen)fullscreen(true);}
+ @Override public void onBackPressed(){if(modelFullscreen&&web!=null)web.evaluateJavascript("window.sakuraExitModelFullscreen?.()",null);else super.onBackPressed();}
+ PhoneLocation locations;volatile boolean phoneForeground=false;
+ void callState(boolean active){if(active&&microphone!=null)runOnUiThread(()->{microphone.stop();microphone.state(false,"Call in progress · microphone off");});if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraCallState?.("+active+")",null));}
  void phoneNotice(String text){if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraPhoneNotice?.("+JSONObject.quote(text)+")",null));}
  void requestCall(String person){if(localAvailable&&calls!=null)calls.request(person);}
  private WebView web; private String base="",token=""; private PermissionRequest cameraRequest;
  @Override public void onCreate(Bundle state){
-  super.onCreate(state); web=new WebView(this);setContentView(web);if(localAvailable)calls=new CallController(this);
+  super.onCreate(state);current=new java.lang.ref.WeakReference<>(this); web=new WebView(this);setContentView(web);if(localAvailable){calls=new CallController(this);locations=new PhoneLocation(this);microphone=new PhoneMicrophone(this);}
   web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);
   web.getSettings().setMediaPlaybackRequiresUserGesture(false);
   web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);
@@ -45,7 +57,7 @@ public class MainActivity extends Activity {
      if(path.equals("api/models/bone-repairs")&&request.getMethod().equals("GET"))return new WebResourceResponse("application/json","UTF-8",new ByteArrayInputStream("{\"repairs\":null}".getBytes("UTF-8")));
      if(path.startsWith("api/"))return new WebResourceResponse("application/json","UTF-8",404,"Not available",null,new ByteArrayInputStream("{}".getBytes("UTF-8")));
     }catch(Exception error){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new ByteArrayInputStream(new byte[0]));}
-    String mime=path.endsWith(".wasm")?"application/wasm":path.endsWith(".js")||path.endsWith(".mjs")?"application/javascript":path.endsWith(".html")?"text/html":path.endsWith(".png")?"image/png":"application/octet-stream";
+    String mime=path.endsWith(".css")?"text/css":path.endsWith(".wasm")?"application/wasm":path.endsWith(".js")||path.endsWith(".mjs")?"application/javascript":path.endsWith(".html")?"text/html":path.endsWith(".png")?"image/png":"application/octet-stream";
     try{return new WebResourceResponse(mime,"UTF-8",getAssets().open(path));}catch(IOException error){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new ByteArrayInputStream(new byte[0]));}
    }
   });
@@ -56,15 +68,43 @@ public class MainActivity extends Activity {
   web.loadUrl("https://appassets.androidplatform.net/index.html");
  }
  private void grantCamera(){if(cameraRequest!=null){cameraRequest.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});cameraRequest=null;}}
- @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==3){if(calls!=null)calls.permissions();return;}if(code==1&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)grantCamera();else if(cameraRequest!=null){cameraRequest.deny();cameraRequest=null;}}
+ @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==7){wakePermissionPending=false;String id=wakePermissionId;wakePermissionId=null;if(id!=null)startWake(id);return;}if(code==6){if(microphone!=null)microphone.permissionResult();return;}if(code==5){if(locations!=null)locations.permissionsResult();return;}if(code==3){if(calls!=null)calls.permissions();return;}if(code==1&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)grantCamera();else if(cameraRequest!=null){cameraRequest.deny();cameraRequest=null;}}
  class Bridge {
   private void complete(String id,String result){web.post(()->web.evaluateJavascript("window.sakuraNativeReply?.("+JSONObject.quote(id)+","+result+")",null));}
+  @JavascriptInterface public String wakeState(){return MainActivity.this.wakeState();}
+  @JavascriptInterface public void installWakePack(String id){new Thread(()->{try{if(WakeAssets.downloading)throw new Exception("A wake pack download is already running.");WakeAssets.downloading=true;WakeAssets.install(MainActivity.this,message->{WakeAssets.downloadStatus=message;});WakeAssets.downloadStatus="Wake pack ready";complete(id,MainActivity.this.wakeState());}catch(Exception error){WakeAssets.downloadStatus=error.getMessage();complete(id,error(error));}finally{WakeAssets.downloading=false;}}).start();}
+  @JavascriptInterface public void setWake(String id,boolean enabled,String phrase){runOnUiThread(()->{try{
+   if(!enabled){stopService(new Intent(MainActivity.this,WakeService.class));web.postDelayed(()->complete(id,MainActivity.this.wakeState()),200);return;}
+   if(!phoneForeground)throw new Exception("Open Sakura to enable background listening.");
+   if(!WakeAssets.ready(MainActivity.this))throw new Exception("Download the offline wake pack first.");
+   if(prefs().getString("local-key","").isEmpty()||MobileModels.list(new File(getFilesDir(),"models")).length()==0)throw new Exception("Save your API key and at least one model before enabling wake mode.");
+   String value=WakePhrase.validate(phrase);if(WakeService.live!=null&&!value.equals(prefs().getString("wake-phrase","hey sakura")))throw new Exception("Turn wake listening off before changing its phrase.");prefs().edit().putString("wake-phrase",value).apply();
+   java.util.ArrayList<String> missing=new java.util.ArrayList<>();if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)missing.add(Manifest.permission.RECORD_AUDIO);if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)missing.add(Manifest.permission.POST_NOTIFICATIONS);
+   if(!missing.isEmpty()){wakePermissionId=id;wakePermissionPending=true;requestPermissions(missing.toArray(new String[0]),7);}else startWake(id);
+  }catch(Exception error){complete(id,error(error));}});}
+  @JavascriptInterface public void setAssistantState(boolean ready,boolean busy){assistantReady=ready;WakeService.busy(busy);}
+  @JavascriptInterface public void syncWakeHistory(String history){try{JSONArray messages=new JSONArray(history);if(history.length()>100000||messages.length()>20)return;prefs().edit().putString("wake-history",history).putLong("wake-history-time",System.currentTimeMillis()).apply();}catch(Exception ignored){}}
+  @JavascriptInterface public String wakeHistory(){try{return new JSONObject().put("messages",new JSONArray(prefs().getString("wake-history","[]"))).put("updated_at",prefs().getLong("wake-history-time",0)).toString();}catch(Exception error){return "{}";}}
+  @JavascriptInterface public void setModelFullscreen(boolean enabled){if(localAvailable)runOnUiThread(()->fullscreen(enabled));}
+  @JavascriptInterface public void setMicrophone(boolean enabled){if(!localAvailable)return;runOnUiThread(()->{final int request=++microphoneGeneration;if(!enabled){microphone.stop();microphone.state(false,"Microphone off");return;}if(calls!=null&&calls.inCall()){microphone.state(false,"Sakura is muted during your call.");return;}WakeService.pauseManual(true);new Thread(()->{long end=android.os.SystemClock.elapsedRealtime()+2000;while(WakeService.recording()&&android.os.SystemClock.elapsedRealtime()<end)try{Thread.sleep(20);}catch(InterruptedException ignored){}runOnUiThread(()->{if(request==microphoneGeneration&&phoneForeground)microphone.start();else if(request==microphoneGeneration)WakeService.pauseManual(false);});}).start();});}
   @JavascriptInterface public boolean localAvailable(){return localAvailable;}
+  @JavascriptInterface public String locationState(){try{return locations==null?"{\"enabled\":false}":locations.state().toString();}catch(Exception error){return error(error);}}
+  @JavascriptInterface public void openPlace(double latitude,double longitude){if(!localAvailable||!Double.isFinite(latitude)||!Double.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180)return;runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query="+latitude+","+longitude)));}catch(Exception error){phoneNotice("No maps/browser app was available to open this place.");}});}
+  @JavascriptInterface public void searchPlaces(double latitude,double longitude,String query){if(!localAvailable||!Double.isFinite(latitude)||!Double.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180||query==null||query.length()>200)return;runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("geo:"+latitude+","+longitude+"?q="+android.net.Uri.encode(query)+"&z=15")));}catch(Exception error){try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query="+android.net.Uri.encode(query+" near "+latitude+","+longitude))));}catch(Exception ignored){phoneNotice("No maps/browser app was available.");}}});}
+  @JavascriptInterface public void openNearby(double latitude,double longitude){if(!localAvailable||!Double.isFinite(latitude)||!Double.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180)return;runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("geo:"+latitude+","+longitude+"?q=restaurants&z=15")));}catch(Exception error){try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://www.google.com/maps/search/restaurants/@"+latitude+","+longitude+",15z")));}catch(Exception ignored){phoneNotice("No maps/browser app was available.");}}});}
+  @JavascriptInterface public void setLocation(String id,boolean enabled){new Thread(()->{try{
+   if(!localAvailable||locations==null)throw new Exception("Location belongs to Sakura Mobile Local mode.");
+   if(enabled){locations.setting("ask");locations.current(true);}else{locations.setting("off");locations.stop();}
+   complete(id,locations.state().toString());
+  }catch(Exception error){complete(id,error(error));}}).start();}
   @JavascriptInterface public void dictate(){if(!localAvailable)return;runOnUiThread(()->{try{
    if(calls!=null&&calls.inCall())throw new Exception("Sakura is muted during your call.");
+   WakeService.pauseManual(true);dictationPending=true;
    Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_PROMPT,"Speak your message to Sakura");startActivityForResult(intent,4);
-  }catch(Exception error){phoneNotice("Phone speech input is unavailable. You can type your message instead.");}});}
-  @JavascriptInterface public String localConfig(){try{return new JSONObject().put("provider",prefs().getString("local-provider","gemini")).put("model",prefs().getString("local-model","gemini-flash-latest")).put("voice",prefs().getString("local-voice","female")).put("address",prefs().getString("local-address","sir")).put("key_set",!prefs().getString("local-key","").isEmpty()).toString();}catch(Exception error){return error(error);}}
+  }catch(Exception error){dictationPending=false;WakeService.pauseManual(false);phoneNotice("Phone speech input is unavailable. You can type your message instead.");}});}
+  @JavascriptInterface public String setHonorific(String address){try{if(!localAvailable||!address.matches("sir|maam|none"))throw new Exception("Choose Sir, Ma’am or No title.");prefs().edit().putString("local-address",address).apply();return localConfig();}catch(Exception error){return error(error);}}
+  @JavascriptInterface public String setNewsArea(String area){try{if(!localAvailable||area==null||area.length()>100)throw new Exception("Enter a city or state of up to 100 characters.");prefs().edit().putString("news-area",area.trim()).apply();return localConfig();}catch(Exception error){return error(error);}}
+  @JavascriptInterface public String localConfig(){try{return new JSONObject().put("provider",prefs().getString("local-provider","gemini")).put("model",prefs().getString("local-model","gemini-flash-latest")).put("voice",prefs().getString("local-voice","female")).put("address",prefs().getString("local-address","sir")).put("news_area",prefs().getString("news-area","")).put("key_set",!prefs().getString("local-key","").isEmpty()).toString();}catch(Exception error){return error(error);}}
   @JavascriptInterface public String configureLocal(String provider,String key,String model,String voice,String address){try{
    if(!localAvailable)throw new Exception("Local mode belongs to Sakura Mobile.");
    if(key.length()>4096||key.contains("\r")||key.contains("\n"))throw new Exception("Enter a valid API key.");
@@ -127,7 +167,7 @@ public class MainActivity extends Activity {
    }catch(Exception error){return error(error);}
   }
   @JavascriptInterface public String request(String method,String path,String body){
-    if(!path.matches("/(state|command|frame|camera|chat|gemini)"))return "{\"error\":\"Unsupported request\"}";
+    if(!path.matches("/(state|command|frame|camera|chat|gemini|tools)"))return "{\"error\":\"Unsupported request\"}";
    try{return call(method,path,body);}catch(Exception error){return error(error);}
   }
   private String call(String method,String path,String body)throws Exception{
@@ -142,8 +182,9 @@ public class MainActivity extends Activity {
   }
   private String error(Exception error){try{return new JSONObject().put("error",error.getMessage()).toString();}catch(Exception ignored){return "{}";}}
  }
- @Override protected void onPause(){super.onPause();if(web!=null)web.evaluateJavascript("window.stopPhoneTracking?.();window.stopPhoneVision?.();window.sakuraLocalPause?.()",null);}
- @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==4&&result==RESULT_OK&&data!=null){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())web.evaluateJavascript("window.sakuraDictation?.("+JSONObject.quote(words.get(0))+")",null);}}
- @Override protected void onResume(){super.onResume();if(calls!=null)calls.resume();if(web!=null)web.evaluateJavascript("window.sakuraResume?.()",null);}
- @Override protected void onDestroy(){if(calls!=null)calls.close();if(web!=null){web.removeJavascriptInterface("Sakura");web.destroy();}super.onDestroy();}
+ @Override protected void onPause(){super.onPause();microphoneGeneration++;if(microphone!=null)microphone.pause();boolean locationPrompt=(locations!=null&&locations.awaitingPermission)||(microphone!=null&&microphone.permissionPending)||wakePermissionPending;if(!locationPrompt){phoneForeground=false;if(locations!=null)locations.stop();}if(web!=null)web.evaluateJavascript("window.stopPhoneTracking?.();window.stopPhoneVision?.();"+(locationPrompt?"":"window.sakuraLocalPause?.()"),null);}
+ @Override protected void onStop(){super.onStop();if(microphone!=null){microphone.stop();microphone.state(false,"Microphone off");}phoneForeground=false;WakeService.busy(false);if(web!=null){web.onPause();web.pauseTimers();}if(locations!=null)locations.stop();}
+ @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==4){dictationPending=false;WakeService.pauseManual(false);}if(request==4&&result==RESULT_OK&&data!=null){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())web.evaluateJavascript("window.sakuraDictation?.("+JSONObject.quote(words.get(0))+")",null);}}
+ @Override protected void onResume(){super.onResume();phoneForeground=true;if(web!=null){web.resumeTimers();web.onResume();}if(microphone!=null)microphone.resume();if(calls!=null)calls.resume();if(web!=null)web.evaluateJavascript("window.sakuraResume?.()",null);}
+ @Override protected void onDestroy(){if(current.get()==this)current.clear();if(microphone!=null)microphone.stop();if(calls!=null)calls.close();if(web!=null){web.removeJavascriptInterface("Sakura");web.destroy();}super.onDestroy();}
 }

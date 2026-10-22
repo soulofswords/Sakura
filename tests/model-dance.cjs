@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),THREE=require('../static/vendor/three/build/three.cjs');
-const ctx={THREE};vm.runInNewContext(fs.readFileSync('static/js/hand-presentation.js','utf8').replace(/import .*?;\n/,'').replace('export function presentHand','function presentHand'),ctx);
-vm.runInNewContext(fs.readFileSync('static/js/model-dance.js','utf8').replace(/import .*?;\n/,'').replace('export default class ModelDance','class ModelDance')+'\nthis.Dance=ModelDance;',ctx);
+const ctx={THREE,console,ImportedGreeting:class{constructor(){this.data={duration:4.067};}async load(){}begin(){return {};}apply(){}restore(){}}};vm.runInNewContext(fs.readFileSync('static/js/hand-presentation.js','utf8').replace(/import .*?;\r?\n/,'').replace('export function presentHand','function presentHand'),ctx);
+vm.runInNewContext(fs.readFileSync('static/js/model-dance.js','utf8').replace(/^import .*?;\r?\n/gm,'').replace('export default class ModelDance','class ModelDance')+'\nthis.Dance=ModelDance;',ctx);
 for(const format of ['pmx','vrm'])for(const style of ['groove','step','wave']){
  const model=new THREE.Group();model.position.set(1,2,3);const v={model,vrm:format==='vrm'?{}:null,physics:{},animationBones:{},_avoidArmClipping(){}};
  for(const name of ['torso','chest','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist','leftThigh','rightThigh','leftKnee','rightKnee'])v.animationBones[name]={bone:new THREE.Bone(),rest:new THREE.Euler()};
@@ -55,3 +55,41 @@ for(const vrm of [false,true])for(const style of ['hands_both','hand_left','hand
  v.userTracking=true;assert.equal(motion.start(style),false);
 }
 console.log('PASS: both/left/right hand gestures, smooth completion and tracking isolation on PMX/VRM');
+for(const vrm of [false,true])for(const style of ['laugh','laugh_bend']){
+ const model=new THREE.Group(),v={model,vrm,physics:{},animationBones:{},_avoidArmClipping(){}};
+ for(const key of ['torso','chest','neck','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist','leftThigh','rightThigh','leftKnee','rightKnee']){
+  const bone=new THREE.Bone();model.add(bone);v.animationBones[key]={bone,rest:new THREE.Euler()};
+ }
+ const motion=new ctx.Dance(v);assert.ok(motion.start(style));let bend=0;
+ for(let i=0;i<600;i++){
+  motion.update(1/60);bend=Math.max(bend,Math.abs(v.animationBones.torso.bone.rotation.x));
+  for(const e of Object.values(v.animationBones))assert.ok(e.bone.quaternion.toArray().every(Number.isFinite));
+ }
+ assert.ok(bend>(style==='laugh_bend'?.3:.04));assert.equal(motion.active,null);
+ for(const e of Object.values(v.animationBones))assert.ok(e.bone.quaternion.angleTo(new THREE.Quaternion())<1e-6);
+ assert.deepEqual(model.position.toArray(),[0,0,0]);
+ v.userTracking=true;assert.equal(motion.start(style),false);v.userTracking=false;v.live2d={};assert.equal(motion.start(style),false);
+}
+console.log('PASS: short/deep laugh on PMX/VRM, finite bends, complete neutral return, tracking and Live2D exclusions');
+for(const vrm of [false,true]){
+ const model=new THREE.Group(),v={model,vrm,physics:{},animationBones:{}};
+ for(const key of ['torso','chest','neck','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist']){
+  const bone=new THREE.Bone();model.add(bone);v.animationBones[key]={bone,rest:new THREE.Euler()};
+ }
+ const motion=new ctx.Dance(v);assert.ok(motion.start('chest_tap'));
+ for(let i=0;i<400;i++){motion.update(1/60);for(const e of Object.values(v.animationBones))assert.ok(e.bone.quaternion.toArray().every(Number.isFinite));}
+ assert.equal(motion.active,null);assert.deepEqual(model.position.toArray(),[0,0,0]);
+ delete v.animationBones.rightWrist;assert.equal(motion.start('chest_tap'),false);
+}
+console.log('PASS: chest tap restores neutral, remains finite, and requires a wrist rig');
+for(const vrm of [false,true]){
+ const model=new THREE.Group(),v={model,vrm,physics:{},animationBones:{}};
+ for(const key of ['torso','chest','neck','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist']){
+  const bone=new THREE.Bone();model.add(bone);v.animationBones[key]={bone,rest:new THREE.Euler()};
+ }
+ const motion=new ctx.Dance(v);assert.ok(motion.start('greeting_wave'));
+ for(let i=0;i<400;i++){motion.update(1/60);for(const e of Object.values(v.animationBones))assert.ok(e.bone.quaternion.toArray().every(Number.isFinite));}
+ assert.equal(motion.active,null);assert.deepEqual(model.position.toArray(),[0,0,0]);
+ v.userTracking=true;assert.equal(motion.start('greeting_wave'),false);v.userTracking=false;v.live2d={};assert.equal(motion.start('greeting_wave'),false);
+}
+console.log('PASS: greeting wave remains finite, completes smoothly and excludes Live2D/face tracking');

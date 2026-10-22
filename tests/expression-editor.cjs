@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 function element(){return {add(item){this.children.push(item);},value:'',textContent:'',children:[],dataset:{},classList:{hidden:true,add(){this.hidden=true;},remove(){this.hidden=false;},contains(){return this.hidden;}},append(...items){this.children.push(...items);},replaceChildren(){this.children=[];},setAttribute(){},querySelector(selector){return selector==='input'?this.children.find(child=>child.type==='range'):null;}};}
 const elements=new Map();function byId(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
 let handler;const store=new Map();const ctx=vm.createContext({Option:class {constructor(text,value){this.text=text;this.value=value;}},document:{getElementById:byId,createElement:element},window:{addEventListener(type,fn){if(type==='keydown')handler=fn;}},localStorage:{getItem:key=>store.get(key),setItem:(key,value)=>store.set(key,value)}});
-vm.runInContext(fs.readFileSync('static/js/auto-expressions.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/custom-expressions.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/expression-editor.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,''),ctx);
+vm.runInContext(fs.readFileSync('static/js/model-visibility.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/auto-expressions.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/custom-expressions.js','utf8').replace(/export /g,'')+'\n'+fs.readFileSync('static/js/expression-editor.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,''),ctx);
 let model='pmx/test.pmx';const v={vtuberTrackingMode:true,allMorphNames:['笑い','happyCustom'],clearManualExpression(){this.manualExpression=null;},live2d:null};
 const editor=ctx.installExpressionEditor(()=>v,()=>model),list=byId('expression-list');editor.refresh();
 assert.equal(list.children.length,2,'each detected expression has its own card');
@@ -25,3 +25,16 @@ v.clearManualExpression();v.areAiExpressionsAutomatic=()=>true;handler(event('Ke
 editor.refresh();assert.equal(list.children[0].children[3].children[0].disabled,true,'Manual preview is visibly disabled in automatic mode');
 assert.equal(ctx.hotkeyFor(event('ShiftLeft')),'');
 console.log('PASS: individual expression cards, automatic and custom hotkeys, Live2D preview/strength, model isolation, and AI Reactions/manual ownership');
+
+v.live2d=null;v.allMorphNames.push('Hide_Wings');v.partVisibility=new Map([['Hide_Wings',0]]);v.partVisibilityKey='visibility:test';v.setMorph=()=>{};
+editor.refresh();const hide=list.children.find(c=>c.dataset.expression==='Hide_Wings');
+assert.equal(hide.children[3].children[0].disabled,false);hide.children[3].children[0].onclick();assert.equal(v.partVisibility.get('Hide_Wings'),1);
+hide.children[3].children[3].onclick();assert.equal(v.partVisibility.get('Hide_Wings'),0);
+hide.querySelector('input').value='100';hide.querySelector('input').oninput();assert.equal(v.partVisibility.get('Hide_Wings'),1);
+byId('close-expression-modal').onclick();handler(event('Digit3',false,true));assert.equal(v.partVisibility.get('Hide_Wings'),0);handler(event('Digit3',false,true));assert.equal(v.partVisibility.get('Hide_Wings'),1);
+console.log('PASS: visibility preview, off, strength and hotkeys bypass facial ownership and share persistent state');
+
+assert.equal(hide.children[0].children[0].textContent,'Hide Wings');
+const visibilityToggle=hide.children[3].children[4];visibilityToggle.onclick();assert.equal(v.partVisibility.get('Hide_Wings'),0);visibilityToggle.onclick();assert.equal(v.partVisibility.get('Hide_Wings'),1);
+const markup=fs.readFileSync('static/index.html','utf8');assert.ok(!markup.includes('data-model-tab="visibility"'));assert.ok(!markup.includes('data-model-panel="visibility"'));
+console.log('PASS: clear Hide Wings label, explicit toggle and no duplicate Visibility tab');

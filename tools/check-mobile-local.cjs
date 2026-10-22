@@ -20,19 +20,32 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
    else if(urlpath.startsWith('/static/'))file=path.join(root,urlpath.slice(1));
    else file=path.join(root,'android/assets',urlpath==='/'?'index.html':urlpath.slice(1));
    if(!(file.startsWith(root+path.sep)||(assetRoot&&file.startsWith(assetRoot+path.sep)))||!fs.existsSync(file)||!fs.statSync(file).isFile())return route.fulfill({status:404,body:''});
-   const ext=path.extname(file).toLowerCase(),mime={'.js':'application/javascript','.html':'text/html','.json':'application/json','.wasm':'application/wasm','.png':'image/png','.jpg':'image/jpeg'}[ext]||'application/octet-stream';
+   const ext=path.extname(file).toLowerCase(),mime={'.js':'application/javascript','.css':'text/css','.html':'text/html','.json':'application/json','.wasm':'application/wasm','.png':'image/png','.jpg':'image/jpeg'}[ext]||'application/octet-stream';
    await route.fulfill({contentType:mime,body:fs.readFileSync(file)});
   });
   await page.addInitScript(({models})=>{
-   let config={provider:'gemini',model:'gemini-flash-latest',voice:'female',address:'sir',key_set:!localStorage.getItem('test-empty')};window.testCalls=[];
+   let config={provider:'gemini',model:'gemini-flash-latest',voice:'female',address:localStorage.getItem('test-address')||'sir',key_set:!localStorage.getItem('test-empty')};window.testCalls=[];
    let savedModels=localStorage.getItem('test-empty')?[]:models,transferPolls=0;
    window.Sakura={localAvailable:()=>true,localConfig:()=>JSON.stringify(config),
     configureLocal:(provider,key,model,voice,address)=>{config={provider,model,voice,address,key_set:true};testCalls.push({type:'config',voice});return JSON.stringify(config);},
+    setHonorific:address=>{config.address=address;localStorage.setItem('test-address',address);testCalls.push({type:'address',address});return JSON.stringify(config);},
     remembered:()=>JSON.stringify([{name:'Saved PC',address:'http://192.168.1.10:8771'}]),
     reconnectAsync:id=>{testCalls.push({type:'reconnect'});const fail=window.failNextReconnect;window.failNextReconnect=false;setTimeout(()=>window.sakuraNativeReply(id,fail?{error:'PC offline (test)'}:{name:'Saved PC',edition:'companion'}),10);},
+    wakeState:()=>JSON.stringify({installed:!!window.testWakeInstalled,enabled:!!window.testWakeEnabled,phrase:window.testWakePhrase||'hey sakura',status:window.testWakeEnabled?'Listening offline':'Wake phrase off',download_active:!!window.testWakeDownloading,download_status:window.testWakeDownloadStatus||'',download_bytes:window.testWakeBytes||0}),
+    installWakePack:id=>{window.testWakeInstalled=true;testCalls.push({type:'wake-download'});setTimeout(()=>sakuraNativeReply(id,JSON.parse(Sakura.wakeState())),10);},
+    setWake:(id,enabled,phrase)=>{window.testWakeEnabled=enabled;window.testWakePhrase=phrase;testCalls.push({type:'wake-toggle',enabled,phrase});setTimeout(()=>sakuraNativeReply(id,JSON.parse(Sakura.wakeState())),10);},
+    setAssistantState:(ready,busy)=>testCalls.push({type:'assistant-state',ready,busy}),
+    syncWakeHistory:history=>localStorage.setItem('test-native-history',JSON.stringify({messages:JSON.parse(history),updated_at:Date.now()})),
+    wakeHistory:()=>localStorage.getItem('test-native-history')||'{}',
+    setModelFullscreen:enabled=>testCalls.push({type:'fullscreen',enabled}),
+    setMicrophone:enabled=>{testCalls.push({type:'microphone',enabled});setTimeout(()=>window.sakuraMicrophone(enabled,enabled?'Listening…':'Microphone off',null),0);},
     localModels:()=>JSON.stringify(savedModels),
-    request:()=>JSON.stringify({expressions:['Smile']}),
-    localChat:(id,history)=>{testCalls.push({type:'chat',history:JSON.parse(history)});setTimeout(()=>window.sakuraNativeReply(id,{reply:'Hello. How can I help?'}),10);},
+    request:(method,path,body)=>{if(path==='/tools'){const data=JSON.parse(body);testCalls.push({type:'pc-tool',...data});if(data.action==='clipboard.read')return JSON.stringify({ok:true,text:'explicit clipboard test'});return JSON.stringify({ok:true,reply:data.action==='system.status'?'CPU usage is 10 percent.':'Volume updated.'});}return JSON.stringify({expressions:['Smile']});},
+    locationState:()=>JSON.stringify({enabled:!!window.testLocationEnabled,fresh:!!window.testLocationEnabled,area:window.testLocationEnabled?'Pune, Maharashtra, India':''}),
+    setLocation:(id,enabled)=>{window.testLocationEnabled=enabled;setTimeout(()=>window.sakuraNativeReply(id,{enabled,fresh:enabled,area:enabled?'Pune, Maharashtra, India':''}),10);},
+    searchPlaces:(latitude,longitude,query)=>testCalls.push({type:'place-search',latitude,longitude,query}),
+    openPlace:(latitude,longitude)=>testCalls.push({type:'maps',latitude,longitude}),
+    localChat:(id,history)=>{const parsed=JSON.parse(history);testCalls.push({type:'chat',history:parsed,address:config.address});setTimeout(()=>window.sakuraNativeReply(id,parsed.at(-1).content.includes('restaurants')?{reply:'Near your current area, Pune: Test restaurant.',places:[{name:'Test restaurant',distance_m:200,latitude:18.52,longitude:73.85}],source:'OpenStreetMap contributors',maps_search:{latitude:18.52,longitude:73.85,query:'Blue Moon restaurant'}}:{reply:'Hello. How can I help?'}),10);},
     localSpeak:id=>setTimeout(()=>window.sakuraNativeReply(id,{error:'Test provider voice unavailable'}),10),
     modelCatalog:id=>setTimeout(()=>window.sakuraNativeReply(id,{provider:config.provider,models:['gemini-test-flash','gemini-test-pro']}),10),
     checkLocalApi:id=>setTimeout(()=>window.sakuraNativeReply(id,{ok:true,message:'API test Passed · test model accepted a generation request.'}),10),
@@ -54,7 +67,41 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
   await page.waitForFunction(()=>!document.querySelector('#local-send').disabled);
   await page.waitForTimeout(250);
   assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='reconnect').length),0,'Local must work without attempting a PC connection');
-  await page.click('summary');await page.selectOption('#local-voice','male');
+  assert.equal(await page.evaluate(()=>document.body.classList.contains('local-model-fullscreen')),true,'Successful model load enters full-screen stage');
+  const stageBounds=await page.locator('#local-avatar').boundingBox();assert.equal(stageBounds.width,430);assert.equal(stageBounds.height,900);
+  assert.equal(await page.locator('#local-mic').getAttribute('aria-pressed'),'false','Microphone stays off by default');
+  assert.equal(await page.locator('#local-stage-panel').isVisible(),false);
+  await page.screenshot({path:path.join(root,'audit-results/mobile-model-fullscreen.png')});
+  await page.click('#local-panel-toggle');assert.equal(await page.locator('#local-stage-panel').isVisible(),true);
+  assert.equal(await page.getByRole('button',{name:'Close menu',exact:true}).count(),1,'Hamburger has an accessible open/close label');
+  async function assertPanelSpacing(){const boxes=await page.evaluate(()=>{const rect=id=>{const r=document.getElementById(id).getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};};return {header:rect('local-stage-bar'),panel:rect('local-stage-panel'),status:rect('local-status'),mic:rect('local-mic-dock')};});assert.ok(boxes.header.bottom+5<=boxes.panel.top,JSON.stringify(boxes));assert.ok(boxes.panel.bottom+5<=boxes.status.top,JSON.stringify(boxes));assert.ok(boxes.status.bottom+5<=boxes.mic.top,JSON.stringify(boxes));}
+  await assertPanelSpacing();
+  await page.evaluate(()=>document.documentElement.style.fontSize='26px');await assertPanelSpacing();
+  await page.screenshot({path:path.join(root,'audit-results/mobile-menu-large-text.png')});
+  await page.evaluate(()=>document.documentElement.style.fontSize='16px');
+  await page.setViewportSize({width:900,height:430});await assertPanelSpacing();
+  await page.setViewportSize({width:430,height:900});
+  await page.click('summary');
+  await page.selectOption('#local-address','maam');
+  await page.waitForFunction(()=>JSON.parse(Sakura.localConfig()).address==='maam');
+  assert.equal(await page.locator('#local-status').textContent(),'Saved · Ma’am');
+  assert.equal(await page.locator('#local-wake').isChecked(),false,'Wake listener is off by default');
+  assert.equal(await page.locator('#local-wake').isDisabled(),true,'No listening until user downloads the pack');
+  assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='wake-download').length),0,'No automatic wake model download');
+  await page.evaluate(()=>{window.testWakeBytes=17000000;window.testWakeDownloading=true;window.testWakeDownloadStatus='Downloading wake pack · 17.0 / 41.2 MB · 41% · 120 KB/s';window.sakuraRefreshWake();});
+  assert.equal(await page.locator('#local-wake-download').isDisabled(),true);
+  assert.ok((await page.locator('#local-wake-status').textContent()).includes('120 KB/s'),'Download progress reaches its own visible settings status');
+  await page.evaluate(()=>{window.testWakeDownloading=false;window.sakuraRefreshWake();});
+  assert.ok((await page.locator('#local-wake-download').textContent()).includes('Resume download · 17.0 MB saved'));
+  await page.click('#local-wake-download');await page.waitForFunction(()=>!document.querySelector('#local-wake').disabled);
+  await page.fill('#local-wake-phrase','hello sakura');await page.evaluate(()=>window.sakuraRefreshWake());
+  assert.equal(await page.locator('#local-wake-phrase').inputValue(),'hello sakura','Polling must not discard an unsaved custom phrase');
+  await page.check('#local-wake');await page.waitForFunction(()=>document.querySelector('#local-wake-phrase').disabled);
+  assert.deepEqual(await page.evaluate(()=>testCalls.find(x=>x.type==='wake-toggle')),{type:'wake-toggle',enabled:true,phrase:'hello sakura'});
+  assert.equal(await page.locator('#local-mic-label').textContent(),'Wake on','Stage does not claim microphone off while the wake listener is enabled');
+  await page.click('#local-mic');await page.waitForFunction(()=>!document.querySelector('#local-wake').checked&&!document.querySelector('#local-wake-phrase').disabled);
+  assert.equal(await page.locator('#local-mic-label').textContent(),'Mic off','Red mic can stop background wake listening');
+  await page.selectOption('#local-voice','male');
   await page.waitForFunction(()=>document.querySelector('#local-status').textContent==='Saved · Male voice');
   await page.selectOption('#local-voice','female');
   await page.waitForFunction(()=>document.querySelector('#local-status').textContent==='Saved · Female voice');
@@ -64,16 +111,40 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
   assert.equal(await page.locator('#local-model-id').inputValue(),'gemini-test-pro');
   await page.getByRole('button',{name:'Test API (small request)',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#local-status').textContent.includes('API test Passed'));
+  await page.check('#local-location');await page.waitForFunction(()=>document.querySelector('#local-location-status').textContent.includes('Pune'));
   await page.uncheck('#local-speech');await page.fill('#local-message','Hello');await page.click('#local-send');
   await page.waitForFunction(()=>document.querySelector('#local-conversation').textContent.includes('Hello. How can I help?'));
+  assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='chat')[0].address),'maam','Next reply uses the changed address without Save settings');
   await page.fill('#local-message','Remember my last message?');await page.click('#local-send');
   await page.waitForFunction(()=>window.testCalls.filter(x=>x.type==='chat').length===2);
   assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='chat')[1].history.length),3);
   await page.waitForFunction(()=>!document.querySelector('#local-send').disabled);
+  await page.fill('#local-message','Find restaurants near me');await page.click('#local-send');await page.getByRole('button',{name:'Open in Maps',exact:true}).click();
+  assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='maps')[0].latitude),18.52);
+  await page.getByRole('button',{name:'Search in Maps · ratings & more results',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>testCalls.find(x=>x.type==='place-search')),{type:'place-search',latitude:18.52,longitude:73.85,query:'Blue Moon restaurant'},'Specific restaurant query is preserved when opening Maps');
+  await page.waitForFunction(()=>!document.querySelector('#local-send').disabled);
   await page.evaluate(()=>window.sakuraCallState(true));assert.equal(await page.locator('#local-send').isDisabled(),true);
   await page.evaluate(()=>window.sakuraCallState(false));assert.equal(await page.locator('#local-send').isDisabled(),false);
+  // The red microphone cancels late input when muted, and submits exactly one recognized speech turn.
+  await page.click('#local-mic');await page.waitForFunction(()=>document.querySelector('#local-mic').getAttribute('aria-pressed')==='true');
+  await page.click('#local-mic');await page.evaluate(()=>window.sakuraMicrophone(false,'Cancelled','Do not send this'));
+  assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='chat').length),3,'Muted/late recognition cannot send a message');
+  await page.click('#local-mic');await page.waitForFunction(()=>document.querySelector('#local-status').textContent==='Listening…');await page.evaluate(()=>window.sakuraMicrophone(false,'Recognized','Voice test message'));
+  await page.waitForFunction(()=>testCalls.filter(x=>x.type==='chat').length===4);
+  assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='chat').at(-1).history.at(-1).content),'Voice test message');
+  await page.waitForFunction(()=>!document.querySelector('#local-send').disabled);
+  assert.equal(await page.locator('#local-mic').getAttribute('aria-pressed'),'false');
+  await page.click('#local-mic');await page.waitForFunction(()=>document.querySelector('#local-status').textContent==='Listening…');await page.evaluate(()=>window.sakuraLocalPause());
+  assert.equal(await page.locator('#local-mic').getAttribute('aria-pressed'),'false','Backgrounding mutes microphone');
+  assert.equal(await page.evaluate(()=>window.sakuraWakeCommand('What time is it?')),true,'Foreground wake routes through ordinary chat');
+  await page.waitForFunction(()=>testCalls.filter(x=>x.type==='chat').length===5&&!document.querySelector('#local-send').disabled);
+  await page.evaluate(()=>{const data=JSON.parse(Sakura.wakeHistory());data.messages.push({role:'user',content:'Background question'},{role:'assistant',content:'Background answer'});data.updated_at=Date.now()+1000;localStorage.setItem('test-native-history',JSON.stringify(data));window.sakuraRefreshWakeHistory();});
+  assert.ok((await page.locator('#local-conversation').textContent()).includes('Background answer'),'Background response history appears on returning to the app');
+  assert.ok(await page.evaluate(()=>testCalls.some(x=>x.type==='assistant-state'&&x.busy)),'Chat/voice signals suspend the native wake listener');
   const reports=[];
   for(const model of models){
+   if(!await page.locator('#local-stage-panel').isVisible())await page.click('#local-panel-toggle');
    await page.selectOption('#local-format',model.format);await page.selectOption('#local-models',model.id);
    await page.waitForFunction(name=>document.querySelector('#local-status').textContent.startsWith(name+' · '),model.name,{timeout:90000});
    const frame=page.frames().find(frame=>frame.url().includes('local-viewer.html'));
@@ -82,6 +153,9 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
    assert.ok(reports.at(-1).canvasCount>0);
    assert.ok(reports.at(-1).visible>100,JSON.stringify(reports.at(-1)));
    if(model.format==='live2d'){
+    await frame.waitForFunction(()=>!document.querySelector('.model-block-transition')&&!document.querySelector('.model-held-frame'));
+    // Model settings intentionally cover the canvas. Close them before the real touch gesture.
+    if(await page.locator('#local-stage-panel').isVisible())await page.click('#local-panel-toggle');
     await page.locator('#local-avatar').scrollIntoViewIfNeeded();const bounds=await page.locator('#local-avatar').boundingBox();
     const before=await frame.evaluate(()=>Number(localStorage.getItem('sakura_model_size')||100));
     const cdp=await page.context().newCDPSession(page),cx=bounds.x+bounds.width/2,cy=bounds.y+bounds.height/2;
@@ -94,9 +168,16 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
    }
   }
   assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='reconnect').length),0,'Chat and saved model loading must not contact PC');
+  await page.click('#local-stage-back');assert.equal(await page.evaluate(()=>document.body.classList.contains('local-model-fullscreen')),false);
   await page.click('#change-mode');assert.equal(await page.locator('#local-avatar').getAttribute('src'),'about:blank');
   await page.click('#mode-pc');await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Connected'));
   assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='reconnect').length),1,'PC mode reconnects to saved PC');
+  await page.click('[data-tab="pc-tools"]');assert.equal(await page.locator('#pc-tools').isVisible(),true);
+  await page.click('#pc-status-refresh');await page.waitForFunction(()=>document.querySelector('#pc-tools-status').textContent.includes('CPU usage'));
+  await page.click('#pc-clipboard-get');await page.waitForFunction(()=>document.querySelector('#pc-clipboard').value==='explicit clipboard test');
+  await page.fill('#pc-clipboard','send only this text');await page.click('#pc-clipboard-send');await page.waitForFunction(()=>testCalls.some(x=>x.type==='pc-tool'&&x.action==='clipboard.write'&&x.text==='send only this text'));
+  await page.click('[data-tab="expression"]');assert.equal(await page.locator('#pc-tools').isVisible(),false);
+
   await page.click('#change-mode');await page.click('#mode-local');await page.locator('#local-mode').waitFor({state:'visible'});
   await page.getByRole('button',{name:'Use model',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#local-send').disabled);
   await page.reload();await page.locator('#app-modes').waitFor({state:'visible'});
@@ -104,6 +185,7 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
   await page.click('#mode-local');await page.locator('#local-mode').waitFor({state:'visible'});
   await page.getByRole('button',{name:'Use model',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#local-send').disabled);
   await page.waitForFunction(()=>document.querySelector('#local-conversation').textContent.includes('Remember my last message?'));
+  assert.equal(await page.locator('#local-address').inputValue(),'maam','Address remains selected after app reload');
   // First setup: no models means no assistant access until API setup and a successful transfer.
   await page.evaluate(()=>localStorage.setItem('test-empty','1'));await page.reload();await page.click('#mode-local');
   await page.getByRole('heading',{name:'1 · Choose your AI provider'}).waitFor();
@@ -121,6 +203,7 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
   assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='receive').length),1);
   assert.equal(await page.evaluate(()=>testCalls.filter(x=>x.type==='reconnect').length),1);
   await page.evaluate(()=>window.failNextReconnect=true);
+  await page.click('#local-panel-toggle');
   await page.locator('#local-mode details').evaluate(element=>element.open=true);
   await page.click('#local-choose-model');await page.getByRole('button',{name:'Add model',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('dialog')?.textContent.includes('Failed'));
@@ -150,6 +233,6 @@ const models=selected.filter(([,p])=>p).map(([format,p])=>({id:format,format,nam
   await page.getByRole('button',{name:'Close',exact:true}).click();
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(root,'audit-results/mobile-local-webview.json'),JSON.stringify({models:models.map(x=>({name:x.name,format:x.format})),reports,errors,nativeBridge:'mocked; physical Android call and network testing required'},null,2));
-  console.log('PASS: mobile setup, voice selection, saved chat, call mute gating, PMX/VRM/Live2D rendering, real two-finger Live2D pinch, global button animations and transfer preparing/sent feedback');
+  console.log('PASS: opt-in/custom wake settings, foreground wake routing/background-history sync and audio gating, non-overlapping hamburger menu in portrait/landscape/large text, immediate/persistent address preference, full-screen stage, red microphone on/off/cancel/send/background gating, mobile setup, voice selection, saved chat, call mute gating, PMX/VRM/Live2D rendering, real two-finger Live2D pinch, global button animations and transfer preparing/sent feedback');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

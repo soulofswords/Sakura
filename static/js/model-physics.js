@@ -30,6 +30,7 @@ const BASE_PARAMS = {
     hair: { stiffness: 0.22, gravity: 30, drag: 0.20, maxAngle: 50 },
     breast: { stiffness: 0.22, gravity: 20, drag: 0.24, maxAngle: 18 },
     skirt: { stiffness: 0.32, gravity: 34, drag: 0.25, maxAngle: 38 },
+    cloth: { stiffness: 0.60, gravity: 12, drag: 0.50, maxAngle: 18 },
     other: { stiffness: 0.25, gravity: 26, drag: 0.20, maxAngle: 48 },
 };
 
@@ -43,7 +44,8 @@ const FALLBACK_PATTERNS = [
     // Game ports (Genshin, Honkai...) name hair bones with 发/髮 and skirts
     // with 裙, alongside the Japanese originals.
     ['hair', /髪|发|髮|辫|辮|ツインテール|ツインテ|おさげ|ポニーテール|アホ毛|三つ編み|hair|ponytail|twintail|pigtails|ahoge|braid/i],
-    ['skirt', /スカート|裾|フリル|マフラー|裙|skirt|frill|muffler|scarf/i],
+    ['skirt', /スカート|裾|下摆|下擺|フリル|マフラー|裙|skirt|frill|muffler|scarf/i],
+    ['cloth', /cloth|shirt|jacket|bodice|blouse|衣服|上衣|衣摆|衣擺|襟|服裾/i],
     ['other', /リボン|尻尾|しっぽ|羽|袖|ネクタイ|ベルト|ポンポン|飘带|飄帶|丝带|絲帶|缎带|緞帶|尾|披风|披風|配饰|配飾|饰品|飾品|挂件|掛件|ribbon|tail|wing|sleeve|tie|belt|pompom|accessory|cape|coat/i],
 ];
 
@@ -361,10 +363,12 @@ export default class ModelPhysics {
         }
 
         const bones = skeletonBones;
-        // Some PMX exports mark only hair/skirt as dynamic even though they
-        // have weighted chest secondary bones. Include explicit secondary
-        // names, never the humanoid torso or gesture-controlled bones.
-        for (let i = 0; i < bones.length; i++) {
+        // An authored dynamic rig is authoritative. Shape/adjustment bones
+        // often share chest names but must not become independent springs:
+        // that deforms fitted clothing and compounds motion down helper chains.
+        // Name-only additions are reserved for rigs with no authored dynamics.
+        const authoredDynamics=this._rigContext?.mmdBones?.some(entry=>entry?.rigidBodyType===1||entry?.rigidBodyType===2);
+        for (let i = 0; !authoredDynamics && i < bones.length; i++) {
             if (classifyBone(bones[i].name) === 'breast'
                 && !/^(?:chest|spine\d*|胸|上半身\d*)$/i.test(bones[i].name)
                 && !reservedNames?.has(bones[i].name) && !excludedBones.has(bones[i])
@@ -536,6 +540,11 @@ export default class ModelPhysics {
     }
 
     update(delta) {
+        if (this.bullet && this.nodes.some(node => node.diagnosticStatic || this.disabledBones?.has(node.bone))) {
+            // Selective freezes must also exclude a bone from simulation, not
+            // just overwrite its visible transform after Bullet moves it.
+            this._switchToSafeSprings('Saved bone freezes are active; using spring physics for selective bone control.');
+        }
         if (this.bullet) {
             this.bullet.allowIdleSleep = Boolean(this.allowIdleSleep);
             this.bullet.update(delta);
@@ -701,7 +710,7 @@ export default class ModelPhysics {
             const parentWorld = this._parentWorld(node.bone.parent);
             const restLocal = node.springRestLocal || node.restLocal;
             const restQuat = node.springRestQuat || node.restQuat;
-            if(node.diagnosticStatic){
+            if(node.diagnosticStatic || this.disabledBones?.has(node.bone)){
                 node.bone.position.copy(node.restLocal);node.bone.quaternion.copy(node.restQuat);node.bone.updateMatrix();
                 _target.copy(node.tailLocal).applyMatrix4(node.bone.matrix).applyMatrix4(parentWorld);
                 node.pos.copy(_target);node.prev.copy(_target);continue;

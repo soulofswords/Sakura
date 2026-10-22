@@ -6,13 +6,12 @@ import subprocess
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
 from urllib.parse import quote_plus
 
 
 def run_command(text, computer_access=False, assistant_name="Sakura"):
     from assistant_reminders import reminders
-    command = re.sub(r"\s+", " ", text.lower()).strip().rstrip('.!?')
+    command = re.sub(r"\s+", " ", text.lower().replace("’", "'")).strip().rstrip('.!?')
     command = re.sub(r'\bu\b', 'you', command)
     name = re.escape(str(assistant_name).lower().strip() or 'sakura')
     command = re.sub(rf'^(?:hey[,!. ]+)?{name}[,!. ]+', '', command)
@@ -28,15 +27,19 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
             break
     command = re.sub(r'[, ]+please$', '', command).strip().rstrip('.!?')
     command = re.sub(r'\byou tube\b', 'youtube', command)
+    from calendar_chat import calendar_command
+    calendar_reply=calendar_command(command)
+    if calendar_reply is not None:return calendar_reply
     # Use the same speech/name normalization for local utilities as app commands.
+    from assistant_tools import handle_command
+    tool_reply=handle_command(command,computer_access,assistant_name)
+    if tool_reply is not None:return tool_reply
     reminder_reply = reminders.command(command)
     if reminder_reply is not None:
         return reminder_reply
-    time_query = re.fullmatch(
-        r"(?:(?:tell|give) me (?:what )?|(?:do you know|say) )?"
-        r"(?:(?:what(?:'s| is) )?(?:the )?(?:current |local )?time(?: is it| now| right now)?|what time (?:is it|it is))", command)
-    if time_query:
-        return f"It's {datetime.now().strftime('%I:%M %p').lstrip('0')}."
+    from local_clock import clock_command
+    clock_reply=clock_command(command)
+    if clock_reply:return clock_reply
     from steam_commands import run_steam_command
     steam_reply = run_steam_command(command, computer_access)
     if steam_reply is not None:
@@ -70,8 +73,6 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
             return f'Opening {label}.'
         except OSError:
             return f"I couldn't start {label}. Try opening it manually once."
-    if command in {"what's the date", 'what is the date', "what is today's date", 'what day is it', 'tell me the date'}:
-        return f"Today is {datetime.now().strftime('%A, %d %B %Y')}."
     sites = {'youtube': ('YouTube', 'https://www.youtube.com'),
              'google': ('Google', 'https://www.google.com'),
              'github': ('GitHub', 'https://github.com'),
@@ -99,7 +100,10 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
     if target:
         if not computer_access:
             return 'Enable computer access in Settings first, and I can open that for you.'
-        return f'Opening {label}.' if webbrowser.open(target, new=2) else f"I couldn't open {label} in your browser."
+        try:
+            return f'Opening {label}.' if webbrowser.open(target, new=2) else f"I couldn't open {label} in your browser."
+        except OSError:
+            return f"I couldn't open {label} in your browser."
     app_match = re.fullmatch(r'(?:open|launch|start) (.{1,100})', command)
     if app_match:
         label = app_match.group(1)
@@ -161,6 +165,9 @@ def open_installed_app(name):
         matches = [p for root in (Path('/Applications'),Path.home()/'Applications')
                    for p in root.glob('*.app') if normalized(p.stem)==normalized(name)]
         if len(matches)==1:
-            subprocess.Popen(['/usr/bin/open','-a',str(matches[0])],shell=False)
-            return f'Opening {name}.'
+            try:
+                subprocess.Popen(['/usr/bin/open','-a',str(matches[0])],shell=False)
+                return f'Opening {name}.'
+            except OSError:
+                return f'I could not start {name}.'
     return f'I could not find an installed app named {name}. Try its exact Start menu name.'

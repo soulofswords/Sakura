@@ -1,0 +1,32 @@
+body.local-model-fullscreen{margin:0;padding:0;overflow:hidden}
+.local-model-fullscreen>h1,.local-model-fullscreen>#mode-description,.local-model-fullscreen>#change-mode{display:none}
+.local-model-fullscreen #local-mode{position:fixed;inset:0;isolation:isolate;background:#0b0914}
+.local-model-fullscreen #local-avatar{position:absolute;inset:0;width:100%!important;height:100%!important;border-radius:0!important;margin:0}
+#local-stage-controls[hidden],#local-stage-expand[hidden]{display:none}
+#local-stage-controls{display:none}
+.local-model-fullscreen #local-stage-controls{display:block}
+.local-model-fullscreen #local-stage-expand{display:none}
+#local-stage-bar{position:absolute;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));display:flex;justify-content:space-between;gap:12px;z-index:6;pointer-events:none}
+#local-stage-bar button{width:auto;pointer-events:auto;background:#171021e8;box-shadow:0 2px 12px #0006}
+#local-mic-dock{position:absolute;bottom:max(18px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;align-items:center;flex-direction:column;gap:5px;z-index:6}
+#local-mic{width:72px;height:72px;margin:0;padding:18px;border-radius:50%;border:2px solid #ffb3b8;background:#c92135;color:white;display:grid;place-items:center;box-shadow:0 4px 20px #0009;touch-action:manipulation}
+#local-mic svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#local-mic.listening{background:#ed243c;box-shadow:0 0 0 6px #ed243c40,0 4px 20px #0009}
+#local-mic:disabled{opacity:.55}
+#local-mic-label{font:14px system-ui;background:#0b0914df;border-radius:10px;padding:2px 8px;color:white}
+.local-model-fullscreen #local-status{position:absolute;z-index:4;bottom:130px;left:max(16px,env(safe-area-inset-left));right:max(16px,env(safe-area-inset-right));max-height:100px;overflow:auto;text-align:center;font-size:14px;line-height:1.4;background:#0b0914d9;border-radius:12px;padding:8px;pointer-events:none;margin:0}
+.local-model-fullscreen #local-stage-panel{display:none;position:absolute;z-index:5;top:72px;bottom:245px;left:12px;right:12px;background:#120d1ff5;border:1px solid #49405d;border-radius:18px;padding:12px;overflow:auto;box-shadow:0 8px 25px #0008}
+.local-model-fullscreen #local-stage-panel.stage-panel-open{display:block}
+@media (max-height:600px){.local-model-fullscreen #local-stage-panel{bottom:125px}.local-model-fullscreen #local-status{bottom:110px;max-height:44px}#local-mic{width:58px;height:58px;padding:12px}#local-mic-dock{bottom:8px}}
+
+/* Grid rows reserve the measured header/footer height, including larger phone text. */
+.local-model-fullscreen #local-mode{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;grid-template-areas:"header" "panel" "status" "mic";gap:12px;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));box-sizing:border-box}
+.local-model-fullscreen #local-stage-controls{display:contents}
+.local-model-fullscreen #local-stage-bar{grid-area:header;position:relative;inset:auto;min-width:0;align-items:center}
+.local-model-fullscreen #local-stage-bar button{margin:0}
+#local-panel-toggle{width:48px!important;height:48px;padding:11px;display:grid;place-items:center;flex-shrink:0}
+#local-panel-toggle svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.local-model-fullscreen #local-stage-panel{grid-area:panel;position:relative;inset:auto;min-height:0;min-width:0;box-sizing:border-box;margin:0}
+.local-model-fullscreen #local-status{grid-area:status;position:relative;inset:auto;box-sizing:border-box;max-height:100px;min-width:0}
+.local-model-fullscreen #local-mic-dock{grid-area:mic;position:relative;inset:auto;transform:none;justify-self:center}
+@media(max-height:600px){.local-model-fullscreen #local-mode{gap:6px}.local-model-fullscreen #local-status{max-height:44px}.local-model-fullscreen #local-stage-bar button{padding:8px}#local-panel-toggle{width:44px!important;height:44px}}

@@ -7,7 +7,7 @@ try{
     window.phoneAvatar={
         async load(url){lips.stop();notice.textContent='Loading model…';try{const result=await viewer.loadModel(url);if(!result)throw Error('Model loading did not complete.');notice.textContent='Drag to move · pinch to zoom';}catch(error){notice.textContent='Model could not load: '+error.message;throw error;}},
         speak:url=>lips.playWithLipSync(url),stop:()=>lips.stop(),
-        pause(value){lips.stop();viewer.container.style.visibility=value?'hidden':'visible';},
+        pause(value){lips.stop();window.sakuraNativeHidden=!!value;viewer.container.style.visibility=value?'hidden':'visible';},
     };
     window.dispatchEvent(new Event('avatar-ready'));
 }catch(error){notice.textContent='3D/Live2D rendering unavailable: '+error.message;window.phoneAvatarError=error.message;}

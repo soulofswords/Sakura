@@ -436,6 +436,7 @@ button.accent-btn {
     border-top: 1px solid var(--panel-border); flex-shrink: 0;
 }
 .input-area input {
+    min-width: 0;
     flex: 1; background: rgba(30,20,40,0.7); color: #fff;
     border: 1px solid var(--panel-border); padding: 7px 10px;
     border-radius: 8px; outline: none; font-size: 0.85rem;
@@ -444,6 +445,10 @@ button.accent-btn {
 }
 .input-area input:focus { border-color: var(--sakura-pink); box-shadow: 0 0 8px var(--sakura-glow); }
 .input-area button { padding: 7px 10px; flex-shrink: 0; }
+#chat-attachment-tray { padding: 6px 12px; display: flex; flex-wrap: wrap; gap: 5px; max-height: 110px; overflow-y: auto; flex-shrink: 0; }
+#chat-attachment-tray[hidden] { display: none; }
+#chat-attachment-tray small { flex-basis: 100%; font-size: 11px; color: var(--text-muted, #b4a9c4); }
+.chat-file-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 12px; font-size: 12px; }
 
 #mic-btn.recording { background: rgba(255,80,80,0.3); border-color: #f87171; animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 6px #f87171; } 50% { box-shadow: 0 0 18px #f87171; } }
@@ -890,6 +895,31 @@ body.desktop-companion .brand .logo {
     height: 36px;
     background: #26182f;
     border-radius: 50%;
+}
+/* Agent lives inside Companion. Keep the active avatar visible in a compact
+   rail while the approved workflow occupies the rest of the same window. */
+#agent-mode-toggle { display:inline-flex; align-items:center; justify-content:center; padding:5px 10px; border:1px solid rgba(255,110,167,.45); border-radius:999px; background:rgba(255,110,167,.14); color:#ffd2e4; cursor:pointer; font:inherit; font-size:.78rem; white-space:nowrap; }
+#agent-mode-toggle:hover { background:rgba(255,110,167,.26); }
+#agent-workspace { display:none; position:fixed; inset:56px 0 0 clamp(230px,24vw,340px); z-index:20; overflow:hidden; background:#0c0b15; border-left:1px solid rgba(255,110,167,.24); }
+#agent-workspace-frame { display:block; width:100%; height:100%; border:0; background:#0c0b15; }
+body.agent-mode { --agent-model-width:clamp(230px,24vw,340px); background:#0c0b15!important; }
+body.agent-mode #top-bar { height:56px; min-height:56px; flex-wrap:nowrap; padding:5px 12px; background:rgba(13,7,20,.98); border-bottom:1px solid var(--panel-border); }
+body.agent-mode #top-bar .brand { flex:0 1 auto; min-width:0; }
+body.agent-mode #companion-toolbar-toggle,
+body.agent-mode #companion-toolbar,
+body.agent-mode #chat-panel,
+body.agent-mode #morph-overlay,
+body.agent-mode #listening-status { display:none!important; }
+body.agent-mode #viewer { top:56px; left:0; width:var(--agent-model-width); height:calc(100vh - 56px); z-index:2; background:radial-gradient(ellipse at 50% 42%,#21172d 0%,#0c0b15 74%); }
+body.agent-mode #agent-workspace { display:block; inset:56px 0 0 var(--agent-model-width); }
+body.agent-mode #win-controls { flex:0 0 auto; }
+body.agent-mode.tracking-only #agent-mode-toggle { display:none!important; }
+@media(max-width:720px) {
+  body.agent-mode { --agent-model-width:190px; }
+  body.agent-mode #top-bar { padding-inline:7px; }
+  body.agent-mode #top-bar .brand { gap:5px; }
+  body.agent-mode #top-bar .brand .badge { display:none; }
+  #agent-mode-toggle { padding:5px 7px; font-size:.72rem; }
 }
 /* Opaque control surfaces remain clickable in a color-keyed native window. */
 body.desktop-companion .dropdown-trigger,

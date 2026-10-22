@@ -84,6 +84,8 @@ export default class LipSync {
             source.onended = () => {
                 if (generation === this.playGeneration && this.source === source) this.stop();
             };
+            await this.onAudioActive?.(true);
+            if(generation!==this.playGeneration)return;
             this.isPlaying = true;
             this.modelViewer.audioPlaybackActive = true;
             this.modelViewer.setActivity?.('talking');
@@ -101,8 +103,10 @@ export default class LipSync {
     }
 
     stop() {
+        const wasPlaying=this.isPlaying;
         ++this.playGeneration;
         this.isPlaying = false;
+        if(wasPlaying)this.onAudioActive?.(false);
         this.modelViewer.audioPlaybackActive = false;
         this.modelViewer.setActivity?.('idle');
         this.modelViewer.setSpeechLevel?.(0);
@@ -173,7 +177,7 @@ export default class LipSync {
         if (index >= values.length) return 0;
         const mix = position - index;
         const rms = values[index] * (1 - mix) + (values[index + 1] || 0) * mix;
-        return Math.min(0.38, Math.max(0, (rms - gate) / reference) * 0.38);
+        return Math.min(0.92, Math.pow(Math.max(0, (rms - gate) / reference), 0.72) * 0.88);
     }
 
     _startAnalysisLoop(generation) {
@@ -200,14 +204,14 @@ export default class LipSync {
                 ? outputTime : now - (this.audioContext.outputLatency || this.audioContext.baseLatency || 0);
             const opening = this.envelope
                 ? this._openingAt(audibleTime - this.playbackStartTime + 0.02)
-                : Math.min(0.38, Math.max(0, (rms - 0.003) * 6));
+                : Math.min(0.92, Math.pow(Math.max(0, (rms - 0.003) * 8), 0.72));
             const available = this.modelViewer.resolvedVowels || {};
             const mouth = ['A', 'O', 'E', 'U', 'I'].find(v => available[v]);
             this.targets = { A: 0, I: 0, U: 0, E: 0, O: 0 };
             const options=this.modelViewer.mouthOptions;
             if (mouth) this.targets[mouth] = options?Math.min(1,Math.max(0,opening-options.cutoff)*options.gain):opening;
             this._smoothWeights(delta);
-            this.modelViewer.setSpeechLevel?.(Object.values(this.current).reduce((sum, value) => sum + value, 0) / 0.45);
+            this.modelViewer.setSpeechLevel?.(Object.values(this.current).reduce((sum, value) => sum + value, 0) / 0.9);
             this.modelViewer.setVowelWeights(this.current);
             this._updateHUD();
             this.rafId = requestAnimationFrame(loop);

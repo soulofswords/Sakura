@@ -1,11 +1,14 @@
-const assert=require('node:assert/strict'),fs=require('node:fs');
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const THREE=require('../static/vendor/three/build/three.cjs');
+const gestureSource=fs.readFileSync('static/js/speech-gesture.js','utf8').replace(/^export /gm,'');
+const {speechGestureWeights}=vm.runInNewContext(gestureSource+'\n({speechGestureWeights})',{});
 const src=fs.readFileSync('static/js/model-viewer.js','utf8').replace(/\r\n/g,'\n');
-const animate=new Function('delta','elapsed',src.match(/_animateCharacter\(delta, elapsed\) \{([\s\S]*?)\n    \}\n\n    _visibleModelBounds/)[1]);
+const animateBase=new Function('delta','elapsed','speechGestureWeights',src.match(/_animateCharacter\(delta, elapsed\) \{([\s\S]*?)\n    \}\n\n    _visibleModelBounds/)[1]);
+const animate=function(delta,elapsed){return animateBase.call(this,delta,elapsed,speechGestureWeights);};
 function viewer(){return {model:{},activity:'talking',talkBlend:0,thinkBlend:0,speechLevel:.6,physicsBoost:0,physics:{windStrength:0},animationBones:Object.fromEntries(['torso','chest','neck','head'].map(k=>[k,{bone:new THREE.Bone(),rest:new THREE.Euler()}])),expressionWeights:{},emotion:'friendly'};}
 for(const mode of ['gemini','local']){
- const v=viewer();for(let i=0;i<60;i++)animate.call(v,1/60,i/60);v.activity='idle';
- for(let i=0;i<180;i++)animate.call(v,1/60,1+i/60);
+ const v=viewer();for(let i=0;i<60;i++)animate.call(v,1/60,i/60,speechGestureWeights);v.activity='idle';
+ for(let i=0;i<180;i++)animate.call(v,1/60,1+i/60,speechGestureWeights);
  assert.ok(v.conversationMotion.settling);assert.ok(v.conversationMotion.settleTime>0);assert.equal(v.physics.allowIdleSleep,false);
  for(let i=0;i<360;i++)animate.call(v,1/60,4+i/60);
  assert.equal(v.conversationMotion.settling,false);assert.ok(Math.abs(v.animationBones.torso.motion.z)>.001);assert.equal(v.physics.allowIdleSleep,true);

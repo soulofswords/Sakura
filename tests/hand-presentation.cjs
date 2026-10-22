@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),THREE=require('../static/vendor/three/build/three.cjs');
-const ctx={THREE};vm.runInNewContext(fs.readFileSync('static/js/hand-presentation.js','utf8').replace(/import .*?;\n/,'').replace('export function presentHand','function presentHand')+'\nthis.present=presentHand;',ctx);
+const ctx={THREE};vm.runInNewContext(fs.readFileSync('static/js/hand-presentation.js','utf8').replace(/import .*?;\r?\n/,'').replace('export function presentHand','function presentHand')+'\nthis.present=presentHand;',ctx);
 for(const rotation of [0,Math.PI])for(const side of ['left','right']){
  const root=new THREE.Group();root.rotation.y=rotation;root.scale.setScalar(10);
  const torso=new THREE.Bone();root.add(torso);torso.position.y=1;

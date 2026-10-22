@@ -52,9 +52,7 @@ def edition_sources(edition,stage):
         source=source[:begin]+source[end:]
     (stage/'Launcher.cs').write_text(source,encoding='utf-8')
     startup=(BASE/'launcher/StartupDialog.cs').read_text(encoding='utf-8-sig')
-    if edition=='companion':
-        startup=replace(startup,'for(int i=0;i<3;i++) {','for(int i=0;i<modes.Length;i++) {')
-    else:
+    if edition=='vtuber':
         startup='// Tracking launcher does not use a startup chooser.\n'
     (stage/'StartupDialog.cs').write_text(startup,encoding='utf-8')
     (stage/'LocalModelDialog.cs').write_text((BASE/'launcher/LocalModelDialog.cs').read_text(encoding='utf-8-sig') if edition=='companion' else '// No local language model downloader in the tracking launcher.\n',encoding='utf-8')
@@ -84,6 +82,9 @@ def edition_sources(edition,stage):
     else:
         rules=''
     html=html.replace('</head>',f'<style>{rules}</style><script>window.SAKURA_EDITION={json.dumps(edition)};</script></head>')
+    if edition=='vtuber':
+        html=html.replace('/static/assets/desktop-companion.png','/static/assets/vtuber-app.png')
+        html=html.replace('<strong>Sakura Companion</strong>','<strong>Sakura VTuber</strong>')
     (stage/'index.html').write_text(html,encoding='utf-8')
     (stage/'product.json').write_text(json.dumps({'edition':edition,'display_name':display}),encoding='utf-8')
     return display,launcher
@@ -109,6 +110,8 @@ def build_edition(edition,output,work):
             yield replacement.get(name,path),name
         yield stage/'product.json','Sakura/product.json'
     builder.app_files=files;builder.CS_DIR=stage;builder.LAUNCHER_FILE=launcher
+    builder.APP_ICON=BASE/'launcher'/('vtuber.ico' if edition=='vtuber' else 'companion.ico')
+    builder.APP_PNG=BASE/'static/assets'/('vtuber-app.png' if edition=='vtuber' else 'desktop-companion.png')
     builder.INSTALLER_FILE=display.replace(' ','-')+'-Setup-Windows-x64.exe'
     builder.OUT=output;output.mkdir(parents=True,exist_ok=True);builder.BUILD=work/'build';builder.BUILD.mkdir()
     builder.DEFAULTS.update(vtuber_tracking_only=edition=='vtuber')
@@ -145,14 +148,17 @@ def main():
         subprocess.run(['node',str(BASE/'tests/color-dial.cjs')],cwd=BASE,check=True)
         subprocess.run([sys.executable,'-m','unittest','tests.test_product_editions','tests.test_startup_modes','tests.test_tracking_mode',
             'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_native_clipboard','tests.test_pmx_editor','tests.test_texture_diagnostics','tests.test_model_repairs','tests.test_mobile_link','tests.test_voice_catalog','tests.test_voice','tests.test_speech_fallback','tests.test_kokoro_speech','tests.test_screen_audio','tests.test_dance_commands','tests.test_nvidia_ar_setup',
-            'tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_cloud_api','tests.test_companion_camera','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_assistant_commands','tests.test_assistant_reminders','tests.test_assistant_updates','tests.test_weather_dates','tests.test_reaction_repeats','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
+            'tests.test_agent_runtime','tests.test_agent_api','tests.test_agent_linkedin','tests.test_agent_calendar','tests.test_agent_mcp','tests.test_astra_strict','tests.test_normal_responses','tests.test_search_confirmation','tests.test_learned_answers','tests.test_local_clock','tests.test_chat_attachments','tests.test_medium_responses','tests.test_response_evidence','tests.test_factual_grounding','tests.test_hardware_metrics','tests.test_system_tools','tests.test_hindi_conversation','tests.test_reply_filler','tests.test_stt_commands','tests.test_persona_grounding','tests.test_shared_memory_claims','tests.test_session_greeting','tests.test_speech_decoration','tests.test_avatar_gestures','tests.test_direct_laugh','tests.test_game_laugh','tests.test_news_speech','tests.test_local_news','tests.test_app_branding','tests.test_pc_response_audit','tests.test_desktop_wake','tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_cloud_api','tests.test_companion_camera','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_assistant_commands','tests.test_assistant_reminders','tests.test_assistant_updates','tests.test_weather_dates','tests.test_reaction_repeats','tests.test_reinstall_settings','tests.test_bytecode_build','-q'],cwd=BASE,check=True)
         for script in sorted((BASE/'static/js').glob('*.js')):subprocess.run(['node','--check',str(script)],check=True)
         subprocess.run(['node',str(BASE/'tests/render-budget.cjs')],cwd=BASE,check=True)
         subprocess.run(['node',str(BASE/'tests/live2d-controls.cjs')],cwd=BASE,check=True)
         subprocess.run([sys.executable,str(BASE/'tools/check-mobile-provider-errors.py')],cwd=BASE,check=True)
-        for name in ['hand-presentation.cjs','screen-memory.cjs','avatar-preview.cjs','camera-preview.cjs','companion-camera.cjs','companion-camera-comments.cjs','assistant-reminders.cjs','mobile-link-controls.cjs','ai-vtuber-screen.cjs','game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-repair-store.cjs','model-physics.cjs','physics-collisions.cjs',
+        subprocess.run([sys.executable,str(BASE/'tools/check-mobile-location.py')],cwd=BASE,check=True)
+        subprocess.run([sys.executable,str(BASE/'tools/check-mobile-wake.py')],cwd=BASE,check=True)
+        subprocess.run([sys.executable,str(BASE/'tools/check-wake-download.py')],cwd=BASE,check=True)
+        for name in ['model-presentation.cjs','media-microphone.cjs','imported-greeting.cjs','game-laughter.cjs','app-branding.cjs','hand-presentation.cjs','screen-memory.cjs','avatar-preview.cjs','camera-preview.cjs','companion-camera.cjs','companion-camera-comments.cjs','assistant-reminders.cjs','mobile-link-controls.cjs','ai-vtuber-screen.cjs','game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-repair-store.cjs','model-physics.cjs','physics-collisions.cjs',
             'reaction-expressions.cjs','auto-expressions.cjs','head-pose-filter.cjs','live2d-head-smooth.cjs','live2d-framing.cjs','vrm-framing.cjs','live2d-tracking-recovery.cjs','model-dance.cjs','expression-editor.cjs','expression-stacking.cjs','live2d-face-mapping.cjs','avatar-retarget.cjs','vrm-head-pitch.cjs','glasses-tracking.cjs','broadcast-camera.cjs','webcam-arm-rig.cjs','tracking-lifecycle.cjs','tracking-distance.cjs','tracking-distance-worker.cjs',
-            'voice-runtime.cjs','startup-presentation.cjs','live-screen.cjs','screen-mic-routing.cjs','screen-capture.cjs','screen-share.cjs','screen-audio.cjs','continuous-mic.cjs','speech-pipeline.cjs','texture-diagnostics.cjs','pmx-materials.cjs','pmx-nose-skin.cjs','vrm-gloss.cjs','opacity-boost.cjs','model-bones.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs','direct-reply-reaction-pause.cjs']:
+            'utility-request.cjs','desktop-wake-controls.cjs','voice-runtime.cjs','startup-presentation.cjs','live-screen.cjs','screen-mic-routing.cjs','screen-capture.cjs','screen-share.cjs','screen-audio.cjs','continuous-mic.cjs','speech-interrupt.cjs','speech-pipeline.cjs','texture-diagnostics.cjs','pmx-materials.cjs','pmx-nose-skin.cjs','vrm-gloss.cjs','opacity-boost.cjs','model-bones.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs','direct-reply-reaction-pause.cjs']:
             subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         with tempfile.TemporaryDirectory(prefix='release-',dir=root) as temp:
             results=[]

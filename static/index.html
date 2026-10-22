@@ -4,17 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sakura — Anime AI Assistant</title>
+    <link id="app-favicon" rel="icon" type="image/png" href="/static/assets/desktop-companion.png?v=flower79">
     <script>
         document.documentElement.classList.add('sakura-starting');
         try {
-            if (new URLSearchParams(location.search).has('desktop') && localStorage.getItem('sakura_transparency') !== 'false') {
+            if (new URLSearchParams(location.search).has('desktop') && !new URLSearchParams(location.search).has('agent') && localStorage.getItem('sakura_transparency') !== 'false') {
                 document.documentElement.classList.add('transparent-mode');
             }
         } catch (_) {}
         // Keep controls usable if a GPU or initialization failure prevents ready.
-        setTimeout(() => document.documentElement.classList.remove('sakura-starting'), 60000);
+        // Keep the control surface usable if the renderer fails or a
+        // minimized window suspends startup rendering.
+        setTimeout(() => document.documentElement.classList.remove('sakura-starting'), 12000);
     </script>
     <style>
+        .response-evidence { margin-top: 8px; font-size: .8em; opacity: .85; }
+        .response-evidence summary { cursor: pointer; }
+        .response-evidence p { margin: 6px 0; }
+        .response-evidence a { color: #72dce8; overflow-wrap: anywhere; }
         html.sakura-starting body { transition: none !important; }
         html.sakura-starting #viewer { visibility: hidden; }
         #startup-render-status { display: none; }
@@ -24,7 +31,7 @@
             color: #b9fbff; background: #151021; font: 14px 'Segoe UI', sans-serif;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/style.css?v=assistant69">
+    <link rel="stylesheet" href="/static/css/style.css?v=files105">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -48,31 +55,34 @@
                 document.body.classList.add('transparent-mode');
             }
         }
+        if (new URLSearchParams(location.search).has('agent')) document.body.classList.add('agent-mode');
     </script>
-    <section id="model-upload-splash" class="hidden" aria-label="Model upload">
-        <img src="/static/assets/model-upload.png" alt="Sakura model and voice upload">
+    <section id="model-upload-splash" class="hidden" aria-label="Sakura startup">
+        <img src="/static/assets/desktop-companion.png?v=flower79" alt="Sakura Companion">
         <div class="model-upload-splash-copy">
-            <strong>Model Upload</strong>
+            <strong>Sakura Companion</strong>
             <span>PMX, VRM, Live2D and custom voices</span>
         </div>
         <button type="button" id="skip-upload-splash">Open model library</button>
     </section>
     <section id="desktop-companion-splash" class="hidden" aria-label="Desktop Companion">
-        <img src="/static/assets/desktop-companion.png" alt="Sakura Desktop Companion">
+        <img src="/static/assets/desktop-companion.png?v=flower79" alt="Sakura Desktop Companion">
         <div class="desktop-companion-splash-copy">
-            <strong>Desktop Companion</strong>
+            <strong>Sakura Companion</strong>
             <span>Sakura is getting ready</span>
         </div>
         <button type="button" id="skip-companion-splash">Open companion</button>
     </section>
     <div id="viewer" title="Desktop: left-drag to position, scroll to resize, right-drag to rotate, double-click to reset. Drag the top bar to move the window."></div>
+    <section id="agent-workspace" aria-label="Sakura Agent workspace"><iframe id="agent-workspace-frame" title="Sakura Agent workspace" src="about:blank"></iframe></section>
 
     <!-- Draggable Header / Top Bar -->
     <header id="top-bar">
         <div class="brand">
-            <span class="logo">🌸</span>
+            <span class="logo"><img id="app-brand-logo" src="/static/assets/desktop-companion.png?v=flower79" alt="Sakura Companion" draggable="false" style="width:28px;height:28px;object-fit:contain;vertical-align:middle;pointer-events:none"></span>
             <span class="title" id="brand-title">Sakura</span>
             <span class="badge">Companion</span>
+            <button id="agent-mode-toggle" class="no-drag" type="button" aria-pressed="false">Agent mode</button>
             <button id="companion-toolbar-toggle" class="companion-toolbar-toggle no-drag" type="button" aria-expanded="false" aria-controls="companion-toolbar" title="Show companion controls">☰</button>
         </div>
         <div id="win-controls" class="win-controls no-drag" style="display: none;">
@@ -215,7 +225,12 @@
                 <label for="model-color-opacity">Transparency <output id="model-color-opacity-value">0%</output></label><input type="range" id="model-color-opacity" min="-100" max="100" value="0">
                 <p class="hint">Negative values strengthen opacity. Use −100% for fully opaque material or ArtMesh opacity. Texture cutouts stay intact.</p>
                 <div class="save-actions"><button id="model-color-apply" data-material-action type="button">Apply color</button><button id="model-color-reset" data-material-action type="button">Restore original color</button></div>
-                <div id="model-lighting-controls"><h4>Character lighting</h4></div>
+                <div id="model-lighting-controls">
+                  <h4>Character lighting</h4>
+                  <p id="model-lighting-target-status" class="modal-hint">Target: full model. Pick a part to limit gloss and bloom to it.</p>
+                  <button id="model-lighting-pick" type="button">Pick part for gloss and bloom</button>
+                  <button id="model-lighting-whole" type="button">Use full model</button>
+                </div>
               </section>
               <section data-model-panel="bones" hidden>
                 <input id="model-bone-search" type="search" placeholder="Search hair, skirt or other bones">
@@ -374,14 +389,17 @@
                 <span id="panel-title-text">💬 Chat with Sakura</span>
             </div>
             <div class="panel-actions no-drag">
-                <button id="refresh-memory-btn" title="Reload saved memory and repair old address names">🔄</button>
+                <button id="refresh-memory-btn" title="Check session-only chat status">🔄</button>
                 <button id="toggle-chat-panel" title="Minimize Chat Panel">—</button>
                 <button id="clear-btn" title="Clear conversation memory">🗑️</button>
             </div>
         </div>
         <div id="screen-view-status" role="status">Screen off · Capture stopped</div>
         <div id="messages"></div>
+        <div id="chat-attachment-tray" class="no-drag" hidden></div>
         <div class="input-area no-drag">
+            <input id="chat-file-input" type="file" hidden multiple accept=".pdf,.docx,.txt,.md,.csv,.json,.log,.py,.js,.html,.xml,.yaml,.yml,.png,.jpg,.jpeg,.webp">
+            <button id="attach-chat-btn" type="button" title="Attach a document or image" aria-label="Attach a document or image">📎</button>
             <input type="text" id="chat-input" placeholder="Type a message or use your mic..." autocomplete="off">
             <button id="mic-btn" title="Hold/Click to speak">🎤</button>
             <button id="send-btn" title="Send message">➤</button>
@@ -412,6 +430,18 @@
 
             <!-- ── TAB: Voice ── -->
             <div class="tab-content" id="tab-general">
+                <fieldset class="setting-group" id="system-tools"><legend>PC tools</legend>
+                    <label><input id="system-tools-permission" type="checkbox"> Enable PC tools (app launching, volume and file-name search)</label>
+                    <p id="system-tools-metrics">Enable computer access in Assistant settings to use PC tools.</p>
+                    <button id="system-tools-refresh" type="button">Refresh PC status</button>
+                    <label for="system-tools-volume">System volume (%)</label><input id="system-tools-volume" type="number" min="0" max="100" value="30">
+                    <button data-volume-action="set" type="button">Set volume</button><button data-volume-action="get" type="button">Check volume</button><button data-volume-action="mute" type="button">Mute</button><button data-volume-action="unmute" type="button">Unmute</button>
+                    <label><input id="phone-system-access" type="checkbox"> Allow paired phones to check PC status and change volume</label>
+                    <label><input id="phone-clipboard-access" type="checkbox"> Allow paired phones to send or request clipboard text</label>
+                    <small>Clipboard transfers are explicit, not automatic. Use only your trusted home Wi-Fi; the current phone link uses HTTP, not encrypted transport.</small>
+                    <p id="system-tools-status" role="status"></p>
+                    <button id="system-tools-capabilities" type="button">Available actions</button><button id="system-tools-results" type="button">Recent action results</button><button id="system-tools-cancel" type="button">Stop current sequence</button><pre id="system-tools-list" style="white-space:pre-wrap"></pre>
+                </fieldset>
                 <fieldset class="setting-group"><legend>Android · Phone connection</legend>
                     <label><input id="phone-link-enabled" type="checkbox"> Enable phone connection on home Wi-Fi</label>
                     <div class="camera-phone-row"><button id="phone-link-existing" type="button">Existing devices</button><button id="phone-link-new" type="button">New device</button></div>
@@ -683,10 +713,15 @@
                     <p class="modal-hint">Uses your active tracking camera. Face privacy covers the face while showing tracking points; when no face is detected, the image stays hidden. Phone tracking shows points only—camera video stays on the phone.</p>
                 </fieldset>
                 <fieldset id="companion-camera-group" class="setting-group"><legend>Companion camera access</legend>
-                    <label><input id="companion-camera-enabled" type="checkbox"> Let Sakura see my camera</label>
+                    <label for="companion-camera-mode">Camera mode</label>
+                    <select id="companion-camera-mode">
+                        <option value="objects">Recognize objects · Google Lens style</option>
+                        <option value="tracking">Face tracking · animate my avatar</option>
+                    </select>
+                    <label><input id="companion-camera-enabled" type="checkbox"> Enable camera access</label>
                     <label><input id="companion-camera-comments" type="checkbox" checked> Occasional camera comments while idle</label>
                     <p id="companion-camera-status" role="status">Camera access off</p>
-                    <p class="modal-hint">Off on every launch. Uses the selected camera above. When enabled, camera images accompany your messages and occasional idle checks. Gemini sends these images to Google; local Qwen-VL processes them on your PC. Turning this off stops camera capture. Tracking preview face masking does not mask these AI images. No camera images are saved to conversation memory.</p>
+                    <p class="modal-hint">Off on every launch. Object recognition shares camera images with your selected AI provider (Gemini sends them to Google; local vision models process them on this PC). Face tracking runs locally and animates your avatar; it does not send camera images to the AI. Switching modes stops the previous camera task. No camera images are saved to conversation memory.</p>
                 </fieldset>
                 <div class="setting-group">
                     <label><input id="obs-background-enabled" type="checkbox"> Solid background for OBS</label>
@@ -821,6 +856,12 @@
             <!-- ── TAB: Assistant ── -->
             <div class="tab-content" id="tab-assistant">
                 <div class="setting-group">
+                    <label>Agent workspace & app connections</label>
+                    <p class="modal-hint">Plan workflows with file, shell, LinkedIn and MCP tools. Each action needs your approval on this PC.</p>
+                    <button id="open-agent-panel" type="button">Open Agent workspace</button>
+                    <span id="agent-panel-status" class="modal-hint" role="status"></span>
+                </div>
+                <div class="setting-group">
                     <label for="youtube-chat-link">VTuber mode · YouTube livestream/chat link:</label>
                     <input id="youtube-chat-link" type="text" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
                     <label class="toggle-label"><input id="vtuber-chat-enabled" type="checkbox" checked>Answer selected viewers aloud</label>
@@ -836,6 +877,8 @@
                 </div>
 
                 <div class="setting-group">
+                    <label for="evidence-threshold">Saved-source evidence score (0–1)</label><input id="evidence-threshold" type="number" min="0" max="1" step="0.05" value="0.9"><p class="modal-hint">Normal conversation is unrestricted. This score applies to source-backed answers; it is not a probability of truth.</p>
+                        <label for="news-area">News area:</label><input id="news-area" maxlength="100" placeholder="Mumbai, Maharashtra — blank for India"><p class="modal-hint">Saved city or state for news. Ask for India news or another place to override.</p>
                     <label for="user-address">Address me as:</label>
                     <select id="user-address"><option value="sir">Sir</option><option value="maam">Ma’am</option><option value="none">No title</option></select>
                     <p class="modal-hint">Used in Companion greetings and replies. Independent of the avatar’s gender.</p>
@@ -861,17 +904,19 @@
                 <div class="setting-group checkbox-group">
                     <label class="toggle-label">
                         <input type="checkbox" id="wake-word-toggle">
-                        <span>Require wake word before answering</span>
+                        <span>Listen for my wake phrase, including in the background</span>
                     </label>
                 </div>
+
+                <div class="setting-group"><button id="desktop-wake-download" type="button">Download offline PC wake pack · 55 MB</button><p id="desktop-wake-status" role="status">Wake listener off</p><small>Windows x64: optional offline English wake/command pack. Say the phrase, wait for the tone, then ask. Listening stays active when minimized; closing to the tray keeps it running while wake mode is on. Use the tray to stop listening or quit. A closed/quit process cannot hear you. Uses the default Windows microphone. Disable the wake phrase to edit normal desktop listening.</small></div>
 
                 <div class="setting-group checkbox-group">
                     <label class="toggle-label">
                         <input type="checkbox" id="computer-control-toggle">
-                        <span>Allow safe computer actions (open approved websites)</span>
+                        <span>Allow PC tools (app launching, system status, volume and file-name search)</span>
                     </label>
                 </div>
-                <div class="modal-hint">When enabled, saying “open YouTube” opens YouTube in your browser. Only approved websites are supported.</div>
+                <div class="modal-hint">When enabled, saying “open YouTube” opens YouTube in your browser. You can also check PC status, set system volume, find file names in standard user folders, or join up to five supported actions with “then”.</div>
 
                 <div class="save-actions">
                     <button id="save-settings-btn" class="accent-btn save-btn">💾 Save &amp; Apply</button>
@@ -900,7 +945,7 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=cloud-check74"></script>
+    <script type="module" src="/static/js/app.js?v=agent-chat107"></script>
 </body>
 </html>
 

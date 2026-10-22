@@ -20,6 +20,16 @@ class ReminderTests(unittest.TestCase):
         self.assertIn('positive',self.store.command('set a -5 minute timer'))
         self.assertIn('duration',self.store.command('set a zero minute timer'))
 
+    def test_internal_ids_are_not_in_conversational_replies(self):
+        timer=self.store.command('start a timer for 2 mins')
+        alarm=self.store.command('set an alarm for 3 pm')
+        listing=self.store.command('list timers')
+        for item in self.store.list():
+            self.assertNotIn(item['id'],timer+alarm+listing)
+        self.assertIn('2 min 0 sec',timer)
+        identifier=self.store.list()[0]['id']
+        self.assertIn('Cancelled',self.store.command('cancel timer '+identifier))
+
     def test_persist_fire_snooze_and_dismiss(self):
         self.store.command('set a 5 second timer');identifier=self.store.list()[0]['id']
         self.now+=6

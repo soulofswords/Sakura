@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Sakura Agent</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui;background:#0c0b15;color:#f0ebf8}*{box-sizing:border-box}body{margin:0 auto;max-width:1320px;padding:26px}h1,h2,h3{margin:.2em 0 .7em}h1{color:#ff9ecb}h2{font-size:20px}h3{font-size:16px}p,small{color:#c5bbd5;line-height:1.5}header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:22px}.grid{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:18px}.card{border:1px solid #3f3457;border-radius:18px;background:#15111f;padding:20px;margin-bottom:16px}label{display:block;font-size:13px;color:#cbbfda;margin:12px 0 5px}input,textarea,select{width:100%;border:1px solid #534165;border-radius:10px;background:#21192e;color:#fff;padding:10px;font:inherit}textarea{min-height:84px;resize:vertical}button,.link{background:#3c2d59;border:1px solid #6f548c;color:#fff;border-radius:10px;padding:9px 13px;cursor:pointer;text-decoration:none;font:inherit}button:hover{background:#594074}button:active{transform:scale(.97)}button:disabled{opacity:.5;cursor:wait}.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.approve{background:#204d40;border-color:#54ac8b}.reject{background:#552b42}.badge{display:inline-block;border-radius:14px;padding:4px 10px;background:#2d2340;color:#e3caf3;font-size:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0e0b15;padding:12px;border-radius:10px;max-height:320px;overflow:auto;font:13px ui-monospace,monospace}details{margin:12px 0}summary{cursor:pointer;color:#eeceff}.notice{border-left:3px solid #e5a950;padding-left:12px}#status{min-height:24px;color:#9ce0cc;white-space:pre-wrap}.action{border:2px solid #cc9aff}.muted{color:#afa2be;font-size:13px}#tasks button{text-align:left;width:100%;margin-bottom:7px}a{color:#9cdad9}.connection{padding:10px 0;border-bottom:1px solid #352940}@media(max-width:850px){.grid{grid-template-columns:1fr}body{padding:14px}header{align-items:start}}[hidden]{display:none!important}
+/* Keep an outstanding approval prominent while the task details scroll. */
+#review.action{position:sticky;top:8px;z-index:8;box-shadow:0 8px 28px #0009;border-color:#cc9aff}
+</style></head><body>
+<header><div><h1>🌸 Sakura Agent</h1><p>Plan and complete tasks. Review each step and approve file changes before they run.</p></div><button id="calendar-open" class="link" type="button">Google account</button><button id="companion-mode" class="link" type="button">Companion mode</button><span class="badge">Local approval required</span></header>
+<p id="status" role="status">Ready. No tool runs until you approve its exact action.</p>
+<div class="grid"><aside>
+<section class="card" id="google-calendar"><h2>Google account</h2><div id="calendar-state" class="muted"></div>
+<details id="calendar-setup"><summary>Set up Google sign-in</summary>
+<p>Sakura needs a registered Google desktop app before account sign-in can work. This is a one-time developer setup. Your Gemini API key cannot connect your calendar.</p>
+<ol><li>In <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener noreferrer">Google Cloud</a>, select your project and enable Google Calendar API.</li><li>Configure the app audience in Google Auth Platform. If the app is in testing, add your Google account as a test user.</li><li>In <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener noreferrer">Google Auth Platform → Clients</a>, create a Desktop app client and download its JSON file.</li></ol>
+<label>Import the desktop client JSON<input id="calendar-client-file" type="file" accept=".json,application/json"></label>
+<p class="muted">The file is read only when you select it. Client settings are saved using Sakura’s protected credential storage. Then use Sign in with Google below.</p>
+</details>
+<p>Connect your Google account for Calendar and optional Drive, Docs and Sheets tools.</p>
+<p class="muted">Google will ask you to choose an account and approve Calendar access. Choose Calendar only, or include Drive, Docs and Sheets. File edits always require a separate review and approval. Gmail and other services are not included.</p>
+<label>Google services<select id="google-services"><option value="calendar">Calendar only</option><option value="workspace">Calendar + Drive, Docs and Sheets</option></select></label><p class="muted">Workspace access requests broad Drive permission. Enable Drive, Docs and Sheets APIs in your Google Cloud project. Existing users must sign in again to grant added permissions.</p><div class="row"><button id="calendar-connect">Sign in with Google</button><button id="calendar-disconnect">Disconnect</button></div>
+<details id="schedule-manager" open><summary>Schedule · next 7 days</summary>
+<p>Refresh your upcoming events, or prepare a new event. Sakura always shows a review step before adding it.</p>
+<div class="row"><button id="calendar-refresh">Refresh schedule</button></div><div id="agenda-status" class="muted" role="status">Connect Google Calendar to view your schedule.</div><div id="agenda-events"></div>
+<h3>Add an event</h3><label>Event title<input id="event-title" maxlength="300" placeholder="Team meeting"></label>
+<div class="row"><label style="flex:1;min-width:180px">Starts<input id="event-start" type="datetime-local"></label><label style="flex:1;min-width:180px">Ends<input id="event-end" type="datetime-local"></label></div>
+<label>Location (optional)<input id="event-location" maxlength="1000"></label><label>Notes (optional)<textarea id="event-description" maxlength="8000"></textarea></label>
+<div class="row"><button id="calendar-propose">Review new event</button></div></details>
+</section>
+<section class="card"><h2>Reusable skills</h2><p>Save procedures for repeated tasks. Skills guide planning; each action still needs approval. Save procedures only, not passwords or personal document contents.</p><div id="skills-list"></div>
+<details><summary>Create a skill</summary><label>Name<input id="skill-name" maxlength="60" placeholder="weekly-report"></label><label>Procedure<textarea id="skill-instructions" maxlength="4000" placeholder="Read the selected source documents, draft a report using only their facts, then verify the saved output."></textarea></label><button id="skill-save" type="button">Save procedure</button></details></section>
+<section class="card"><h2>Connections</h2><p>Connect servers that expose MCP tools. Saving a server does not execute it; discovery needs approval.</p><div id="connections"></div>
+<details><summary>Add MCP server</summary><label>Name<input id="connection-name" maxlength="80" placeholder="My work apps"></label>
+<label>Transport<select id="transport"><option value="http">Streamable HTTP</option><option value="stdio">Local stdio process</option></select></label>
+<div id="http-fields"><label>MCP URL<input id="mcp-url" placeholder="https://provider.example/mcp"></label><label>Bearer token, if required<input id="mcp-token" type="password" autocomplete="off"></label></div>
+<div id="stdio-fields" hidden><label>Executable<input id="mcp-command" placeholder="C:\path\to\server.exe"></label><label>Arguments (JSON array)<textarea id="mcp-args">[]</textarea></label><label>Secret environment variables (JSON object)<textarea id="mcp-env" placeholder='{"API_KEY":"..."}'></textarea></label><p class="notice">Approving discovery starts this process with your user permissions. Install and review the server first.</p></div>
+<div class="row"><button id="save-connection">Save connection</button></div></details>
+</section>
+<section class="card"><h2>LinkedIn</h2><div id="linkedin-state" class="muted"></div>
+<p>Profile reading and approved posts use LinkedIn’s API. Inbox and job submissions require an MCP provider with those granted capabilities.</p>
+<details><summary>Set up LinkedIn sign-in</summary>
+<p>Create your own app in the <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noreferrer noopener">LinkedIn Developer Portal</a>. Enable Sign In with LinkedIn using OpenID Connect and Share on LinkedIn. Register this exact callback:</p><pre id="callback"></pre>
+<label>Client ID<input id="linkedin-client" autocomplete="off"></label><label>Client secret<input id="linkedin-secret" type="password" autocomplete="off"></label>
+<p>Your secret and access token are protected using Windows DPAPI or macOS Keychain. Never distribute a developer secret inside an installer.</p>
+<div class="row"><button id="linkedin-save">Save app settings</button></div></details>
+<div class="row"><button id="linkedin-connect">Connect LinkedIn</button><button id="linkedin-disconnect">Disconnect</button></div>
+</section>
+<section class="card"><h2>Tasks</h2><p>Agent task history is saved on this PC so you can resume after closing Sakura. Pending approvals are cancelled when the app restarts. Clear history removes these saved tasks.</p><div id="tasks"></div><div class="row"><button id="refresh">Refresh connections & tasks</button><button id="clear-tasks" class="reject">Clear task history</button></div></section>
+</aside><main>
+<section class="card"><h2>New workflow</h2><label>Goal<textarea id="goal" placeholder="Read my CV, compare it with the job description, and draft a LinkedIn post. Ask before accessing files or publishing."></textarea></label>
+<label>Workspace folder on this PC<input id="workspace" placeholder="C:\Users\you\Documents\JobSearch"></label>
+<label>Planning AI<select id="planner-provider"><option value="ollama">Local AI</option><option value="gemini">Google Gemini API</option></select></label>
+<label>Reusable skill<select id="selected-skill"><option value="">No skill</option></select></label>
+<p id="planner-provider-status" class="muted">Choose which configured AI plans each step.</p>
+<p class="notice">Files stay in this folder. Sakura can read source documents and create new DOCX or Markdown drafts after you approve each step. It will not overwrite the original. Approved shell commands and MCP processes run with your user permissions; the workspace is not a sandbox. Results read by a cloud model are sent to that selected provider.</p>
+<label><input id="auto-plan" type="checkbox" checked style="width:auto"> Automatically suggest the next step after a successful approved action</label>
+<div class="row"><button id="create">Create task</button><button id="plan">Suggest next step</button><button id="cancel">Cancel task</button></div></section>
+<section id="review" class="card" hidden></section>
+<section class="card"><h2>Task progress</h2><div id="progress">Select or create a task to begin.</div></section>
+<section class="card"><details><summary>Manual tool proposal</summary><p>Choose a tool and exact JSON arguments. This still requires separate approval. Use this if the selected model cannot produce a valid plan.</p>
+<label>Tool<select id="tool"></select></label><pre id="tool-schema"></pre>
+<label>Arguments<textarea id="tool-args">{}</textarea></label><button id="propose">Create approval request</button></details></section>
+</main></div>
+<script>
+const token='__AGENT_TOKEN__';
+const $=id=>document.getElementById(id);
+let state={tools:[],connections:[],runs:[]},selected=null,current=null,busy=false,calendarPollTimer=null;
+$('calendar-open').onclick=()=>{$('google-calendar').scrollIntoView({behavior:'smooth',block:'start'});$('google-calendar').querySelector('h2').focus?.();};
+const selectedPlanner=()=>({provider:$('planner-provider').value,skill:$('selected-skill').value});
+try{$('planner-provider').value=localStorage.getItem('sakura-agent-planner')||'ollama';}catch{}
+function announce(text){if(typeof text==='string'&&text.trim()&&window.parent!==window)window.parent.postMessage({type:'sakura-agent-speech',text:text.trim().slice(0,420)},location.origin);}
+async function api(path,body,method){
+ const response=await fetch('/api/agent/'+path,{method:method||(body===undefined?'GET':'POST'),headers:{'X-Sakura-Agent':token,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Agent request failed ('+response.status+').');return data;
+}
+function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
+function button(text,fn,cls){const el=node('button',text,cls);el.onclick=()=>perform(fn);return el;}
+async function perform(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('status').textContent='Working…';try{await fn();$('status').textContent='Ready. Review the current step before approving.';}catch(error){$('status').textContent=error.message;announce('I hit a problem. '+error.message);}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+function runAnnouncement(run){const pending=run?.steps?.findLast(step=>step.status==='pending');if(pending)return 'I have a step ready. '+(pending.reason||'Please review it before I run anything.');if(run?.status==='completed'&&run.summary)return 'That is finished. '+run.summary;if(run?.summary)return run.summary;return 'I could not prepare a step yet. Please check the task and available tools.';}
+function renderReview(action){
+ const box=$('review');box.replaceChildren();box.hidden=!action;box.classList.toggle('action',action?.status==='pending');if(!action)return;
+ box.append(node('h2','Review action'),node('span',action.status,'badge'),node('h3',action.tool),node('p',action.reason||'You requested this action.'),node('pre',JSON.stringify(action.arguments,null,2)));
+ if(action.preview)box.append(node('pre',JSON.stringify(action.preview,null,2)));
+ box.append(node('p','This approval applies once to this exact action. Changes require a new review. Its result can be sent to your selected AI provider to plan the next step.','notice'));
+ if(action.status==='pending'){
+  const row=node('div',undefined,'row');
+  for(const [title,approve,cls]of [['Approve & run',true,'approve'],['Reject',false,'reject']])row.append(button(title,async()=>{
+   const result=await api('actions/'+action.id+'/decision',{approve});renderReview(result.action);
+   if(result.run){selected=result.run.id;current=result.run;renderRun(current);}await refresh();
+   if(!approve)announce('No problem. I will leave that step alone.');
+   else if(result.action.status==='completed')announce(result.action.tool==='files.write'?'The new draft is ready. I left your original untouched.':'That step finished successfully.');
+   else if(result.action.result?.error)announce('That step did not finish. '+result.action.result.error.slice(0,180));
+   if(approve&&result.run?.status==='ready'&&$('auto-plan').checked){
+    $('status').textContent='Action finished. Suggesting the next step; execution still needs approval…';
+    const next=await api('tasks/'+result.run.id+'/plan',selectedPlanner());renderRun(next);await refresh();
+    announce(runAnnouncement(next));
+   }
+  },cls));box.append(row);
+  requestAnimationFrame(()=>box.scrollIntoView({behavior:'smooth',block:'nearest'}));
+ }
+ if(action.result)box.append(node('h3','Actual result'),node('pre',JSON.stringify(action.result,null,2)));
+}
+function renderRun(run){
+ current=run;const progress=$('progress');progress.replaceChildren();if(!run)return;
+ progress.append(node('h3',run.goal),node('p','Workspace: '+run.workspace),node('span',run.status,'badge'));
+ if(run.summary)progress.append(node('p',run.summary));
+ for(const step of run.steps){
+  const detail=node('details');detail.append(node('summary',step.tool+' · '+step.status),node('pre',JSON.stringify(step.arguments,null,2)));
+  if(step.result)detail.append(node('pre',JSON.stringify(step.result,null,2)));progress.append(detail);
+ }
+ const pending=run.steps.findLast(s=>s.status==='pending');if(pending)renderReview(pending);
+}
+function renderTools(){
+ const previous=$('tool').value;$('tool').replaceChildren();
+ for(const tool of state.tools){const option=node('option',tool.name);option.value=tool.name;$('tool').append(option);}
+ if(state.tools.some(t=>t.name===previous))$('tool').value=previous;renderSchema();
+}
+function renderSchema(){const tool=state.tools.find(t=>t.name===$('tool').value);$('tool-schema').textContent=tool?tool.description+'\n'+JSON.stringify(tool.inputSchema,null,2):'No tools discovered.';}
+async function refresh(){
+ state=await api('state');$('connections').replaceChildren();
+ const providers=state.providers||[];const choice=$('planner-provider').value;
+ $('planner-provider').replaceChildren();
+ for(const item of providers){const option=node('option',item.label+(item.ready?'':' · not configured'));option.value=item.id;option.disabled=!item.ready;$('planner-provider').append(option);}
+ if(providers.some(item=>item.id===choice&&item.ready))$('planner-provider').value=choice;
+ const active=providers.find(item=>item.id===$('planner-provider').value);
+ $('planner-provider-status').textContent=active?(active.ready?'Planning with '+active.label+'.':'Configure this provider in Sakura Settings > AI first.'):'No AI provider is available.';
+ for(const item of state.connections){const div=node('div',undefined,'connection');div.append(node('strong',item.name),node('p',item.transport==='http'?item.url:[item.command,...item.args].join(' ')));
+  const row=node('div',undefined,'row');row.append(button('Discover tools',async()=>renderReview(await api('connections/'+item.id+'/discover',{}))),button('Remove',async()=>{await api('connections/'+item.id,undefined,'DELETE');await refresh();}));div.append(row);$('connections').append(div);}
+ const li=state.linkedin;$('linkedin-state').textContent=li.connected?'Connected'+(li.profile.name?' as '+li.profile.name:' · approve a profile read to identify account'):li.configured?'Configured · sign-in required':'Not connected';
+ const calendar=state.calendar||{};$('calendar-state').textContent=calendar.connected?(calendar.workspace_connected?'Connected · Calendar, Drive, Docs and Sheets':'Connected · Calendar only; reconnect to enable files'):calendar.configured?'Ready to sign in':'One-time Google app setup required. Expand the setup below.';
+ $('calendar-setup').open=!calendar.configured;
+ const skillChoice=$('selected-skill').value;$('selected-skill').replaceChildren(new Option('No skill',''));$('skills-list').replaceChildren();
+ for(const skill of state.skills||[]){$('selected-skill').append(new Option(skill.name,skill.name));const entry=node('details');entry.append(node('summary',skill.name),node('pre',skill.instructions),button('Delete skill',async()=>{await api('skills/'+encodeURIComponent(skill.name),undefined,'DELETE');await refresh();}));$('skills-list').append(entry);}
+ if((state.skills||[]).some(item=>item.name===skillChoice))$('selected-skill').value=skillChoice;
+ $('tasks').replaceChildren();for(const run of [...state.runs].reverse())$('tasks').append(button(run.goal.slice(0,70)+' · '+run.status,async()=>{selected=run.id;renderReview(null);renderRun(await api('tasks/'+run.id));}));
+ renderTools();if(selected){const run=state.runs.find(r=>r.id===selected);if(run)renderRun(run);}
+}
+$('transport').onchange=()=>{$('http-fields').hidden=$('transport').value!=='http';$('stdio-fields').hidden=$('transport').value!=='stdio';};
+$('skill-save').onclick=()=>perform(async()=>{await api('skills',{name:$('skill-name').value.trim(),instructions:$('skill-instructions').value});$('skill-name').value='';$('skill-instructions').value='';await refresh();});
+$('planner-provider').onchange=()=>{try{localStorage.setItem('sakura-agent-planner',$('planner-provider').value);}catch{}const item=(state.providers||[]).find(provider=>provider.id===$('planner-provider').value);$('planner-provider-status').textContent=item?'Planning with '+item.label+'.':'No AI provider is available.';};
+$('save-connection').onclick=()=>perform(async()=>{
+ const data={name:$('connection-name').value,transport:$('transport').value,url:$('mcp-url').value,token:$('mcp-token').value,command:$('mcp-command').value,args:JSON.parse($('mcp-args').value||'[]'),env:JSON.parse($('mcp-env').value||'{}')};
+ await api('connections',data);$('mcp-token').value='';$('mcp-env').value='';await refresh();
+});
+$('create').onclick=()=>perform(async()=>{const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value});selected=run.id;renderReview(null);renderRun(run);announce('All right, I will work through this one step at a time and check with you before anything runs.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
+ $('plan').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderReview(null);const planned=await api('tasks/'+selected+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));await refresh();});
+$('propose').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderRun(await api('tasks/'+selected+'/propose',{tool:$('tool').value,arguments:JSON.parse($('tool-args').value)}));await refresh();});
+$('cancel').onclick=()=>perform(async()=>{if(!selected)return;renderReview(null);renderRun(await api('tasks/'+selected+'/cancel',{}));await refresh();});
+$('clear-tasks').onclick=()=>perform(async()=>{if(!window.confirm('Clear all saved Agent tasks from this PC? This cannot be undone.'))return;await api('tasks',undefined,'DELETE');selected=null;current=null;renderReview(null);$('progress').textContent='Select or create a task to begin.';await refresh();});
+$('refresh').onclick=()=>perform(refresh);$('tool').onchange=renderSchema;
+$('callback').textContent=location.origin+'/api/agent/linkedin/callback';
+$('linkedin-save').onclick=()=>perform(async()=>{await api('linkedin/configure',{client_id:$('linkedin-client').value.trim(),client_secret:$('linkedin-secret').value});$('linkedin-secret').value='';await refresh();});
+$('linkedin-connect').onclick=()=>perform(async()=>{const data=await api('linkedin/connect',{});location.assign(data.url);});
+$('linkedin-disconnect').onclick=()=>perform(async()=>{await api('linkedin/disconnect',{});await refresh();});
+$('calendar-client-file').onchange=()=>perform(async()=>{
+ const input=$('calendar-client-file'),file=input.files?.[0];if(!file)return;
+ try{
+  if(file.size>65536)throw Error('Choose the small desktop client JSON downloaded from Google Cloud.');
+  const config=JSON.parse(await file.text()),client=config.installed;
+  if(!client||typeof client.client_id!=='string'||!client.client_id.endsWith('.apps.googleusercontent.com'))throw Error('This is not a Google Desktop app client JSON. Download the Desktop app client file from Google Cloud.');
+  await api('calendar/configure',{client_id:client.client_id,client_secret:client.client_secret||''});
+  await refresh();$('calendar-state').textContent='Setup saved. Click Sign in with Google to connect your account.';
+ }finally{input.value='';}
+});
+$('calendar-connect').onclick=()=>{if(!state.calendar?.configured){$('calendar-setup').open=true;$('calendar-setup').scrollIntoView({block:'nearest'});$('status').textContent='Complete the one-time Google app setup below, then sign in.';return;}let opened=false;void perform(async()=>{await api('calendar/connect',{workspace:$('google-services').value==='workspace'});opened=true;if(calendarPollTimer)clearInterval(calendarPollTimer);calendarPollTimer=setInterval(async()=>{try{const status=await api('calendar/status');if(status.connected&&($('google-services').value!=='workspace'||status.workspace_connected)){clearInterval(calendarPollTimer);calendarPollTimer=null;await refresh();announce('Google Calendar is connected. I can check your events and prepare changes for your approval.');}}catch(error){$('status').textContent=error.message;clearInterval(calendarPollTimer);calendarPollTimer=null;}},2500);}).then(()=>{if(opened)$('status').textContent='Google sign-in opened in your browser. Choose an account and approve Calendar access; Sakura will update when the connection completes.';});};
+$('calendar-disconnect').onclick=()=>perform(async()=>{if(calendarPollTimer){clearInterval(calendarPollTimer);calendarPollTimer=null;}await api('calendar/disconnect',{});await refresh();});
+$('calendar-refresh').onclick=()=>perform(loadAgenda);
+$('calendar-propose').onclick=()=>perform(async()=>{
+ const title=$('event-title').value.trim(),start=$('event-start').value,end=$('event-end').value;
+ if(!title||!start||!end)throw Error('Enter the event title, start time, and end time.');
+ const startDate=new Date(start),endDate=new Date(end);if(!Number.isFinite(startDate.getTime())||!Number.isFinite(endDate.getTime())||endDate<=startDate)throw Error('Choose a valid end time after the start time.');
+ const run=await api('calendar/propose',{summary:title,start:startDate.toISOString(),end:endDate.toISOString(),location:$('event-location').value.trim(),description:$('event-description').value.trim()});
+ selected=run.id;renderRun(run);announce('I prepared the event. Please review its details before I add it to your calendar.');await refresh();
+});
+$('companion-mode').onclick=()=>{if(window.parent!==window)window.parent.postMessage({type:'sakura-agent-companion-mode'},location.origin);else location.assign('/?desktop=1&companion=1');};
+function displayEventTime(value){
+ if(!value)return 'Time not provided';
+ if(value.dateTime){const date=new Date(value.dateTime);return Number.isNaN(date.getTime())?String(value.dateTime):date.toLocaleString([], {dateStyle:'medium',timeStyle:'short'});}
+ if(value.date){const date=new Date(value.date+'T12:00:00');return date.toLocaleDateString([], {dateStyle:'medium'})+' · all day';}
+ return 'Time not provided';
+}
+async function loadAgenda(){
+ const data=await api('calendar/agenda');const box=$('agenda-events');box.replaceChildren();
+ if(!data.events?.length){$('agenda-status').textContent='No upcoming events in the next 7 days.';return;}
+ $('agenda-status').textContent=data.events.length+' upcoming event'+(data.events.length===1?'':'s')+' · '+(data.calendar||'primary calendar');
+ for(const event of data.events){const row=node('div',undefined,'connection');row.append(node('strong',event.summary||'(Untitled event)'),node('p',displayEventTime(event.start)+(event.end?' – '+displayEventTime(event.end):'')));if(event.location)row.append(node('p',event.location));box.append(row);}
+}
+perform(refresh);
+</script></body></html>

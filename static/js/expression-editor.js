@@ -1,5 +1,6 @@
 import {installCustomExpressions} from './custom-expressions.js?v=ai-expression52';
 import {installAutoExpressions} from './auto-expressions.js?v=1';
+import {setPartVisible} from './model-visibility.js?v=irida101';
 export function hotkeyFor(event) {
     if (!event.code || ['ControlLeft','ControlRight','ShiftLeft','ShiftRight','AltLeft','AltRight','MetaLeft','MetaRight'].includes(event.code)) return '';
     return [event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.shiftKey?'Shift':'',event.metaKey?'Meta':'',event.code].filter(Boolean).join('+');
@@ -20,6 +21,8 @@ export function installExpressionEditor(getViewer, getModelKey) {
         } catch(_) { return {}; }
     };
     const save=data=>localStorage.setItem(key(),JSON.stringify(data));
+    const isVisibility=(v,name)=>!!v?.partVisibility?.has(name);
+    const visibilityActive=(v,name)=>isVisibility(v,name)&&v.partVisibility.get(name)===1;
     const defaultHotkey=index=>{
         const keys=['1','2','3','4','5','6','7','8','9','0'];
         return `Ctrl+${Math.floor(index/keys.length)?'Alt+':''}Digit${keys[index%keys.length]}`;
@@ -38,6 +41,11 @@ export function installExpressionEditor(getViewer, getModelKey) {
     };
     const apply=(name,weight)=>{
         const v=getViewer();if(!v||!v.allMorphNames.includes(name))return;
+        if(isVisibility(v,name)){
+            setPartVisible(v,name,weight<.5);
+            status.textContent=name+(weight>=.5?' hidden.':' shown.')+' Saved for this model.';
+            return;
+        }
         if(v.areAiExpressionsAutomatic?.()){status.textContent='Reactions are on: expressions are automatic. Turn Reactions off to select expressions manually.';return;}
         v.manualExpressions ||= new Map();v.manualExpressions.set(name,weight);v.manualExpression={name,weight};
         if(v.live2d&&!v.live2d.setExpression(name,weight)){
@@ -46,7 +54,9 @@ export function installExpressionEditor(getViewer, getModelKey) {
         status.textContent='Active expressions: '+[...v.manualExpressions.keys()].join(', ');
     };
     const deactivate=name=>{
-        const v=getViewer();v?.manualExpressions?.delete(name);
+        const v=getViewer();
+        if(isVisibility(v,name)){setPartVisible(v,name,true);status.textContent=name+' shown.';return;}
+        v?.manualExpressions?.delete(name);
         for(const p of v?.customExpressions?.[name]?.parameters||[])if(!v?.live2d)v?.setMorph?.(p.id,0);
         if(v?.live2d)v.live2d.removeExpression(name);else v?.setMorph?.(name,0);
         if(v?.manualExpression?.name===name)v.manualExpression=null;
@@ -62,15 +72,18 @@ export function installExpressionEditor(getViewer, getModelKey) {
         const names=getViewer()?.allMorphNames||[],data=ensureDefaults(names);
         for(const name of names){
             const binding=data[name]||{hotkey:null,weight:1};
+            const visibility=isVisibility(getViewer(),name);
+            const visibilityLabel={Hide_Wings:'Hide Wings',Hide_Horns:'Hide Horns',Hide_Top:'Hide Top clothing'}[name];
             const card=document.createElement('section');card.className='expression-card';card.dataset.expression=name;
             const header=document.createElement('div');header.className='expression-card-header';
-            const title=document.createElement('strong');title.className='expression-card-name';title.textContent=binding.label||getViewer()?.customExpressions?.[name]?.name||name;
+            const title=document.createElement('strong');title.className='expression-card-name';title.textContent=binding.label||visibilityLabel||getViewer()?.customExpressions?.[name]?.name||name;
             const shortcut=document.createElement('span');shortcut.className='expression-shortcut';shortcut.textContent=binding.hotkey||'No shortcut';
             header.append(title,shortcut);
             const strengthLabel=document.createElement('label');strengthLabel.textContent='Strength';
             const strength=document.createElement('input');strength.type='range';strength.min='0';strength.max='100';strength.value=Math.round(binding.weight*100);strength.setAttribute('aria-label',`${name} expression strength`);
             strength.oninput=()=>{
                 const current=bindings();current[name]={...(current[name]||{}),weight:Number(strength.value)/100};save(current);
+                if(isVisibility(getViewer(),name)){apply(name,Number(strength.value)/100);return;}
                 if(getViewer()?.manualExpressions?.has(name)){
                     getViewer().manualExpressions.set(name,Number(strength.value)/100);
                     if(getViewer().manualExpression?.name===name)getViewer().manualExpression.weight=Number(strength.value)/100;
@@ -78,11 +91,20 @@ export function installExpressionEditor(getViewer, getModelKey) {
                 }
             };
             const actions=document.createElement('div');actions.className='expression-card-actions';
-            const preview=document.createElement('button');preview.type='button';preview.textContent='Preview';preview.disabled=!!getViewer()?.areAiExpressionsAutomatic?.();preview.onclick=()=>apply(name,Number(strength.value)/100);
+            const preview=document.createElement('button');preview.type='button';preview.textContent='Preview';preview.disabled=!!getViewer()?.areAiExpressionsAutomatic?.()&&!isVisibility(getViewer(),name);preview.onclick=()=>apply(name,Number(strength.value)/100);
             const assign=document.createElement('button');assign.type='button';assign.textContent='Set hotkey';assign.onclick=()=>{recordingName=name;status.textContent=`Press a shortcut for ${name}…`;};
             const remove=document.createElement('button');remove.type='button';remove.textContent='Clear hotkey';remove.onclick=()=>{const current=bindings();current[name]={...current[name],hotkey:null,weight:Number(strength.value)/100};save(current);updateShortcut(name,shortcut);};
             const off=document.createElement('button');off.type='button';off.textContent='Turn off';off.onclick=()=>deactivate(name);
             actions.append(preview,assign,remove,off);card.append(header,strengthLabel,strength,actions);list.append(card);
+            if(visibility){
+                const toggle=document.createElement('button');toggle.type='button';
+                const sync=()=>{toggle.textContent=visibilityActive(getViewer(),name)?'Show part':'Hide part';toggle.setAttribute('aria-pressed',String(visibilityActive(getViewer(),name)));};
+                toggle.onclick=()=>{if(visibilityActive(getViewer(),name))deactivate(name);else apply(name,1);sync();};
+                const previewAction=preview.onclick,offAction=off.onclick,strengthAction=strength.oninput;
+                preview.onclick=()=>{previewAction();sync();};off.onclick=()=>{offAction();sync();};strength.oninput=()=>{strengthAction();sync();};
+                actions.append(toggle);sync();
+                const hint=document.createElement('p');hint.className='modal-hint';hint.textContent='Model-part visibility. Works independently of facial Reactions; saved for this model.';card.append(hint);
+            }
             const rename=document.createElement('input');rename.type='text';rename.maxLength=100;rename.value=title.textContent;rename.setAttribute('aria-label','Expression name');
             const renameButton=document.createElement('button');renameButton.type='button';renameButton.textContent='Rename';renameButton.onclick=()=>{const label=rename.value.trim();if(!label)return;const current=bindings();current[name]={...current[name],label};save(current);title.textContent=label;};
             const naming=document.createElement('div');naming.className='expression-card-actions';naming.append(rename,renameButton);card.append(naming);
@@ -97,7 +119,7 @@ export function installExpressionEditor(getViewer, getModelKey) {
     document.getElementById('close-expression-modal').onclick=()=>{recordingName=null;customEditor.clearPreview();panel.classList.add('hidden');};
     document.getElementById('expression-neutral').onclick=()=>{const v=getViewer();if(v?.areAiExpressionsAutomatic?.())return;v?.clearManualExpression();v?.manualExpressions?.clear();status.textContent='All active expressions cleared.';};
     window.addEventListener('keydown',event=>{
-        const v=getViewer();if(!v||event.repeat||(!recordingName&&v.areAiExpressionsAutomatic?.()))return;
+        const v=getViewer();if(!v||event.repeat)return;
         if(!recordingName&&(event.target.closest?.('input,textarea,select,[contenteditable="true"]')||!panel.classList.contains('hidden')))return;
         const code=hotkeyFor(event);if(!code)return;
         if(recordingName){
@@ -112,8 +134,9 @@ export function installExpressionEditor(getViewer, getModelKey) {
         }
         const entry=Object.entries(bindings()).find(([name,binding])=>binding.hotkey===code&&v.allMorphNames.includes(name));
         if(!entry)return;
+        if(v.areAiExpressionsAutomatic?.()&&!isVisibility(v,entry[0]))return;
         event.preventDefault();event.stopImmediatePropagation();
-        if(v.manualExpressions?.has(entry[0]))deactivate(entry[0]);else apply(entry[0],entry[1].weight);
+        if(visibilityActive(v,entry[0])||v.manualExpressions?.has(entry[0]))deactivate(entry[0]);else apply(entry[0],entry[1].weight);
     },true);
     window.addEventListener('sakura-reactions-changed',()=>{if(!panel.classList.contains('hidden'))render();});
     return {refresh:render};

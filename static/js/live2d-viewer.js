@@ -160,7 +160,7 @@ export default class Live2DViewer {
         const core=this.avatar.internalModel.coreModel,ids=Array.from(core._model?.parameters?.ids||[]);
         const set=(id,value)=>{if(ids.includes(id)&&Number.isFinite(value))core.setParameterValueById(id,value);};
         const opening=Math.max(...['A','I','U','E','O'].map(k=>Number(this.values[k])||0),0);
-        set('ParamMouthOpenY',opening);set('ParamMouthForm',0);
+        set('ParamMouthOpenY',opening);set('ParamMouthForm',opening>0?.12+opening*.35:0);
         for(const name of Object.values(this.owner.mouthOptions?.mapping||{}))if(name&&name!=='none'&&Object.hasOwn(this.values,name))set(name,this.values[name]);
     }
     applyParameters(){
@@ -206,7 +206,7 @@ export default class Live2DViewer {
             }
         }else{
             const mouth=Math.max(...['A','I','U','E','O'].map(k=>this.values[k]||0),0);
-            smooth('ParamMouthOpenY',mouth);smooth('ParamMouthForm',o.activity==='talking'?.2:0);
+            smooth('ParamMouthOpenY',mouth);smooth('ParamMouthForm',o.activity==='talking'?.12+mouth*.35:0);
             const blink=o.vtuberTrackingMode?0:Math.pow(Math.max(0,Math.cos(performance.now()/1000*1.1)),40);
             set('ParamEyeLOpen',1-blink);set('ParamEyeROpen',1-blink);
             if(!o.vtuberTrackingMode){

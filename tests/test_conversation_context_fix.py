@@ -1,3 +1,4 @@
+from tests.generation_quality_isolation import GenerationQualityIsolation
 import base64
 from io import BytesIO
 from pathlib import Path
@@ -8,7 +9,7 @@ from PIL import Image
 from llm import LLM
 from vision_context import combine_screen_avatar
 
-class ConversationContextFix(unittest.TestCase):
+class ConversationContextFix(GenerationQualityIsolation,unittest.TestCase):
     def test_unsolicited_hindi_flattery_retried_and_failed_drafts_not_saved(self):
         bad='मुझे आपके बारे में बहुत अच्छा लगता है, आप एक बहुत अच्छा और आकर्षक व्यक्ति हैं। आपके चेहरे पर एक बहुत अच्छा विश्वास आता है।'
         with tempfile.TemporaryDirectory() as directory:
@@ -135,10 +136,10 @@ class ConversationContextFix(unittest.TestCase):
             {'role':'user','content':'Just do what you have. I want to see that.'}]
         fitted=LLM._fit_local_messages(history,2048,128)
         self.assertEqual(fitted[1:],history[1:])
-    def test_action_history_is_persisted(self):
+    def test_unverified_action_dialogue_is_not_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'memory.json';llm=LLM(path);llm.remember_exchange('make u dance','Here comes a little dance.')
-            self.assertEqual(LLM(path).history[0]['content'],'make u dance')
+            self.assertEqual(LLM(path).history,[])
     def test_two_views_are_one_bounded_image(self):
         def encode(color):
             data=BytesIO();Image.new('RGB',(1920,1080),color).save(data,format='JPEG');return base64.b64encode(data.getvalue()).decode()

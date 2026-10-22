@@ -10,7 +10,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     const releases = new Map();
     const played = [];
     let releasePlayback;
-    const firstPhrase = 'First ' + 'word '.repeat(10).trim() + '.';
+    const firstPhrase = 'First ' + 'word '.repeat(6).trim() + '.';
     const secondPhrase = 'Second ' + 'word '.repeat(10).trim() + '.';
     const thirdPhrase = 'Third ' + 'word '.repeat(10).trim() + '.';
     const speech = speakPhrases([firstPhrase, secondPhrase, thirdPhrase].join(' '), text => new Promise(resolve => releases.set(text, resolve)), async (audio, first) => {
@@ -30,6 +30,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     releases.get(thirdPhrase)('audio3');
     await speech;
     assert.deepEqual(played, [['audio1', true], ['audio2', false], ['audio3', false]]);
+    const status='CPU usage is 13 percent. RAM usage is 8 of 32 GB, 25 percent. GPU usage is 40 percent.';assert.equal(splitSpeech(status)[0],'CPU usage is 13 percent.','Do not delay CPU speech by merging RAM/GPU details into the opening');
     const longReply='Hello again! I am glad to help you today. Tell me what you would like to work on and we can get started together.';
     const fast=splitSpeech(longReply);assert.ok(fast[0].length<=72&&fast.length>1,'Ordinary replies must begin with a small synthesized phrase');
     assert.equal(fast.join(' '),longReply,'Faster speech cannot omit words');

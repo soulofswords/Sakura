@@ -9,6 +9,7 @@ const context = {
     performance,
     window: {},
     repairNoseSkin() { return 0; },
+    loadVisibility() {}, applyVisibility() {},
     fetch: (...args) => fetchImpl(...args),
     THREE: {
         Loader: class { constructor(manager) { this.manager = manager; } },
@@ -28,6 +29,8 @@ const context = {
         }
     },
 };
+const gestureSource=fs.readFileSync('static/js/speech-gesture.js','utf8').replace(/^export /gm,'');
+Object.assign(context,vm.runInNewContext(gestureSource+'\n({classifySpeechGesture,speechGestureWeights})',{}));
 let source = fs.readFileSync('static/js/model-viewer.js', 'utf8')
     .replace(/^import .*;\r?\n/gm, '').replace('export default class ModelViewer', 'class ModelViewer');
 vm.runInNewContext(source + '\nthis.ModelViewer = ModelViewer; this.SmartTgaLoader = SmartTgaLoader;', context);
@@ -36,11 +39,13 @@ const viewer = Object.create(context.ModelViewer.prototype);
 const scene = new Set();
 Object.assign(viewer, {
     loadGeneration: 0, model: null, placeholderGroup: null,
+    blockTransition:{begin(){return false;},reveal(){}},
     repairStore: {async load(){},key(url){return url;},manual(){return [];},diagnostic(){return null;}},
     physics: { detach() {}, attach() { return { bones: 0 }; } },
     scene: { add(model) { scene.add(model); } },
     renderer: { domElement: {style: {}}, renderLists: { dispose() {} }, compileAsync: async () => {} },
     _autoFrame(model) { this.framed = model; },
+    _applyTrackingRestPose() {},
     setQuality() {},
     _indexMorphTargets(model) { this.allMorphNames = [model.name]; },
 });
@@ -49,7 +54,7 @@ function mesh(name) {
     const texture = Object.assign(resource(), { isTexture: true });
     const material = Object.assign(resource(), { map: texture, uniforms: { map: { value: texture } } });
     const geometry = Object.assign(resource(), {userData:{MMD:{bones:['センター','上半身','頭','左腕','右腕','左足','右足'].map(boneName=>({name:boneName}))}}}), skeleton = resource();
-    return { name, isSkinnedMesh:true, geometry, skeleton, material, texture,
+    return { name, isSkinnedMesh:true, geometry, skeleton, material, texture, updateMatrixWorld() {},
         removeFromParent() { scene.delete(this); }, traverse(fn) { fn(this); } };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));

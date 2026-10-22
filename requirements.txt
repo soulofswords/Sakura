@@ -18,6 +18,8 @@ pywebview
 PySide6==6.8.3
 qtpy
 Pillow
+pypdf>=6.0,<7
+-r requirements-agent.txt
 pytchat==0.5.5
 
 # ── Optional (wake word) ──────

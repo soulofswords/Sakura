@@ -69,5 +69,5 @@ export function installScreenAudio(isActive, isSpeaking, request = fetch, comput
         request('/api/screen-audio', {method: 'POST', keepalive: true,
             headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled:false})}).catch(() => {});
     });
-    return {refresh, sync, setVisible: visible => {group.hidden = !visible;}};
+    return {refresh, sync, playbackActive: () => isActive() && toggle.checked && selected.some(id => id === 'default-output' || catalog.some(source => source.id === id && source.kind === 'output')), setVisible: visible => {group.hidden = !visible;}};
 }

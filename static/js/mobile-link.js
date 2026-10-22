@@ -1,7 +1,7 @@
 import HeadPoseFilter from './head-pose-filter.js?v=1';
 export function installMobileLink(getViewer,getTracker,onReply,openSettings){
     const toggle=document.getElementById('phone-link-enabled'),status=document.getElementById('phone-link-status');
-    let enabled=false,busy=false,remote=false,filter=new HeadPoseFilter(),lastState=0,lastRemoteFrame=0;
+    let enabled=false,busy=false,remote=false,remoteKind='',filter=new HeadPoseFilter(),lastState=0,lastRemoteFrame=0;
     const devices=document.getElementById('phone-link-devices');
     const show=data=>{enabled=!!data.enabled;toggle.checked=enabled;
         document.getElementById('phone-link-address').value=enabled?(data.addresses||[])[0]||'':'';
@@ -71,17 +71,24 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
             }
             const response=await fetch('/api/mobile/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)});
             if(!response.ok)return;
-            const data=await response.json();if(!data.enabled){enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
+            const data=await response.json();if(!data.enabled){enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
             for(const command of data.commands||[]){
                 if(command.type==='request-model'){
                     void import('./mobile-model-transfer.js?v=phone-touch73').then(module=>module.openMobileModelTransfer(command.request_id)).catch(error=>{status.textContent=error.message;});
                 }else if(command.type==='tracking-start'){
-                    getTracker()?.stop();remote=true;filter=new HeadPoseFilter();
+                    getTracker()?.stop();remote=true;remoteKind='vtuber';filter=new HeadPoseFilter();
                     window.dispatchEvent(new CustomEvent('sakura-phone-tracking',{detail:true}));
                     viewer.setVtuberTrackingMode(true);viewer.setUserTracking(true);
-                }else if(command.type==='tracking-stop'){remote=false;viewer.setUserTracking(false);}
+                }else if(command.type==='companion-tracking-start'){
+                    getTracker()?.stop();remote=true;remoteKind='companion';filter=new HeadPoseFilter();
+                    window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:true}}));
+                    viewer.setVtuberTrackingMode(true);viewer.setUserTracking(true);
+                }else if(command.type==='companion-tracking-stop'){
+                    remote=false;remoteKind='';viewer.setUserTracking(false);viewer.setVtuberTrackingMode(false);
+                    window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));
+                }else if(command.type==='tracking-stop'){remote=false;remoteKind='';viewer.setUserTracking(false);}
                 else if(command.type==='camera-start'||command.type==='camera-stop'){
-                    if(command.type==='camera-start'){remote=false;viewer.setUserTracking(false);}
+                    if(command.type==='camera-start'){remote=false;if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';viewer.setUserTracking(false);}
                     window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:command}));
                 }
                 else if(command.type==='calibrate')viewer.calibrateUserTracking();

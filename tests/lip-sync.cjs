@@ -49,6 +49,7 @@ function frame(delta) {
         Float32Array.from({ length: 1600 }, (_, i) => i < 800 ? level : 0) });
     sync._prepareEnvelope(clip(0.02));
     const quietOpening = sync._openingAt(0.02);
+    assert.ok(quietOpening>.7&&quietOpening<=.92, "Audible syllables use an expressive bounded opening, not the old 38% cap");
     assert.equal(sync._openingAt(-0.01), 0, 'No mouth movement before audible playback');
     assert.equal(sync._openingAt(0.08), 0, 'Silent parts of a clip close the mouth');
     assert.equal(sync._openingAt(1), 0, 'No mouth movement after a clip');
@@ -87,7 +88,7 @@ function frame(delta) {
     assert.equal(viewer.weights.I, 0, 'Speech uses one mouth shape without stretching the lips');
     amplitude = 1;
     for (let n = 0; n < 20; n++) frame(1 / 60);
-    assert.ok(Object.values(viewer.weights).reduce((a, b) => a + b, 0) <= 0.45 + 1e-9);
+    assert.ok(Object.values(viewer.weights).reduce((a, b) => a + b, 0) <= 0.92 + 1e-9);
     assert.equal(Object.values(viewer.weights).filter(value => value > 0).length, 1);
     amplitude = 0;
     for (let n = 0; n < 30; n++) frame(1 / 60);

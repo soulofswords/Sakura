@@ -102,7 +102,6 @@ export default class ModelRigMonitor {
         void this.viewer.repairStore.saveDiagnostic(this.url,report).then(()=>complete(report.frozen.length?`${report.frozen.length} bone repairs saved for future launches.`:'Bone check saved: no sustained instability detected.'),error=>complete('Repair could not be saved: '+error.message));
     }
     enforce(){
-        if(!this.viewer.vrm)return;
         for(const node of this.nodes||[])if(node.diagnosticStatic){node.bone.position.copy(node.restLocal);node.bone.quaternion.copy(node.restQuat);node.bone.updateMatrix();}
     }
     applyFrozen(){
@@ -117,7 +116,7 @@ export default class ModelRigMonitor {
         if(this.finished)return false;
         this.manualRepair=true;
         this.referenceCaptured=true;this.capture('reference');
-        this.viewer.rigAnalysis.status='Snapshot captured. Checking hair and bones for eight seconds; confirmed repairs apply immediately and are saved.';
+        this.viewer.rigAnalysis.status='Snapshot captured. Checking hair, clothing and other physics bones for eight seconds; confirmed repairs apply immediately and are saved.';
         window.dispatchEvent(new CustomEvent('sakura-rig-analysis',{detail:this.viewer.rigAnalysis}));return true;
     }
     unfreezeBone(bone){

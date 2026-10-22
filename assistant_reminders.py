@@ -54,7 +54,7 @@ class Reminders:
             if re.match(r'^(?:show|list|check|what|how much|how long)',text):
                 items=self.list()
                 if not items:return 'You have no active timers or alarms.'
-                return 'Active timers and alarms: '+'; '.join(f"{x['id']}: {x['label']} — "+('ringing now' if x['status']=='ringing' else f"{x['remaining']//60} min {x['remaining']%60} sec remaining") for x in items)
+                return 'Active timers and alarms: '+'; '.join(f"{x['label']} — "+('ringing now' if x['status']=='ringing' else f"{x['remaining']//60} min {x['remaining']%60} sec remaining") for x in items)
             if re.match(r'^(?:cancel|delete|remove|stop|dismiss|snooze)\b',text):
                 kind='timer' if re.search(r'\btimers?\b',text) else 'alarm'
                 with self.lock:
@@ -82,7 +82,7 @@ class Reminders:
                 if not 1<=seconds<=604800:return 'Tell me a timer duration between one second and seven days, such as “set a five minute timer”.'
                 label=f'{int(seconds//60)} min {int(seconds%60)} sec timer'
                 item=self.add('timer',self.clock()+seconds,label)
-                return f"Timer set for {label.removesuffix(' timer')} (ID {item['id']}). I’ll alert you while Sakura is open."
+                return f"Timer set for {label.removesuffix(' timer')}. I’ll alert you while Sakura is open."
             if re.search(r'\balarm\b',text):
                 if re.search(r'\b(?:on|every|daily|weekly|repeat|repeating|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',text):
                     return 'Alarm dates currently support today or tomorrow. Please say the time and one of those days.'
@@ -104,7 +104,7 @@ class Reminders:
                 if 'tomorrow' in text or due<=now:due+=timedelta(days=1)
                 label=due.strftime('%d %B %Y at %I:%M %p')
                 item=self.add('alarm',due.timestamp(),label)
-                return f"Alarm set for {label}, using this PC’s local time (ID {item['id']}). Keep Sakura open for the alert."
+                return f"Alarm set for {label}, using this PC’s local time. Keep Sakura open for the alert."
         except (OSError,ValueError,KeyError,TypeError):
             return 'I could not update the timer/alarm file. Your request was not confirmed; please try again.'
         return None

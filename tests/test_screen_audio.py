@@ -1,3 +1,5 @@
+from response_evidence import strict_answer as production_strict_answer
+from tests.generation_quality_isolation import GenerationQualityIsolation
 import tempfile
 import threading
 import time
@@ -11,7 +13,7 @@ from screen_audio import ScreenAudio, capture
 from llm import LLM
 
 
-class AudioTests(unittest.TestCase):
+class AudioTests(GenerationQualityIsolation,unittest.TestCase):
     def test_computer_only_enforced_on_server(self):
         with patch.object(app.app.state, 'tracking_only', False, create=True), patch.object(app.app.state, 'ai_vtuber_audio', True, create=True), patch.object(app, 'stt', Mock()), patch('screen_audio.sources', return_value=[{'id':'default-output','kind':'output'},{'id':'mic','kind':'input'}]), patch('screen_audio.listener') as listener:
             listener.configure.return_value = {'enabled':True}
@@ -81,21 +83,14 @@ class AudioTests(unittest.TestCase):
                 llm.chat('hello', audio_context='private recording')
                 self.assertNotIn('private recording', str(request.call_args.args[0]))
 
-    def test_api_tracks_only_ai_modes_and_current_screen(self):
-        client = TestClient(app.app)
-        with patch.object(app.app.state, 'tracking_only', True, create=True):
-            self.assertEqual(client.post('/api/screen-audio', json={'enabled':True}).status_code, 409)
-        with patch.object(app.app.state, 'tracking_only', False, create=True), patch('screen_audio.listener') as listener:
-            listener.configure.return_value = {'enabled': False}
-            self.assertEqual(client.post('/api/screen-audio', json={'enabled':False}).status_code, 200)
-            self.assertEqual(client.post('/api/screen-audio', json={'enabled':'yes'}).status_code, 400)
-            listener.context.return_value = 'Game dialogue'
-            with patch.object(app, 'llm') as llm, patch.object(app, 'get_vision_status', return_value={'ready':True}), patch.object(app, 'get_settings', return_value={}):
-                llm.chat.return_value = 'hello'
-                client.post('/api/chat', json={'text':'hello','screen_image':'/9j/','defer_audio':True})
-                self.assertEqual(llm.chat.call_args.kwargs['audio_context'], 'Game dialogue')
-                client.post('/api/chat', json={'text':'hello','defer_audio':True})
-                self.assertNotIn('audio_context', llm.chat.call_args.kwargs)
+    def test_strict_api_does_not_generate_from_audio_or_screen(self):
+        model=Mock();model.chat.return_value='A dragon is ahead.'
+        with patch.object(app,'llm',model),patch.object(app,'get_settings',return_value={}),patch('response_evidence.retrieve',return_value=None),patch('response_evidence.strict_answer',side_effect=production_strict_answer):
+            client=TestClient(app.app)
+            result=client.post('/api/chat',json={'text':'What is happening on screen?','defer_audio':True,'audio_context':'A dragon is ahead.'})
+            self.assertEqual(result.status_code,200)
+            self.assertEqual(result.json()['reply'],"I couldn't verify that.")
+        model.chat.assert_not_called()
 
     def test_windows_capture_downmix_resample_and_discard(self):
         manager = Mock()

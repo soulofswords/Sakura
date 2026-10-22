@@ -10,22 +10,14 @@ from PIL import Image, ImageDraw
 from llm import LLM
 
 class ScreenMemoryTests(unittest.TestCase):
-    def test_video_timeline_used_after_screen_moves_on_and_expires(self):
+    def test_unverified_visual_timeline_is_not_factual_memory(self):
         with tempfile.TemporaryDirectory() as directory:
             model=LLM(Path(directory)/'memory.json')
-            with patch('llm.time.monotonic',return_value=100),patch.object(model,'_request',return_value='A red car turns left, then stops beside a tree.') as infer:
-                self.assertTrue(model.observe_screen('latest',['earlier','middle','latest']))
-                self.assertTrue(infer.call_args.kwargs['summarizing'])
-                self.assertEqual(infer.call_args.args[0][-1]['images'],['earlier','middle','latest'])
-            with patch('llm.time.monotonic',return_value=110),patch.object(model,'_request') as infer:
-                self.assertFalse(model.observe_screen('image'));infer.assert_not_called()
-            with patch('llm.time.monotonic',return_value=125),patch.object(model,'_request',return_value='The car stopped by a tree.') as infer:
-                model.chat('What happened in that video?')
-                sent=infer.call_args.args[0]
-                self.assertTrue(any('red car turns left' in m['content'] for m in sent))
-                self.assertFalse(any(m.get('images') for m in sent),'No old images retained in prompts')
-            self.assertNotIn('_screen_notes',model.memory_path.read_text())
-            with patch('llm.time.monotonic',return_value=701):self.assertEqual(model._screen_timeline_context(),'')
+            with patch.object(model,'_request') as infer:
+                self.assertFalse(model.observe_screen('latest',['earlier','middle','latest']))
+            infer.assert_not_called()
+            self.assertEqual(model._screen_notes,[])
+            self.assertEqual(model._screen_timeline_context(),'')
 
     def test_clear_during_observation_cannot_restore_discarded_notes(self):
         with tempfile.TemporaryDirectory() as directory:

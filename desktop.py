@@ -12,7 +12,8 @@ from pathlib import Path
 from product import DISPLAY_NAME, LAUNCHER_NAME, EDITION
 APP_DISPLAY_NAME = DISPLAY_NAME
 APP_USER_MODEL_ID = 'Sakura.VTuber' if EDITION=='vtuber' else 'Sakura.DesktopCompanion'
-APP_ICON_PATH = Path(__file__).parent / 'launcher' / 'companion.ico'
+from app_branding import icon_path
+APP_ICON_PATH = icon_path(Path(__file__).parent, EDITION)
 from PySide6.QtCore import QCoreApplication
 # Set identity before Qt creates its persistent browser profile, avoiding a
 # shared default cache lock between the Companion and VTuber processes.
@@ -70,10 +71,45 @@ class DesktopApi:
     def __init__(self, window_holder):
         self.holder = window_holder
 
+    def wake_state(self):
+        return self.holder['wake'].state()
+
+    def install_wake_pack(self):
+        try:return self.holder['wake'].install()
+        except Exception as error:return {'error':str(error)}
+
+    def set_wake_listener(self, enabled, phrase='hey sakura'):
+        try:
+            wake=self.holder['wake']
+            if enabled:
+                if EDITION=='vtuber' or getattr(app.state,'tracking_only',False):raise RuntimeError('Wake listening is available in Companion AI mode.')
+                return wake.start(phrase)
+            wake.stop()
+            return wake.state()
+        except Exception as error:return {'error':str(error)}
+
+    def pause_wake_listener(self, paused):
+        self.holder['wake'].pause(paused)
+        return True
+
+    def end_chat_session(self):
+        win=self.holder.get('window')
+        if win and EDITION!='vtuber':
+            # closing can run on Qt's GUI thread. Never synchronously wait for
+            # JavaScript on that same thread or close/restart deadlocks.
+            def notify():
+                try:win.evaluate_js("window.dispatchEvent(new Event('sakura-chat-session-ended')); void 0;")
+                except Exception:pass
+            threading.Thread(target=notify,name='sakura-session-close',daemon=True).start()
+
     def close(self):
         """Close the desktop companion window."""
         win = self.holder.get("window")
         if win:
+            self.end_chat_session()
+            if self.holder.get('wake') and self.holder['wake'].state()['enabled'] and self.holder.get('tray_available'):
+                self.holder['resize_bridge'].hide_request.emit()
+                return
             win.destroy()
 
     def open_pmx_editor(self, model_path):
@@ -321,6 +357,12 @@ class DesktopApi:
         win.evaluate_js('window.applyLibraryMode(' + ('true' if enabled else 'false') + '); void 0;')
         return enabled
 
+    def set_brand_mode(self, tracking):
+        bridge=self.holder.get('resize_bridge')
+        if not bridge:return False
+        bridge.brand_request.emit(bool(tracking))
+        return True
+
     def set_screen_access(self, enabled):
         self.screen_access = bool(enabled)
         return self.screen_access
@@ -432,8 +474,18 @@ def main():
                 time.sleep(0.05)
 
     # Holder to pass window reference to Api
-    library_mode = os.environ.get('SAKURA_UPLOAD_UI') == '1' or bool(getattr(app.state, 'tracking_only', False))
+    agent_mode = getattr(app.state, 'startup_mode', '') == 'agent'
+    library_mode = os.environ.get('SAKURA_UPLOAD_UI') == '1' or bool(getattr(app.state, 'tracking_only', False)) or agent_mode
     holder = {'library_mode': library_mode}
+    from desktop_wake import DesktopWake
+    def wake_command(text):
+        import json
+        bridge=holder.get('resize_bridge')
+        if bridge and holder.pop('wake_hidden',False):bridge.focus_request.emit()
+        result=holder['window'].evaluate_js('window.receiveDesktopWakeCommand?.('+json.dumps(text)+')')
+        if not result:holder['wake'].pause(False)
+    holder['wake']=DesktopWake(Path(__file__).parent,wake_command)
+
     from window_placement import read_placement
     placement_file=Path(__file__).parent/'desktop-profile'/'companion-placement.json'
     saved_placement=read_placement(placement_file)
@@ -453,8 +505,9 @@ def main():
         ui_revision = (Path(__file__).parent / 'static' / 'index.html').stat().st_mtime_ns
     except OSError:
         ui_revision = int(time.time())
-    page_mode = 'library=1&upload=1' if library_mode else 'desktop=1&companion=1'
-    page_url = f'http://{gui_server.HOST}:{gui_server.port}/?{page_mode}&ui={ui_revision}'
+    page_mode = 'library=1&upload=1' if library_mode and not agent_mode else 'desktop=1&companion=1'
+    page_url = f'http://{gui_server.HOST}:{gui_server.port}/?{page_mode}&ui={ui_revision}' + ('&agent=1' if agent_mode else '')
+    if getattr(app.state,'tracking_only',False):page_url+='&tracking=1'
     webview.settings['DRAG_REGION_DIRECT_TARGET_ONLY'] = True
     window = webview.create_window(
         title=APP_DISPLAY_NAME,
@@ -514,21 +567,46 @@ def main():
         class ResizeBridge(QObject):
             request = Signal(str)
             focus_request = Signal()
+            hide_request = Signal()
             input_request = Signal(bool)
             surface_request = Signal(bool)
             mode_request = Signal(bool)
+            brand_request = Signal(bool)
             maximize_request = Signal()
             def __init__(self):
                 super().__init__()
                 self.focus_request.connect(self.focus_window)
+                self.hide_request.connect(self.hide_window)
                 self.request.connect(self.resize_window)
                 self.input_request.connect(self.set_input_transparency)
                 self.surface_request.connect(self.set_surface_transparency)
                 self.mode_request.connect(self.set_mode)
+                self.brand_request.connect(self.set_brand)
                 self.maximize_request.connect(self.toggle_maximize)
+
+            @Slot(bool)
+            def set_brand(self, tracking):
+                path=icon_path(Path(__file__).parent,EDITION,tracking)
+                holder['active_icon_path']=path
+                icon=QIcon(str(path))
+                native.setWindowIcon(icon)
+                application.setWindowIcon(icon)
+                if holder.get('tray'):holder['tray'].setIcon(icon)
+                if sys.platform=='win32':
+                    from window_identity import set_taskbar_identity
+                    set_taskbar_identity(int(native.winId()),APP_USER_MODEL_ID,APP_LAUNCHER_PATH,path)
+
+            @Slot()
+            def hide_window(self):
+                holder['wake_hidden']=True
+                native.webview.page().runJavaScript("window.dispatchEvent(new CustomEvent('sakura-native-visibility',{detail:{hidden:true}}))")
+                native.hide()
 
             @Slot()
             def focus_window(self):
+                holder['wake_hidden']=False
+                native.show()
+                native.webview.page().runJavaScript("window.dispatchEvent(new CustomEvent('sakura-native-visibility',{detail:{hidden:false}}))")
                 if native.isMinimized():native.showNormal()
                 native.raise_()
                 native.activateWindow()
@@ -651,6 +729,7 @@ def main():
         bridge = ResizeBridge()
         bridge.moveToThread(native.thread())
         holder['resize_bridge'] = bridge
+        bridge.set_brand(bool(getattr(app.state,'tracking_only',False)))
         if not holder.get('library_mode'):
             from window_placement import compact_geometry
             from PySide6.QtCore import QPoint
@@ -697,6 +776,35 @@ def main():
         drag_timer.timeout.connect(update_hair_drag)
         drag_timer.start()
         holder['hair_drag_timer'] = drag_timer
+        last_visibility=[None]
+        def update_native_visibility():
+            hidden=not native.isVisible() or native.isMinimized()
+            if hidden==last_visibility[0]:return
+            last_visibility[0]=hidden
+            native.webview.page().runJavaScript("window.dispatchEvent(new CustomEvent('sakura-native-visibility',{detail:{hidden:"+('true' if hidden else 'false')+"}}))")
+            if hidden:holder['wake_hidden']=True
+        visibility_timer=QTimer(native);visibility_timer.setInterval(500);visibility_timer.timeout.connect(update_native_visibility);visibility_timer.start();holder['visibility_timer']=visibility_timer
+
+        if EDITION!='vtuber':
+            from PySide6.QtWidgets import QSystemTrayIcon, QMenu
+            from PySide6.QtGui import QAction
+            if QSystemTrayIcon.isSystemTrayAvailable():
+                tray=QSystemTrayIcon(QIcon(str(holder.get('active_icon_path',APP_ICON_PATH))),native)
+                menu=QMenu();show_action=QAction('Open Sakura',menu);show_action.triggered.connect(holder['resize_bridge'].focus_window);menu.addAction(show_action)
+                stop_action=QAction('Stop wake listening',menu)
+                def stop_wake():
+                    holder['wake'].stop()
+                    threading.Thread(target=window.evaluate_js,args=("window.stopDesktopWakeFromTray?.()",),daemon=True).start()
+                stop_action.triggered.connect(stop_wake);menu.addAction(stop_action)
+                quit_action=QAction('Quit Sakura',menu)
+                def quit_sakura():
+                    holder['wake'].stop();window.destroy()
+                quit_action.triggered.connect(quit_sakura);menu.addAction(quit_action)
+                tray.setContextMenu(menu);tray.setToolTip('Sakura · wake listening off');tray.activated.connect(lambda reason:holder['resize_bridge'].focus_window() if reason==QSystemTrayIcon.ActivationReason.DoubleClick else None);tray.show()
+                holder.update(tray=tray,tray_menu=menu,tray_available=True)
+                def update_tray():
+                    state=holder['wake'].state();tray.setToolTip('Sakura · '+state['status'][:110]);stop_action.setEnabled(state['enabled'])
+                tray_timer=QTimer(native);tray_timer.setInterval(2000);tray_timer.timeout.connect(update_tray);tray_timer.start();holder['tray_timer']=tray_timer
         print('  Native window controls ready.', flush=True)
 
     # before_show runs synchronously on Qt's UI thread.
@@ -707,10 +815,18 @@ def main():
     # bridge so activation follows normal UI-thread window handling.
     window.events.loaded += lambda: holder['resize_bridge'].focus_request.emit()
 
+    def keep_wake_in_tray():
+        api.end_chat_session()
+        if holder.get('tray_available') and holder['wake'].state()['enabled']:
+            holder['resize_bridge'].hide_request.emit()
+            return False
+    window.events.closing += keep_wake_in_tray
+
     overlay_stopped = threading.Event()
     window.events.closed += overlay_stopped.set
 
     def release_owned_services():
+        holder['wake'].stop()
         if _desktop_server is not None:
             _desktop_server.should_exit = True
         from ollama_runtime import stop

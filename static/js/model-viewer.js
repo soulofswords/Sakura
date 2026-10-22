@@ -1,4 +1,6 @@
-import Live2DViewer from './live2d-viewer.js?v=phone-touch73';
+import {waitForModelGpu} from './model-presentation.js?v=switch85';
+import Live2DViewer from './live2d-viewer.js?v=fbx89';
+import ModelBlockTransition from './model-block-transition.js?v=switch85';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
 import * as THREE from 'three';
 import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
@@ -11,13 +13,15 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import AvatarRetarget from './avatar-retarget.js?v=vrm-pitch14';
 import ArmClearance from './arm-clearance.js?v=clearance1';
-import ModelPhysics from './model-physics.js?v=hair-collision31';
-import ModelRigMonitor from './model-rig-monitor.js?v=startup68';
+import ModelPhysics from './model-physics.js?v=authored-cloth76';
+import ModelRigMonitor from './model-rig-monitor.js?v=authored-cloth76';
 import ModelRepairStore from './model-repair-store.js?v=1';
 import {ModelBones} from './model-bones.js?v=persistent5';
 import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
-import ReactionExpressions from './reaction-expressions.js?v=camera-emotions59';
-import ModelDance from './model-dance.js?v=assistant69';
+import ReactionExpressions from './reaction-expressions.js?v=files105';
+import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
+import ModelDance from './model-dance.js?v=fbx89';
+import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
 
 /**
  * Smart loader for .tga textures.
@@ -118,21 +122,42 @@ export default class ModelViewer {
         this.scene = new THREE.Scene();
 
         // Camera
-        this.camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const initialWidth=Math.max(1,this.container.clientWidth||window.innerWidth);
+        const initialHeight=Math.max(1,this.container.clientHeight||window.innerHeight);
+        this.camera = new THREE.PerspectiveCamera(40, initialWidth / initialHeight, 0.1, 1000);
         this.camera.position.set(0, 14, 18);
 
         // Renderer
         this.companionSurface = !document.title.startsWith('Sakura VTuber');
-        this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: true,
-            // Native transparent windows repaint between animation frames.
-            // Retain the last complete frame for those compositor updates.
-            preserveDrawingBuffer: true,
-            powerPreference: 'high-performance',
-        });
-        this.renderer.setDrawingBufferSize(window.innerWidth,window.innerHeight,
-            renderPixelRatio(window.innerWidth,window.innerHeight,Math.min(window.devicePixelRatio,2),this.renderer.capabilities.maxTextureSize));
+        // Windows may fail to create a high-performance, antialiased context
+        // after a GPU reset or when the discrete adapter is busy. Retry with
+        // progressively less demanding context attributes before giving up;
+        // alpha and the retained frame are required by the desktop compositor.
+        const rendererOptions = [
+            {antialias:true, powerPreference:'high-performance'},
+            {antialias:false, powerPreference:'high-performance'},
+            {antialias:false, powerPreference:'low-power'},
+            {antialias:false, powerPreference:'default'},
+        ];
+        let rendererError;
+        for (const options of rendererOptions) {
+            try {
+                this.renderer = new THREE.WebGLRenderer({
+                    ...options,
+                    alpha:true,
+                    failIfMajorPerformanceCaveat:false,
+                    // Native transparent windows repaint between animation
+                    // frames. Retain the last complete compositor frame.
+                    preserveDrawingBuffer:true,
+                });
+                break;
+            } catch (error) {
+                rendererError = error;
+            }
+        }
+        if (!this.renderer) throw rendererError || new Error('Could not create a WebGL renderer.');
+        this.renderer.setDrawingBufferSize(initialWidth,initialHeight,
+            renderPixelRatio(initialWidth,initialHeight,Math.min(window.devicePixelRatio,2),this.renderer.capabilities.maxTextureSize));
         Object.assign(this.renderer.domElement.style,{width:'100%',height:'100%'});
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.sortObjects = true; // depth-sort transparent draw calls
@@ -272,7 +297,10 @@ export default class ModelViewer {
     }
 
     _holdPresentedFrame() {
-        if (this.companionSurface) return;
+        // An alpha snapshot replaces the live canvas (CSS hides it), so it
+        // is safe on native Companion windows too. Do not stack it above the
+        // model-switch animation, which already owns a complete saved frame.
+        if (this.blockTransition?.canvas) return;
         if (this._heldFrame || this._displayLoading || !this.model) return;
         const source = this.live2d?.app?.view || this.renderer.domElement;
         if (!source?.width || !source?.height) return;
@@ -298,7 +326,7 @@ export default class ModelViewer {
         // Keep the copy through one compositor frame. A stale load must not
         // remove the snapshot belonging to a later model selection.
         requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (ticket !== this._displayLoadTicket || this._displayLoading) return;
+            if (ticket !== this._displayLoadTicket || this._displayLoading || this._modelPresentationPending === ticket) return;
             frame.remove();
             if (this._heldFrame === frame) {
                 this._heldFrame = null;
@@ -312,8 +340,8 @@ export default class ModelViewer {
         if (this.resizeFrame) return;
         this.resizeFrame = requestAnimationFrame(() => {
             this.resizeFrame = null;
-            const width = Math.max(1, window.innerWidth);
-            const height = Math.max(1, window.innerHeight);
+            const width = Math.max(1, this.container.clientWidth||window.innerWidth);
+            const height = Math.max(1, this.container.clientHeight||window.innerHeight);
             this.camera.aspect = width / height;
             this.camera.updateProjectionMatrix();
             if (this._displayLoading) return;
@@ -358,7 +386,7 @@ export default class ModelViewer {
             localStorage.setItem('sakura_render_quality', this.quality);
             return;
         }
-        const width = Math.max(1, window.innerWidth), height = Math.max(1, window.innerHeight);
+        const width = Math.max(1, this.container.clientWidth||window.innerWidth), height = Math.max(1, this.container.clientHeight||window.innerHeight);
         const ratio = renderPixelRatio(width,height,Math.min(window.devicePixelRatio*preset.scale,3),this.renderer.capabilities.maxTextureSize);
         this._holdPresentedFrame();
         this.camera.aspect = width / height;
@@ -597,6 +625,8 @@ export default class ModelViewer {
     }
 
     async loadModel(url, options = {}) {
+        this.blockTransition ||= new ModelBlockTransition(this);
+        const transitionHoldsFrame=this.blockTransition.begin();
         // The running camera worker must never retarget the disposed skeleton.
         // Rebuild the retargeter for the new format after the load completes.
         const resumeTracking = this.userTracking || this._resumeTrackingOnLoad;
@@ -607,7 +637,7 @@ export default class ModelViewer {
         this.userTrackingSample = null;
         this.dance?.stop(true);
         this.reactionExpressions?.clear();
-        this._holdPresentedFrame();
+        if(!transitionHoldsFrame)this._holdPresentedFrame();
         this.materialEditor?.restore();
         const ticket = (this._displayLoadTicket || 0) + 1;
         this._displayLoadTicket = ticket;
@@ -617,6 +647,7 @@ export default class ModelViewer {
             const result=await this._loadModelInternal(url, options);
             if(result&&ticket===this._displayLoadTicket){
                 this.lastModelUrl=url;
+                loadVisibility(this,url);
                 // Imported skinned bounds describe the bind pose. Moving
                 // hair/skirts can escape those cached bounds during dragging.
                 this.model?.traverse(child=>{if(child.isSkinnedMesh)child.frustumCulled=false;});
@@ -630,19 +661,43 @@ export default class ModelViewer {
             return result;
         } finally {
             if (ticket === this._displayLoadTicket) {
+                this._modelPresentationPending = ticket;
                 this._displayLoading = false;
-                if(this.vtuberTrackingMode)this._applyTrackingRestPose();
+                this._applyTrackingRestPose();
                 if (resumeTracking && this.model && this.userTrackingRequested!==false) this.setUserTracking(true);
                 this._resumeTrackingOnLoad = false;
                 // Present the fully framed model in this task, before the
                 // compositor can show a cleared canvas between frames.
                 this.setQuality(this.quality);
-                this._releasePresentedFrame(ticket);
+                // Final quality/gloss changes can invalidate textures/programs
+                // after the loader's first compile. Keep the previous image
+                // through the final draw and its GPU uploads.
+                try{await this._finishModelPresentation(ticket);}
+                finally{
+                    if(ticket===this._displayLoadTicket){
+                        this._modelPresentationPending = null;
+                        this._releasePresentedFrame(ticket);
+                        void this.blockTransition.reveal();
+                    }
+                }
             }
         }
     }
 
+    async _finishModelPresentation(ticket){
+        if(this.live2d||!this.model||!this.renderer?.getContext)return;
+        const current=()=>ticket===this._displayLoadTicket&&!this._displayLoading;
+        await this.renderer.compileAsync(this.scene,this.camera);
+        if(!current())return;
+        this._renderFrame();
+        const ready=await waitForModelGpu(this.renderer,current);
+        if(!ready&&current())console.warn('Model presentation GPU wait did not complete; context lost or GPU busy.');
+    }
+
     async _loadModelInternal(url, options = {}) {
+        // A lighting target belongs to the model whose material was picked.
+        this.characterLightingTarget = null;
+        this._bloomTargetObjects = [];
         if (/\.model3\.json(?:\?|$)/i.test(url)) return this._loadLive2D(url);
         this.humanoidInfo = null;
         const isVrm = /\.vrm(?:\?|$)/i.test(url);
@@ -1189,6 +1244,17 @@ export default class ModelViewer {
                 // rest. Keep their depth so hidden expression cards/back hair
                 // cannot draw through the face. Genuine translucency still blends.
                 if (material.transparent && !textureCutout) material.depthWrite = material.opacity >= .999;
+                const hairMapFile = String(material.userData?.MMD?.mapFileName || material.map?.name || '').replace(/\\/g, '/');
+                const taffyHair = /^f头发(?:[23])?$/u.test(material.name || '') && /(?:^|\/)taffy_hair_color\.png$/i.test(hairMapFile)
+                    && material.opacity >= .999;
+                if (taffyHair) {
+                    // This atlas's soft alpha made solid bangs see-through.
+                    // Cut out strand gaps, then draw surviving hair opaque so
+                    // both the face and the desktop stay behind its surface.
+                    material.transparent = false;
+                    material.alphaTest = Math.max(material.alphaTest || 0, .2);
+                    material.depthWrite = true;
+                }
                 if (this.pmxReferenceMode || princessProfile || nanallyProfile) {
                     // Keep PMX diffuse, ambient, toon, sphere and sidedness
                     // settings. MMD's ambient term must use the same diffuse
@@ -1204,17 +1270,6 @@ export default class ModelViewer {
                     material.blending = THREE.NormalBlending;
                     material.needsUpdate = true;
                     continue;
-                }
-                const hairMapFile = String(material.userData?.MMD?.mapFileName || material.map?.name || '').replace(/\\/g, '/');
-                const taffyHair = /^f头发(?:[23])?$/u.test(material.name || '') && /(?:^|\/)taffy_hair_color\.png$/i.test(hairMapFile)
-                    && material.opacity >= .999;
-                if (taffyHair) {
-                    // This atlas's soft alpha made solid bangs see-through.
-                    // Cut out strand gaps, then draw surviving hair opaque so
-                    // both the face and the desktop stay behind its surface.
-                    material.transparent = false;
-                    material.alphaTest = Math.max(material.alphaTest || 0, .2);
-                    material.depthWrite = true;
                 }
                 const racingAlphaClothing = racingOutfitProfile && /^cf_m_shorts_06\b/i.test(material.name || '');
                 if (racingAlphaClothing) {
@@ -1618,8 +1673,7 @@ export default class ModelViewer {
         // Only restrained brow expressions; mouth vowels remain under lip-sync.
         this.emotion = /\b(sorry|sad|hurt|worried|difficult|upset)\b/i.test(text) ? 'concerned'
             : /\b(wow|yay|awesome|congratulations|excited)\b/i.test(text) ? 'happy' : 'friendly';
-        this.gestureStyle = /\?|क्यों|कैसे|\b(why|how|what|kyun|kaise)\b/i.test(text) ? 'question'
-            : /\b(first|because|means|example|पहले|मतलब|pehle|matlab)\b/i.test(text) ? 'explain' : 'casual';
+        this.gestureStyle = classifySpeechGesture(text);
     }
 
     _avoidArmClipping() {
@@ -1665,7 +1719,7 @@ export default class ModelViewer {
         this.thinkBlend += ((this.activity === 'thinking' ? 1 : 0) - this.thinkBlend) * alpha;
         // A gesture has preparation, a stroke and a settling phase. Alternate
         // hands with occasional quiet beats instead of continuously waving both.
-        this.conversationMotion ||= { time: 0, beat: 0, duration: 2.8, energy: 0 };
+        this.conversationMotion ||= { time: 0, beat: 0, duration: 1.8, energy: 0 };
         const motion = this.conversationMotion;
         const dt = Math.max(0, Math.min(delta, 0.1));
         const talkingNow = this.activity === 'talking';
@@ -1689,10 +1743,9 @@ export default class ModelViewer {
         if (motion.time >= motion.duration) {
             motion.time -= motion.duration;
             motion.beat++;
-            motion.duration = 2.5 + ((motion.beat * 7) % 5) * .24;
+            motion.duration = 1.55 + ((motion.beat * 7) % 5) * .20;
         }
         const phase = motion.time / motion.duration;
-        const envelope = Math.pow(Math.sin(Math.PI * phase), 2);
         const speech = this.talkBlend * (0.4 + motion.energy * 0.6);
         // Unboosted, wind-free idle should settle instead of continuously
         // exciting hair and clothing with scripted torso/head oscillations.
@@ -1707,14 +1760,24 @@ export default class ModelViewer {
         // settle-then-freeze behavior; webcam VTuber tracking stays untouched.
         const companionSway = this.vtuberTrackingMode ? 0
             : Math.sin(elapsed * .43) * .034 + Math.sin(elapsed * .23 + 1.4) * .008;
-        const motif = motion.beat % 5;
-        const leftGesture = speech * envelope * ([1, .12, .7, 0, .15][motif]);
-        const rightGesture = speech * envelope * ([.12, 1, .5, 0, .8][motif]);
-        const emphasis = envelope * speech * (this.emotion === 'happy' ? 1.15 : this.emotion === 'concerned' ? .65 : 1);
-        const handTurn = this.gestureStyle === 'question' ? .23 : this.gestureStyle === 'explain' ? .12 : .08;
+        const motif = motion.beat % 7;
+        const phrase=speechGestureWeights(this.gestureStyle,phase,motif);
+        const leftGesture = speech * phrase.left;
+        const rightGesture = speech * phrase.right;
+        const emphasis = phrase.stroke * speech * (this.emotion === 'happy' ? 1.15 : this.emotion === 'concerned' ? .65 : 1);
+        const handTurn = this.gestureStyle === 'question' ? .23 : this.gestureStyle === 'explain' ? .15
+            : this.gestureStyle === 'celebrate' ? .18 : this.gestureStyle === 'reassure' ? .10 : .08;
         const rotate = (key, x, y, z) => {
             const entry = this.animationBones[key];
             if (!entry) return;
+            // Use the arm direction calculated from this model's actual bind
+            // geometry. A fixed 0.72-radian offset leaves T-rest rigs in A-pose.
+            if(entry.trackingRest && /^(left|right)Arm$/.test(key)) {
+                const legacy=this.vrm?(key==='leftArm'?1.35:-1.35):(key==='leftArm'?-.72:.72);
+                x+=entry.trackingRest.x-entry.rest.x;
+                y+=entry.trackingRest.y-entry.rest.y;
+                z+=entry.trackingRest.z-entry.rest.z-legacy;
+            }
             entry.motion ||= {x, y, z};
             const follow = 1 - Math.exp(-dt / (key.includes('Wrist') ? .19 : .13));
             for (const [axis, value] of Object.entries({x, y, z})) entry.motion[axis] += (value - entry.motion[axis]) * follow;
@@ -1728,12 +1791,12 @@ export default class ModelViewer {
             this.thinkBlend * 0.085 + gesture * 0.028 - companionSway * .18 - settleLean * .4);
         // Lower the arms out of the model's bind A-pose and soften the elbows.
         // Talking alternates inviting, open-hand gestures from that resting pose.
-        rotate('leftArm', leftGesture * .18, -.10 - leftGesture * .18,
-            (this.vrm ? 1.35 - leftGesture * .62 : -.72 + leftGesture * .62) + breathe * .008);
-        rotate('rightArm', rightGesture * .18, .10 + rightGesture * .18,
-            (this.vrm ? -1.35 + rightGesture * .62 : .72 - rightGesture * .62) - breathe * .008);
-        rotate('leftElbow', leftGesture * .04, -.18 - leftGesture * .85, -.045);
-        rotate('rightElbow', rightGesture * .04, .18 + rightGesture * .85, .045);
+        rotate('leftArm', leftGesture * .28, -.10 - leftGesture * .24,
+            (this.vrm ? 1.35 - leftGesture * .80 : -.72 + leftGesture * .80) + breathe * .008);
+        rotate('rightArm', rightGesture * .28, .10 + rightGesture * .24,
+            (this.vrm ? -1.35 + rightGesture * .80 : .72 - rightGesture * .80) - breathe * .008);
+        rotate('leftElbow', leftGesture * .04, -.18 - leftGesture * 1.05, -.045);
+        rotate('rightElbow', rightGesture * .04, .18 + rightGesture * 1.05, .045);
         rotate('leftWrist', leftGesture * .08, leftGesture * handTurn, -.045 + leftGesture * .16);
         rotate('rightWrist', rightGesture * .08, -rightGesture * handTurn, .045 - rightGesture * .16);
         for (const finger of this.conversationFingers || []) {
@@ -2012,16 +2075,18 @@ export default class ModelViewer {
             center.y + Math.sin(pitch)*25, center.z + Math.cos(yaw)*Math.cos(pitch)*25);
     }
 
-    setGlossBoost(value, root=this.model) {
+    setGlossBoost(value, root=this.model, selectedMaterial=null) {
         const boost = Math.max(0, Math.min(1, Number(value) || 0));
+        this.glossBoostValue=boost;
         this.glossOriginals ||= new WeakMap();
         root?.traverse(child => {
             for (const mat of (Array.isArray(child.material) ? child.material : [child.material])) {
                 if (!mat) continue;
+                const materialBoost=selectedMaterial&&mat!==selectedMaterial?0:boost;
                 if(mat.isMToonMaterial&&!mat.isOutline){
                     mat.userData ||= {};
                     if(!mat.userData.sakuraGloss){
-                        const uniform={value:boost},compile=mat.onBeforeCompile,key=mat.customProgramCacheKey;
+                        const uniform={value:materialBoost},compile=mat.onBeforeCompile,key=mat.customProgramCacheKey;
                         mat.userData.sakuraGloss=uniform;
                         mat.onBeforeCompile=function(shader,renderer){
                             compile?.call(this,shader,renderer);
@@ -2035,16 +2100,28 @@ export default class ModelViewer {
                         mat.customProgramCacheKey=function(){return key.call(this)+'|sakura-gloss-v1';};
                         mat.needsUpdate=true;
                     }
-                    mat.userData.sakuraGloss.value=boost;
+                    mat.userData.sakuraGloss.value=materialBoost;
                 }
                 if (!this.glossOriginals.has(mat)) this.glossOriginals.set(mat, {
                     shininess: mat.shininess, specular: mat.specular?.clone(), roughness: mat.roughness });
                 const original = this.glossOriginals.get(mat);
-                if (typeof original.shininess === 'number') mat.shininess = THREE.MathUtils.lerp(original.shininess, Math.max(original.shininess, 120), boost);
-                if (original.specular) mat.specular.copy(original.specular).lerp(new THREE.Color(0xaaaaaa), boost);
-                if (typeof original.roughness === 'number') mat.roughness = THREE.MathUtils.lerp(original.roughness, 0.08, boost);
+                if (typeof original.shininess === 'number') mat.shininess = THREE.MathUtils.lerp(original.shininess, Math.max(original.shininess, 120), materialBoost);
+                if (original.specular) mat.specular.copy(original.specular).lerp(new THREE.Color(0xaaaaaa), materialBoost);
+                if (typeof original.roughness === 'number') mat.roughness = THREE.MathUtils.lerp(original.roughness, 0.08, materialBoost);
             }
         });
+    }
+
+    setCharacterLightingTarget(material=null) {
+        this.characterLightingTarget=material||null;
+        this._bloomTargetObjects=[];
+        this._bloomLights=[];
+        if(material)this.scene?.traverse(object=>{
+            if(object.isLight)this._bloomLights.push(object);
+            else if(object.isMesh&&(Array.isArray(object.material)?object.material:[object.material]).includes(material))this._bloomTargetObjects.push(object);
+        });
+        this.setGlossBoost(this.glossBoostValue??Number(localStorage.getItem('sakura_gloss_boost')||0),this.vrm?.scene||this.model,material);
+        if(this.controls)this._renderFrame();
     }
 
     setCharacterGlow(value) {
@@ -2087,6 +2164,7 @@ export default class ModelViewer {
 
     animate() {
         requestAnimationFrame(this.animate);
+        if(window.sakuraNativeHidden){this.clock?.getDelta();return;}
         try {
             this._renderFrame();
         } catch (error) {
@@ -2112,10 +2190,8 @@ export default class ModelViewer {
         if (this.companionSurface) {
             // Always present a complete default framebuffer after native size
             // changes or offscreen captures, never reuse damaged alpha tiles.
-            if (this._heldFrame) {
-                this._heldFrame.remove(); this._heldFrame = null;
-                this.container.classList?.remove('model-frame-held');
-            }
+            // Only _releasePresentedFrame may uncover a held frame. Removing
+            // it here exposes the cleared drawing buffer before the new draw.
             const size = this.renderer.getSize(this._presentSize ||= new THREE.Vector2());
             this.renderer.setRenderTarget(null);
             this.renderer.setViewport(0, 0, size.x, size.y);
@@ -2132,7 +2208,11 @@ export default class ModelViewer {
         // Keep the last image while the old GPU resources are released and
         // the replacement textures/shaders load. No empty scene flashes.
         if (this._displayLoading) { this.clock.getDelta(); return; }
-        const delta = this.clock.getDelta();
+        // CPU speech preparation/model uploads can stall a frame. Advancing
+        // VRM spring bones by that entire pause can fling vertices for one
+        // frame. Bound simulation steps consistently for all model formats.
+        const rawDelta = this.clock.getDelta();
+        const delta = Number.isFinite(rawDelta) ? Math.min(.05, Math.max(0, rawDelta)) : 0;
         const elapsed = this.clock.getElapsedTime();
         if(this.live2d){this.reactionExpressions?.update(delta);this.autoExpressions?.update(delta);this.live2d.render(delta);return;}
         this._prepareCompanionSurface();
@@ -2203,6 +2283,7 @@ export default class ModelViewer {
         } else if (!this.areAiExpressionsAutomatic?.() && this.manualExpression)
             this.setMorph(this.manualExpression.name, this.manualExpression.weight);
         // Physics runs after the gesture poses are written so hair, clothing
+        applyVisibility(this);
         // and body chains inherit their motion as inertia this frame.
         this.physics.updateSpeechPhysics(this.userTracking ? (this.avatarRetarget?.weights?.A || 0)
             : this.activity === 'talking' ? this.speechLevel : 0, delta);
@@ -2216,7 +2297,14 @@ export default class ModelViewer {
         if (this.characterGlow > 0 && this.bloomPass) {
             this.renderer.setRenderTarget(this.bloomBase);
             this.renderer.clear();
-            this.renderer.render(this.scene, this.camera);
+            if(this.characterLightingTarget&&this._bloomTargetObjects?.length){
+                const bloomLayer=31,cameraMask=this.camera.layers.mask,background=this.scene.background;
+                const changed=[];
+                for(const object of [...this._bloomTargetObjects,...(this._bloomLights||[])]){changed.push([object,object.layers.mask]);object.layers.enable(bloomLayer);}
+                this.camera.layers.set(bloomLayer);this._blackBloomBackground||=new THREE.Color(0x000000);this.scene.background=this._blackBloomBackground;
+                try{this.renderer.render(this.scene,this.camera);}
+                finally{this.camera.layers.mask=cameraMask;this.scene.background=background;for(const [object,mask]of changed)object.layers.mask=mask;}
+            }else this.renderer.render(this.scene, this.camera);
             this.bloomCopy.material.uniforms.image.value = this.bloomBase.texture;
             this.renderer.setRenderTarget(this.bloomWork);
             this.bloomCopy.render(this.renderer);

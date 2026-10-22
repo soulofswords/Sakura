@@ -17,6 +17,9 @@ const active=new Map(),live={setExpression:(n,w)=>active.set(n,w),removeExpressi
 const c=new context.Controller(v);c.begin('Great!');c.update(.1);assert.ok(active.get('Happy')>0);c.stop();for(let i=0;i<100;i++)c.update(.1);assert.equal(active.size,0,'Live2D reaction removed after fade');
 c.begin('Great!');c.update(.1);v.manualExpressions.set('Happy',1);active.set('Happy',1);c.clear();assert.equal(active.get('Happy'),1,'Manual expression remains owned by user');
 console.log('PASS: model-specific mood choice, unsafe morph exclusion, smooth speech/fade, both AI providers, VTuber guard, stale model cleanup and Live2D manual ownership');
+const sparkling={model:{},getMorphNames:()=>['Happy','Sparkle eyes'],setMorph(){}};
+const spark=new context.Controller(sparkling);assert.ok(spark.begin('Let us look at the role.','sparkle'));assert.equal(sparkling.reactionExpressionInfo.name,'Sparkle eyes');
+spark.clear();sparkling.getMorphNames=()=>['Happy'];assert.ok(spark.begin('Let us look at the role.','sparkle'));assert.equal(sparkling.reactionExpressionInfo.name,'Happy','Use a happy expression when sparkle is not authored');
 let automatic=false,cleared=0;
 const ai={model:{},getMorphNames:()=>['Happy'],setMorph(){},areAiExpressionsAutomatic:()=>automatic,clearManualExpression(){cleared++;}};
 const controlled=new context.Controller(ai);

@@ -38,7 +38,7 @@ def main(edition=None):
                 (destination/'static/js/app.js').write_text(source,encoding='utf-8')
             # Only seed user settings once. Refreshes must preserve edits made
             # in either separate app since its first launch.
-            for name in ['settings.json','.gemini-key.bin','conversation-memory.json']:
+            for name in ['settings.json','.gemini-key.bin']:
                 if edition=='vtuber' and name!='settings.json':continue
                 original=BASE/name;target=destination/name
                 if original.is_file() and not target.exists():shutil.copy2(original,target)
@@ -62,6 +62,7 @@ def main(edition=None):
             # an edition-specific branded interpreter alongside that runtime.
             (stage/'Launcher.cs').write_text(launcher_source,encoding='utf-8')
             builder.CS_DIR=stage
+            builder.APP_ICON=BASE/'launcher'/('vtuber.ico' if edition=='vtuber' else 'companion.ico')
             built=stage/launcher;builder.compile_cs(built,['Launcher.cs','StartupDialog.cs','LocalModelDialog.cs'],['System.Web.Extensions'])
             try:shutil.copy2(built,ROOT/launcher)
             except PermissionError:

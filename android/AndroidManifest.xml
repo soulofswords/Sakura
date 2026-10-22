@@ -1,19 +1,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.sakura.mobile">
  <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+ <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+ <uses-feature android:name="android.hardware.location" android:required="false"/>
+ <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+ <uses-feature android:name="android.hardware.location.network" android:required="false"/>
  <uses-permission android:name="android.permission.CAMERA"/>
+ <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+ <uses-permission android:name="android.permission.WAKE_LOCK"/>
+ <uses-feature android:name="android.hardware.microphone" android:required="false"/>
  <uses-permission android:name="android.permission.CALL_PHONE"/>
  <uses-permission android:name="android.permission.READ_CONTACTS"/>
  <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
  <uses-feature android:name="android.hardware.telephony" android:required="false"/>
  <uses-permission android:name="com.android.alarm.permission.SET_ALARM"/>
  <queries>
+  <intent><action android:name="android.intent.action.INSERT"/><data android:mimeType="vnd.android.cursor.dir/event"/></intent>
+  <intent><action android:name="android.speech.RecognitionService"/></intent>
   <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
   <intent><action android:name="android.intent.action.SET_TIMER"/></intent>
   <intent><action android:name="android.intent.action.SET_ALARM"/></intent>
  </queries>
  <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35"/>
- <application android:label="Sakura Mobile" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:icon="@drawable/icon">
+ <application android:label="Sakura Mobile" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:icon="@drawable/sakura_flower" android:roundIcon="@drawable/sakura_flower">
+  <service android:name=".WakeService" android:exported="false" android:foregroundServiceType="microphone"/>
   <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>

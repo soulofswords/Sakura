@@ -17,7 +17,7 @@ class MicrophoneLanguageEndpointTests(unittest.IsolatedAsyncioTestCase):
         recording=io.BytesIO();sf.write(recording,np.ones(48000,dtype=np.float32)*.02,48000,format='WAV')
         model=Mock();model.transcribe.return_value='नमस्ते'
         with tempfile.TemporaryDirectory() as folder:
-            for voice,language in [('kokoro_hf_alpha_hindi','hi'),('kokoro_hf_beta_hinglish','hi'),('kokoro_af_heart',None)]:
+            for voice,language in [('kokoro_hf_alpha_hindi','hi'),('kokoro_hf_beta_hinglish','hi'),('kokoro_af_heart','en')]:
                 upload=UploadFile(file=io.BytesIO(recording.getvalue()),filename='test.wav',headers=Headers({'content-type':'audio/wav'}))
                 with patch.object(server,'AUDIO_DIR',Path(folder)),patch.object(server,'stt',model),patch.object(server,'get_settings',return_value={'selected_voice':voice}):
                     result=await server.speech_to_text(upload)
@@ -72,7 +72,8 @@ class AssistantUpdates(unittest.TestCase):
         self.assertEqual(stt._transcribe(np.ones(16000,dtype=np.float32)*.02),'')
         stt.model.transcribe.assert_called_once()
         self.assertTrue(stt.model.transcribe.call_args.kwargs['vad_filter'])
-        self.assertNotIn('initial_prompt',stt.model.transcribe.call_args.kwargs)
+        self.assertIn('Delhi',stt.model.transcribe.call_args.kwargs['initial_prompt'])
+        self.assertFalse(stt.model.transcribe.call_args.kwargs['condition_on_previous_text'])
 
     def test_confident_speech_passes(self):
         stt=SpeechToText.__new__(SpeechToText);stt.model=Mock();stt.vad_available=True

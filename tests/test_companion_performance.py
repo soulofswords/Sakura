@@ -27,7 +27,7 @@ class PerformanceTests(unittest.IsolatedAsyncioTestCase):
                 model.remember_exchange.assert_not_called()
             result=await app.reply_vtuber({'author':'viewer','text':'please dance disco','avatar_can_dance':False})
             self.assertIsNone(result['avatar_motion'],'Live2D and user tracking must not be overridden')
-        with patch.object(app,'llm',model),patch.object(app,'get_settings',return_value={}),patch.object(app.app.state,'tracking_only',False,create=True):
+        with patch.object(app,'llm',model),patch.object(app,'get_settings',return_value={'response_restriction_level':'off'}),patch.object(app.app.state,'tracking_only',False,create=True):
             result=await app.chat({'text':'please dance twist','ai_vtuber':True,'avatar_can_dance':True,'defer_audio':True})
             self.assertEqual(result['avatar_motion'],'twist')
 
@@ -37,7 +37,7 @@ class PerformanceTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             llm=LLM(Path(folder)/'memory.json');llm.user_address='maam'
             with patch.object(llm,'_request_raw',return_value='*winks* Hello, Master.'):
-                self.assertEqual(llm.viewer_reply('Viewer','hello'),'Hello.')
+                self.assertEqual(llm.viewer_reply('Viewer','tell me a joke'),'Hello.')
 
     async def test_titles_greetings_and_saved_validation(self):
         self.assertEqual(greeting('sir',8),'Good morning, Sir.')

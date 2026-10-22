@@ -8,7 +8,7 @@ window.sakuraNativeReply=(id,result)=>{
 export function nativeJob(method,...args){
     return new Promise((resolve,reject)=>{
         const id='phone-'+Date.now()+'-'+(++sequence);
-        const timer=setTimeout(()=>{pending.delete(id);reject(Error('Request timed out. Check your connection and try again.'));},160000);
+        const timer=setTimeout(()=>{pending.delete(id);reject(Error('Request timed out. Check your connection and try again.'));},method==='installWakePack'?1800000:160000);
         pending.set(id,{resolve,reject,timer});
         try{window.Sakura[method](id,...args);}catch(error){clearTimeout(timer);pending.delete(id);reject(error);}
     });

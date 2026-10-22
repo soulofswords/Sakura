@@ -40,7 +40,7 @@ DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'k
 def compile_cs(output, files, references=(), resource=None, bootstrap=None):
     args = [str(CSC), '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
             '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
-            f'/win32icon:{BASE / "launcher/companion.ico"}', f'/out:{output}']
+            f'/win32icon:{globals().get("APP_ICON", BASE / "launcher/companion.ico")}', f'/out:{output}']
     args += [f'/reference:{ref}.dll' for ref in references]
     if resource: args += [f'/resource:{resource},SakuraPayload']
     if bootstrap: args += [f'/resource:{bootstrap},SakuraBootstrap']
@@ -58,13 +58,14 @@ def app_files():
     for file in BASE.glob('*.py'):
         yield file, 'Sakura/' + file.name
     for name in ('requirements.txt','requirements-macos.txt','run-macos.command',
-                 'setup-macos.command','setup-rvc-macos.command','requirements-rvc.txt'):
+                 'setup-macos.command','setup-rvc-macos.command','requirements-rvc.txt',
+                 'requirements-agent.txt'):
         yield BASE / name, 'Sakura/' + name
     yield BASE/'personality/sakura.txt', 'Sakura/personality/sakura.txt'
-    for name in ('companion.ico','model-upload.ico'):
+    for name in ('companion.ico','companion-vtuber.ico','vtuber.ico','model-upload.ico'):
         yield BASE/'launcher'/name,'Sakura/launcher/'+name
     yield BASE/'static/index.html','Sakura/static/index.html'
-    for folder in ('js','css','assets','vendor'):
+    for folder in ('js','css','assets','vendor','audio'):
         for file in (BASE/'static'/folder).rglob('*'):
             if file.is_file() and '__pycache__' not in file.parts:
                 yield file, 'Sakura/' + file.relative_to(BASE).as_posix()
@@ -201,7 +202,7 @@ def macos():
     import pycdlib
     package=BUILD/'mac'/f'{MAC_NAME}.app'/'Contents'
     resources=package/'Resources';(package/'MacOS').mkdir(parents=True,exist_ok=True);resources.mkdir(parents=True,exist_ok=True)
-    Image.open(BASE/'static/assets/desktop-companion.png').convert('RGBA').save(resources/'companion.icns',format='ICNS')
+    Image.open(globals().get('APP_PNG',BASE/'static/assets/desktop-companion.png')).convert('RGBA').save(resources/'companion.icns',format='ICNS')
     with zipfile.ZipFile(resources/'source.zip','w',compression=zipfile.ZIP_DEFLATED) as output:
         for path,name in app_files():output.write(path,name)
         output.write(resources/'companion.icns','Sakura/launcher/companion.icns')
