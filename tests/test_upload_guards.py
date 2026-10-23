@@ -97,6 +97,31 @@ class InstallerOriginTests(unittest.TestCase):
         installer.start.assert_not_called()
 
 
+class ModelManagerOriginTests(unittest.TestCase):
+    """Uninstalling weights is destructive, so a visited page must not trigger it."""
+
+    def posted(self, manager, origin=None):
+        headers = {}
+        if origin:
+            headers.update({'origin': origin, 'sec-fetch-site': 'cross-site'})
+        payload = {'model': 'gemma3:4b', 'confirm': 'gemma3:4b'}
+        with patch('local_model_manager.manager', manager):
+            return TestClient(app.app).post('/api/ollama/manager/delete', json=payload, headers=headers)
+
+    def test_a_cross_site_page_cannot_uninstall_a_model(self):
+        manager = Mock()
+        response = self.posted(manager, 'http://evil.example')
+        self.assertEqual(response.status_code, 403)
+        manager.remove.assert_not_called()
+
+    def test_the_local_panel_still_reaches_the_real_uninstall_check(self):
+        manager = Mock()
+        manager.remove.return_value = {'ok': True, 'message': 'Uninstalled gemma3:4b. Other models were kept.'}
+        response = self.posted(manager)
+        self.assertEqual(response.status_code, 200)
+        manager.remove.assert_called_once()
+
+
 class SettingsWriteTests(unittest.TestCase):
     def test_an_interrupted_write_keeps_the_previous_settings(self):
         with tempfile.TemporaryDirectory() as name:

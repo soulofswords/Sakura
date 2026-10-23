@@ -14,6 +14,10 @@ from persona_grounding import GROUNDING_RULES, unsupported_persona, invalid_pers
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL, ASSISTANT_NAME, PERSONALITY_DIR, BASE_DIR, OLLAMA_VISION_MODEL
 
 
+class ModelUnavailable(ValueError):
+    """The selected model cannot answer; its text is already written for the user."""
+
+
 class LLM:
     def __init__(self, memory_path=None, *, persist_memory=None):
         self.model = OLLAMA_MODEL
@@ -224,10 +228,15 @@ class LLM:
         if provider != 'ollama' or getattr(self, 'tracking_only', False):
             return
         try:
-            requests.post(f'{self.base_url}/api/generate',
+            response = requests.post(f'{self.base_url}/api/generate',
                           json={'model': self.model, 'stream': False, 'keep_alive': '15m',
                                 'options': {'num_ctx': self.context_length}},
-                          timeout=(3, 60)).raise_for_status()
+                          timeout=(3, 60))
+            if response.status_code == 404:
+                # Preloading still has to fail quietly, but not silently: a
+                # deleted model otherwise first appears as a reply-time crash.
+                print(f"  The selected local model '{self.model}' is not installed. Choose one in Settings > AI.", flush=True)
+            response.raise_for_status()
         except requests.RequestException:
             pass
 
@@ -658,6 +667,9 @@ class LLM:
                 except (ValueError, AttributeError): detail = ''
                 raise ValueError('The local model rejected the message (HTTP 400). '+
                                  (detail or 'Check the model supports the attached image and selected context size.'))
+            if response.status_code == 404:
+                raise ModelUnavailable(f"'{request_payload['model']}' is not installed on this computer. "
+                                       'Open Settings > AI and choose a downloaded model, or download that one.')
             response.raise_for_status()
             result = response.json()
             reply = result["message"]["content"]
@@ -1136,6 +1148,9 @@ class LLM:
                         else:
                             print('  Reply quality validation failed; no speech generated.',flush=True)
                             return ''
+            except ModelUnavailable as exc:
+                # Already a complete instruction for the user, not a crash.
+                return str(exc)
             except requests.ConnectionError:
                 return f'I cannot reach {self.provider}. Check your internet connection.' if self.provider!='ollama' else "Hmm, I cannot reach Ollama. Make sure it is running! (ollama serve)"
             except Exception as exc:

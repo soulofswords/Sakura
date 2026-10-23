@@ -135,6 +135,22 @@ class CalendarApprovalTests(unittest.TestCase):
             self.runtime.decide(proposal['id'], True)
             create.assert_called_once()
 
+    def test_a_different_google_account_invalidates_a_pending_calendar_write(self):
+        """The OAuth client id is identical for two accounts, so it cannot guard a write."""
+        accounts = iter([{'refresh_token': 'account-one', 'scopes': ['calendar']},
+                         {'refresh_token': 'account-two', 'scopes': ['calendar']}])
+        with patch('agent_calendar.google_calendar.status', return_value={'connected': True}), \
+             patch('agent_calendar.google_calendar.config_fingerprint', return_value='same-client-id'), \
+             patch('agent_google.secret_get', side_effect=lambda name: next(accounts)), \
+             patch('agent_calendar.google_calendar.create_event') as create:
+            proposal = self.runtime.propose(self.run['id'], 'calendar.events.create', {
+                'summary': 'Design review', 'start': '2026-10-23T15:00:00+05:30',
+                'end': '2026-10-23T16:00:00+05:30'})['steps'][-1]
+            result = self.runtime.decide(proposal['id'], True)
+        create.assert_not_called()
+        self.assertEqual(result['action']['status'], 'failed')
+        self.assertIn('connection changed', result['action']['result']['error'])
+
     def test_changed_calendar_connection_invalidates_pending_approval(self):
         with patch('agent_calendar.google_calendar.status', return_value={'connected': True}), \
              patch('agent_calendar.google_calendar.config_fingerprint', side_effect=['config-a', 'config-b']), \

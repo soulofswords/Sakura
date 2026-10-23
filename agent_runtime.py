@@ -264,9 +264,11 @@ class AgentRuntime:
             action['bindings']['account']=account['sub'];action['preview']['account']=account.get('name',account['sub'])
         if tool.startswith('calendar.events.'):
             from agent_calendar import google_calendar
+            from agent_google import binding
             if not google_calendar.status().get('connected'):
                 raise ValueError('Connect Google Calendar in the Agent Connections panel first.')
-            action['bindings']['calendar_config']=google_calendar.config_fingerprint()
+            # A client id alone cannot tell two Google accounts apart.
+            action['bindings']['calendar_account']=binding()
             action['preview'].update(calendar='Google Calendar',approval='This action will run only if you approve it.')
             if tool=='calendar.events.list':
                 action['preview'].update(operation='Read calendar events',calendar_id=args.get('calendar_id','primary'),
@@ -396,8 +398,9 @@ class AgentRuntime:
             return {'ok':True,**linkedin.publish(args['text'],args['visibility'])}
         if tool.startswith('calendar.events.'):
             from agent_calendar import google_calendar
-            if google_calendar.config_fingerprint()!=bindings.get('calendar_config'):
-                raise ValueError('Google Calendar connection changed after review. Propose the action again.')
+            from agent_google import binding
+            if binding()!=bindings.get('calendar_account'):
+                raise ValueError('Google Calendar connection changed after review (a different Google account is connected). Propose the action again.')
             if tool=='calendar.events.list':return google_calendar.list_events(**args)
             if tool=='calendar.events.create':return google_calendar.create_event(**args)
             if tool=='calendar.events.update':return google_calendar.update_event(**args)

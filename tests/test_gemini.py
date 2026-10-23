@@ -7,6 +7,10 @@ import app
 import credentials
 from llm import LLM
 
+# Greetings are answered locally by the evidence layer, so a provider-error test
+# must ask something that actually reaches the API.
+ACTUAL_QUESTION = 'Describe the difference between a retry and a rollback.'
+
 class GeminiTests(unittest.TestCase):
     def test_slow_api_fails_once_without_saving_fake_reply(self):
         import requests
@@ -14,7 +18,7 @@ class GeminiTests(unittest.TestCase):
             model = LLM(Path(folder)/'memory.json')
             model.configure_provider('gemini', api_key='synthetic-key')
             with patch('llm.requests.post', side_effect=requests.Timeout) as post:
-                reply = model.chat('hello')
+                reply = model.chat(ACTUAL_QUESTION)
                 self.assertIn('took too long', reply)
                 self.assertNotIn('synthetic-key', reply)
                 self.assertEqual(model.history, [])
@@ -73,7 +77,7 @@ class GeminiTests(unittest.TestCase):
             llm=LLM(Path(folder)/'memory.json');llm.configure_provider('gemini',api_key='synthetic-key')
             response=Mock(ok=False,status_code=403)
             with patch('llm.requests.post',return_value=response):
-                reply=llm.chat('hello')
+                reply=llm.chat(ACTUAL_QUESTION)
                 self.assertIn('403',reply)
                 self.assertNotIn('synthetic-key',reply)
                 self.assertEqual(llm.history,[])
@@ -82,7 +86,7 @@ class GeminiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             llm=LLM(Path(folder)/'memory.json');llm.configure_provider('gemini')
             with patch('llm.requests.post') as post:
-                self.assertIn('API key is missing',llm.chat('hello'))
+                self.assertIn('API key is missing',llm.chat(ACTUAL_QUESTION))
                 post.assert_not_called()
 
     def test_connection_error_reports_reason_without_key(self):
@@ -101,9 +105,9 @@ class GeminiTests(unittest.TestCase):
             llm.configure_provider('gemini', api_key='synthetic-key')
             busy = Mock(ok=False, status_code=503, headers={})
             success = Mock(ok=True)
-            success.json.return_value = {'candidates':[{'content':{'parts':[{'text':'Hello'}]}}]}
+            success.json.return_value = {'candidates':[{'content':{'parts':[{'text':'Recovered reply'}]}}]}
             with patch('llm.requests.post', side_effect=[busy, success]) as post, patch('llm.time.sleep') as sleep:
-                self.assertEqual(llm.chat('hello'), 'Hello')
+                self.assertEqual(llm.chat(ACTUAL_QUESTION), 'Recovered reply')
                 self.assertEqual(post.call_count, 2)
                 self.assertEqual([call.args[0] for call in sleep.call_args_list], [1])
                 self.assertEqual(len(llm.history), 2)
@@ -113,7 +117,7 @@ class GeminiTests(unittest.TestCase):
             llm = LLM(Path(folder)/'memory.json')
             llm.configure_provider('gemini', api_key='synthetic-key')
             with patch('llm.requests.post', return_value=Mock(ok=False, status_code=503, headers={'Retry-After':'100'})) as post, patch('llm.time.sleep') as sleep:
-                reply = llm.chat('hello')
+                reply = llm.chat(ACTUAL_QUESTION)
                 self.assertIn('temporarily busy', reply)
                 self.assertNotIn('Check your key', reply)
                 self.assertEqual(post.call_count, 2)
@@ -125,7 +129,7 @@ class GeminiTests(unittest.TestCase):
             llm = LLM(Path(folder)/'memory.json')
             llm.configure_provider('gemini', api_key='synthetic-key')
             with patch('llm.requests.post', return_value=Mock(ok=False, status_code=403)) as post, patch('llm.time.sleep') as sleep:
-                self.assertIn('403', llm.chat('hello'))
+                self.assertIn('403', llm.chat(ACTUAL_QUESTION))
                 post.assert_called_once()
                 sleep.assert_not_called()
 

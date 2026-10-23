@@ -1743,8 +1743,10 @@ async def model_manager_status():
     return {'catalog':manager.catalog(),'job':manager.status()}
 
 @app.post('/api/ollama/manager/{operation}')
-async def manage_local_model(operation: str, payload: dict):
+async def manage_local_model(request: Request, operation: str, payload: dict):
     from local_model_manager import manager
+    if not _started_locally(request):
+        return JSONResponse({'error':'Model downloads and uninstalls can only be started from this computer.'},403)
     if EDITION=='vtuber' or getattr(app.state,'tracking_only',False):
         return JSONResponse({'error':'Manage language models in Companion AI mode.'},409)
     try:
