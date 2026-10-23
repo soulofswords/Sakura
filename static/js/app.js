@@ -1,6 +1,8 @@
 import { appendEvidence } from './response-evidence.js?v=medium103';
 import {installChatAttachments} from './chat-attachments.js?v=files105';
 import {installSystemTools} from './system-tools.js?v=metrics93';
+import {installLocalModelManager} from './local-model-manager.js?v=model-clean136';
+installLocalModelManager();
 installSystemTools();
 document.getElementById('open-agent-panel')?.addEventListener('click',async()=>{
     const status=document.getElementById('agent-panel-status');
@@ -15,14 +17,16 @@ installButtonFeedback();
 import {finishStartupPresentation} from './startup-presentation.js?v=startup106';
 import {installScreenAudio} from './screen-audio.js?v=media90';
 import {installSpoutControls} from './spout-output.js?v=miu-expression-manager6';
-import {installMobileLink} from './mobile-link.js?v=phone-touch73';
+import {installVirtualCamera} from './virtual-camera.js?v=1';
+import {installMobileLink} from './mobile-link.js?v=phone-resume134';
 import {installCameraPreview} from './camera-preview.js?v=1';
-import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes106';
+import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes107';
 import {installReminders} from './assistant-reminders.js?v=1';
 import {installExpressionEditor} from './expression-editor.js?v=irida101';
-import {installModelSettings} from './model-settings.js?v=irida102';
-import ModelViewer from './model-viewer.js?v=startup106';
-import AvatarTracking from './avatar-tracking.js?v=distance7';
+import {installModelSettings} from './model-settings.js?v=irida103';
+import {installVtuberCollab} from './vtuber-collab.js?v=collab3';
+import ModelViewer from './model-viewer.js?v=vrm-brows131';
+import AvatarTracking from './avatar-tracking.js?v=presence128';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
 import LipSync from './lip-sync.js?v=fbx89';
@@ -31,7 +35,7 @@ import EyeTracking from './eye-tracking.js?v=vtuber-eyes1';
 import ScreenShare from './screen-share.js?v=timeline63';
 import ScreenMemory from './screen-memory.js?v=timeline63';
 import {utilityRequest} from './utility-request.js?v=1';
-import {desktopWakeControls} from './desktop-wake-controls.js?v=1';
+import {desktopWakeControls} from './desktop-wake-controls.js?v=mic-gate115';
 import ContinuousMic from './continuous-mic.js?v=interrupt104';
 import {createSpeechInterrupt,isSpeechInterrupt} from './speech-interrupt.js?v=interrupt104';
 import { speakPhrases } from './speech-pipeline.js?v=latency94';
@@ -81,10 +85,15 @@ const speechInterrupt=createSpeechInterrupt({
 });
 window.addEventListener('pagehide',()=>{speechInterrupt.stop();clearTimeout(interruptFollowupTimer);});
 
-async function startDesktopListening() {
+async function startDesktopListening(explicit = false) {
     if (trackingOnly) return;
     if (vtuberEnabled || aiVtuberStarting) return;
     if(currentSettings.wake_word_enabled&&window.pywebview?.api?.set_wake_listener){await nativeWake.sync();return;}
+    if (!explicit && !currentSettings.wake_word_enabled) {
+        continuousMic.stop();
+        listeningStatus.textContent='Microphone off · click Listen or enable the wake phrase';
+        return;
+    }
     try { await continuousMic.start(selectedMicId); }
     catch (err) {
         continuousMic.stop();
@@ -106,6 +115,8 @@ let gameStartedScreen = false;
 let gameForeground = false;
 let gamePriorReactions = false;
 let lastGameSeen = 0;
+let gameCloudFallbackActive = false;
+let lastGameVramNotice = '';
 let lastReactionText = '';
 let lastGameWatch=0;
 let vtuberEnabled = false;
@@ -331,7 +342,7 @@ async function scanLocalModels() {
     } catch (error) { status.textContent = error.message; }
 }
 
-async function saveAiSettings(clearKey = false) {
+async function saveAiSettings(clearKey = false, clearBrave = false) {
     const modelButtons = ['qwen-2b-btn', 'qwen-4b-btn'].map(id => document.getElementById(id));
     if (modelButtons.some(button => button.disabled)) return;
     modelButtons.forEach(button => { button.disabled = true; });
@@ -340,6 +351,8 @@ async function saveAiSettings(clearKey = false) {
         const payload = { llm_provider: llmProvider.value,
             gemini_model: geminiModel.value.trim() || 'gemini-flash-latest',
             ollama_model: document.getElementById('ollama-model').value.trim(),
+            game_ollama_model: document.getElementById('game-ollama-model').value.trim(),
+            game_cloud_auto_enabled: document.getElementById('game-cloud-auto').checked,
             ollama_models_folder: document.getElementById('ollama-models-folder').value.trim(),
             ollama_context: Number(document.getElementById('ollama-context').value),
             gemini_fallback_enabled: !clearKey && document.getElementById('gemini-fallback').checked,
@@ -355,11 +368,15 @@ async function saveAiSettings(clearKey = false) {
             else payload.api_key = geminiApiKey.value.trim();
         }
         if (clearKey) {if(['ollama','gemini'].includes(llmProvider.value))payload.clear_gemini_key=true;else payload.clear_cloud_key=true;}
+        payload.web_search_enabled = document.getElementById('web-search-enabled').checked;
+        if (document.getElementById('brave-api-key').value.trim()) payload.brave_key = document.getElementById('brave-api-key').value.trim();
+        if (clearBrave) payload.clear_brave_key = true;
         const response = await fetch('/api/settings', { method: 'POST',
             headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data.error || 'Could not save AI settings.');
         geminiApiKey.value = '';
+        document.getElementById('brave-api-key').value = '';
         currentSettings = data.settings;
         applySettingsUI(currentSettings);
         flashMsg(aiSaveStatus, clearKey ? 'Saved key removed.' : 'AI settings saved.');
@@ -716,8 +733,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     // 2. Initialize Three.js viewer and lip sync safely
     try {
         viewer  = new ModelViewer('viewer');
+        installVtuberCollab({viewer, ModelViewer});
         viewer.areAiExpressionsAutomatic = () => reactionsEnabled && !trackingOnly && !viewer.vtuberTrackingMode;
         installSpoutControls(()=>viewer);
+        installVirtualCamera(()=>viewer);
         window.sakuraExpressionEditor = installExpressionEditor(()=>viewer, ()=>selectedPmxPath || lastGoodModelUrl || 'none');
         window.sakuraModelSettings = installModelSettings(()=>viewer, ()=>selectedPmxPath || lastGoodModelUrl || 'none', refreshPmxTextureSelector,()=>selectedMicId,
             key=>loadModelFromUrl('/models/'+key.split('/').map(encodeURIComponent).join('/')));
@@ -762,6 +781,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     installReminders(()=>!trackingOnly&&!vtuberEnabled,()=>selectedSpeakerId);
     const cameraToggle=document.getElementById('companion-camera-enabled');
     const companionCameraMode=document.getElementById('companion-camera-mode');
+    const companionFaceTrackingOptions=document.getElementById('companion-face-tracking-options');
+    const updateCompanionCameraOptions=()=>{companionFaceTrackingOptions.hidden=companionCameraMode.value!=='tracking';};
+    companionCameraMode.addEventListener('change',updateCompanionCameraOptions);
+    updateCompanionCameraOptions();
     const setCompanionCameraMode=async enabled=>{
         const status=document.getElementById('companion-camera-status');
         if(!enabled){
@@ -773,7 +796,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         const mode=companionCameraMode.value;
         status.textContent=mode==='tracking'?'Requesting camera permission for local face tracking…':'Requesting camera permission for object recognition…';
         try{
-            await companionCameraModes.start(mode,document.getElementById('settings-tracking-camera').value);
+            await companionCameraModes.start(mode,document.getElementById('settings-tracking-camera').value,
+                document.getElementById('tracking-backend').value,document.getElementById('face-tracking-source').value);
             cameraToggle.checked=true;
             status.textContent=mode==='tracking'?'Face tracking on · processed locally · avatar follows your head and hands':'Object recognition on · camera images are shared with your selected AI provider';
         }catch(error){companionCameraModes.stop();cameraToggle.checked=false;status.textContent=`Camera unavailable: ${error.message}. Select another camera above, close apps using it, or connect your Camo phone, then retry.`;}
@@ -983,7 +1007,7 @@ function setupEvents() {
         temporaryFollowupMic=false;
         if (nativeWake.enabled()){wakeWordToggle.checked=false;await saveAppSettings();}
         else if (continuousMic.enabled) continuousMic.stop();
-        else if(!wasTemporary)startDesktopListening();
+        else if(!wasTemporary)startDesktopListening(true);
     });
     setupTabs();
 
@@ -1081,6 +1105,7 @@ function setupEvents() {
         updateProviderFields();document.getElementById('cloud-model-status').textContent='Selected '+select.value+'. Test API saves this selection and checks generation access.';
     });
     document.getElementById('remove-gemini-key').addEventListener('click', () => saveAiSettings(true));
+    document.getElementById('remove-brave-key').addEventListener('click', () => saveAiSettings(false, true));
 
     // Chat
     sendBtn.addEventListener('click', handleSendMessage);
@@ -1430,6 +1455,8 @@ function applySettingsUI(s) {
     document.getElementById('transparency-hotkey').value=s.transparency_hotkey || '';
     updateTransparencyShortcut();
     llmProvider.value = s.llm_provider || 'ollama';
+    document.getElementById('game-ollama-model').value=s.game_ollama_model||'';
+    document.getElementById('game-cloud-auto').checked=s.game_cloud_auto_enabled!==false;
     document.getElementById('ollama-model').value = s.ollama_model || 'qwen3-vl:2b-instruct';
     document.getElementById('ollama-models-folder').value = s.ollama_models_folder || '';
     document.getElementById('ollama-context').value = s.ollama_context || 4096;
@@ -1442,6 +1469,11 @@ function applySettingsUI(s) {
     const keySaved=['ollama','gemini'].includes(s.llm_provider)?s.gemini_key_set:s.cloud_key_set;
     geminiKeyStatus.textContent = keySaved ? `A key is saved for ${s.llm_provider}. Leave blank to keep it.` : 'No key saved for this provider.';
     document.getElementById('remove-gemini-key').disabled = !keySaved;
+    document.getElementById('web-search-enabled').checked = s.web_search_enabled !== false;
+    document.getElementById('brave-key-status').textContent = s.brave_key_set
+        ? 'A Brave Search key is saved. Leave blank to keep it.'
+        : 'No Brave key saved; she falls back to free public sources.';
+    document.getElementById('remove-brave-key').disabled = !s.brave_key_set;
     updateProviderFields();
     if (screenShare.enabled) screenShare.onChange(true, false);
     if (!identityDirty) {
@@ -1519,7 +1551,7 @@ async function saveAppSettings() {
         currentSettings = data.settings;
         applySettingsUI(currentSettings);
         await nativeWake.sync();
-        flashMsg(saveStatusMsg, newWakeEnabled ? `Saved · Say "${newWakeWord}" before a command.` : 'Saved · Wake phrase is off; all speech is accepted.');
+        flashMsg(saveStatusMsg, newWakeEnabled ? `Saved · Say "${newWakeWord}" before a command.` : 'Saved · Wake phrase off; use Listen or the microphone button.');
     } catch (err) { flashMsg(saveStatusMsg, err.message, 8000); }
     finally {
         identitySaving = false;
@@ -2704,11 +2736,59 @@ async function handleSendMessage() {
     }
 }
 
+async function setGameLocalModel(active) {
+    if(currentSettings?.llm_provider!=='ollama')return;
+    const response=await fetch('/api/game-mode/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active})});
+    const data=await response.json();if(!response.ok)throw Error(data.error||'Could not switch game model.');
+    return data;
+}
+
+async function setGameCloudFallback(active, reason = '') {
+    if (active === gameCloudFallbackActive) return;
+    const response = await fetch('/api/game-mode/cloud-fallback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not change the Game Mode AI provider.');
+    gameCloudFallbackActive = !!data.active;
+    if (active && data.active) {
+        lastGameVramNotice = '';
+        listeningStatus.textContent = `High VRAM usage${reason ? ` (${reason})` : ''} · Game Mode switched to ${data.provider} cloud AI`;
+    } else if (active && data.reason) {
+        const notice = `High VRAM usage · ${data.reason} Staying on local AI.`;
+        if (lastGameVramNotice !== notice) listeningStatus.textContent = notice;
+        lastGameVramNotice = notice;
+    } else if (!active && data.provider === 'ollama') {
+        listeningStatus.textContent = 'VRAM pressure cleared · Game Mode returned to local AI';
+        lastGameVramNotice = '';
+    }
+}
+
+async function updateGameVramFallback(game) {
+    if (currentSettings?.llm_provider !== 'ollama' || currentSettings.game_cloud_auto_enabled===false) return;
+    const gpus = Array.isArray(game.gpus) ? game.gpus : [];
+    const measured = gpus.filter(gpu => Number.isFinite(gpu.vram_percent) && Number.isFinite(gpu.vram_total_bytes) && gpu.vram_total_bytes > 0);
+    if (!measured.length) return;
+    const gpu = measured.reduce((highest, item) => item.vram_percent > highest.vram_percent ? item : highest);
+    const freeBytes = Number.isFinite(gpu.vram_used_bytes) ? gpu.vram_total_bytes - gpu.vram_used_bytes : null;
+    const isHigh = gpu.vram_percent >= 90 || (freeBytes !== null && freeBytes < 1024 ** 3);
+    const recovered = gpu.vram_percent <= 82 && (freeBytes === null || freeBytes >= 1.5 * 1024 ** 3);
+    const reason = `${gpu.name || 'GPU'} at ${gpu.vram_percent}% VRAM`;
+    if (!gameCloudFallbackActive && isHigh) await setGameCloudFallback(true, reason);
+    else if (gameCloudFallbackActive && recovered) await setGameCloudFallback(false);
+}
+
 async function leaveGameMode() {
     const wasActive = gameActive;
     if(!wasActive)return;
     gameActive = false;
     gameReady = false;
+    if (gameCloudFallbackActive) {
+        try { await setGameCloudFallback(false); }
+        catch (error) { listeningStatus.textContent = `Game mode ended · ${error.message}`; }
+    }
+    try { await setGameLocalModel(false); } catch(error) { listeningStatus.textContent=error.message; }
     reactionsEnabled = gamePriorReactions;
     screenReactBtn.textContent = reactionsEnabled?'💬 Reactions on':'💬 Reactions off';
     screenReactBtn.setAttribute('aria-pressed',String(reactionsEnabled));
@@ -2736,7 +2816,12 @@ async function checkGameMode() {
             return;
         }
         lastGameSeen = Date.now();
+        if (gameActive && !chatBusy && !reactionBusy && !lipSync?.isPlaying) {
+            try { await updateGameVramFallback(game); }
+            catch (error) { listeningStatus.textContent = `Game Mode VRAM fallback: ${error.message}`; }
+        }
         if (!gameActive) {
+            await setGameLocalModel(true);
             gamePriorReactions=reactionsEnabled;
             gameResumeMic = continuousMic.enabled;
             gameActive = true;
@@ -2752,7 +2837,7 @@ async function checkGameMode() {
         reactionsEnabled = true;
         screenReactBtn.textContent = '💬 Reactions on';
         screenReactBtn.setAttribute('aria-pressed', 'true');
-        listeningStatus.textContent = `Game detected: ${game.name} · ${currentSettings.llm_provider==='ollama'?currentSettings.ollama_model:currentSettings.llm_provider} · live screen/audio + microphone`;
+        if (!gameCloudFallbackActive) listeningStatus.textContent = `Game detected: ${game.name} · ${currentSettings.llm_provider==='ollama'?currentSettings.ollama_model:currentSettings.llm_provider} · live screen/audio + microphone`;
     } catch (error) { listeningStatus.textContent = `Game mode: ${error.message}`; }
     finally { autoGameBusy = false; }
 }
@@ -2997,6 +3082,8 @@ function extractWakeCommand(raw, phrase) {
 async function sendAudioForSTT(blob, options = {}) {
     if (trackingOnly || vtuberEnabled || aiVtuberStarting) return;
     const continuous = options.continuous === true;
+    const captureGeneration = continuousMic.generation;
+    if (continuous && !continuousMic.enabled) return;
     showTypingIndicator();
     const formData = new FormData();
     formData.append('audio', blob, 'speech.webm');
@@ -3006,6 +3093,8 @@ async function sendAudioForSTT(blob, options = {}) {
         if (!res.ok) throw new Error(data.error || `Speech recognition failed (${res.status})`);
         removeTypingIndicator();
         if (vtuberEnabled || aiVtuberStarting) return;
+        // Discard STT that completed after the user stopped the recorder.
+        if (continuous && (!continuousMic.enabled || continuousMic.generation !== captureGeneration)) return;
         if (data.text?.trim()) {
             const raw = data.text.trim();
             if(isSpeechInterrupt(raw,currentSettings.wake_word||'hey sakura')&&(chatBusy||lipSync?.isPlaying)){
@@ -3063,7 +3152,10 @@ function addMessage(text, sender, evidence = null) {
     const msg = document.createElement('div');
     msg.className = `message ${sender}`;
     msg.textContent = text;
-    if (sender === 'sakura') appendEvidence(msg, evidence || {});
+    // Only backend replies carry provenance. Startup notices, model loading
+    // progress and UI errors are not factual AI answers and must not display
+    // a misleading "Unknown" verification badge.
+    if (sender === 'sakura' && evidence) appendEvidence(msg, evidence);
     messagesEl.appendChild(msg);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -3113,6 +3205,43 @@ function setupAvatarTracking() {
     const camera = document.getElementById('tracking-camera');
     const settingsCamera = document.getElementById('settings-tracking-camera');
     const cameraStatus = document.getElementById('settings-camera-status');
+    const faceTrackingSource = document.getElementById('face-tracking-source');
+    const companionFaceTrackingSource = document.getElementById('companion-face-tracking-source');
+    const faceTrackingHelp = document.getElementById('face-tracking-source-help');
+    const vbridgerStatus = document.getElementById('vbridger-status');
+    const nvidiaRtxToggle = document.getElementById('settings-nvidia-rtx-toggle');
+    const savedFaceSource = localStorage.getItem('sakura_face_tracking_source');
+    if (['webcam','nvidia_broadcast','nvidia_ar','nvidia_expressionapp','nvidia_vts','vbridger'].includes(savedFaceSource)) faceTrackingSource.value = savedFaceSource;
+    companionFaceTrackingSource.value = faceTrackingSource.value;
+    const trackingBackend = document.getElementById('tracking-backend');
+    const trackingBackendHelp = document.getElementById('tracking-backend-help');
+    const savedBackend = localStorage.getItem('sakura_tracking_backend');
+    if (['mediapipe','leap_motion','nvidia_gpu'].includes(savedBackend)) trackingBackend.value = savedBackend;
+    const backendHelp = {
+        mediapipe: 'MediaPipe runs locally from your webcam. It tracks face, arm pose and both hands/fingers.',
+        leap_motion: 'Leap Motion uses the local Ultraleap WebSocket service for detailed finger tracking; the webcam continues tracking face and arm pose. Connect the controller and start its service first.',
+        nvidia_gpu: 'Runs MediaPipe face, arm and finger landmark models with the browser GPU delegate. Chrome/WebView and Windows must expose an NVIDIA GPU; if GPU startup fails, switch back to MediaPipe.'
+    };
+    const graphicsRenderer = () => {
+        try {
+            const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+            const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+            return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '') : '';
+        } catch (_) { return ''; }
+    };
+    trackingBackend.addEventListener('change', () => {
+        localStorage.setItem('sakura_tracking_backend', trackingBackend.value);
+        const renderer = trackingBackend.value === 'nvidia_gpu' ? graphicsRenderer() : '';
+        const detected = renderer ? ` WebGL renderer: ${renderer}.` : ' The browser does not expose its GPU renderer; it may use an integrated GPU or software rendering.';
+        trackingBackendHelp.textContent = (backendHelp[trackingBackend.value] || backendHelp.mediapipe) + detected;
+        if (avatarTracking.enabled) { avatarTracking.stop(); start.click(); }
+        else cameraStatus.textContent = `${trackingBackend.options[trackingBackend.selectedIndex].text} selected. Press Start tracking to use it.`;
+    });
+    if (trackingBackend.value === 'nvidia_gpu') {
+        const renderer = graphicsRenderer();
+        trackingBackendHelp.textContent = backendHelp.nvidia_gpu + (renderer ? ` WebGL renderer: ${renderer}.`
+            : ' The browser does not expose its GPU renderer; it may use an integrated GPU or software rendering.');
+    } else trackingBackendHelp.textContent = backendHelp[trackingBackend.value] || backendHelp.mediapipe;
     const bgEnabled = document.getElementById('obs-background-enabled');
     const bgColor = document.getElementById('obs-background-color');
     bgEnabled.checked = localStorage.getItem('sakura_obs_background_enabled') === 'true';
@@ -3184,7 +3313,7 @@ function setupAvatarTracking() {
         'tracking-blink-gain':'blinkGain', 'tracking-gaze-strength':'gaze'};
     const applyTrackingOptions = () => {
         if (viewer) viewer.trackingOptions = trackingOptions;
-        avatarTracking.frameRate = [15,24,30].includes(Number(trackingOptions.fps)) ? Number(trackingOptions.fps) : 15;
+        avatarTracking.frameRate = [15,24,30,60].includes(Number(trackingOptions.fps)) ? Number(trackingOptions.fps) : 15;
         for (const [id,key] of Object.entries(trackingSliders)) {
             const control = document.getElementById(id);
             control.value = Number(trackingOptions[key])*100;
@@ -3207,7 +3336,7 @@ function setupAvatarTracking() {
     document.getElementById('tracking-glasses').addEventListener('change',e=>{
         trackingOptions.glasses=e.target.checked;applyTrackingOptions();avatarTracking.calibrate();
     });
-    const restartTracking = () => { if (avatarTracking.enabled) { avatarTracking.stop(); start.click(); } };
+    const restartTracking = () => { if (avatarTracking.enabled) avatarTracking.start(camera.value, avatarTracking.backend).catch(error => { status.textContent=error.message; cameraStatus.textContent=error.message; }); };
     document.getElementById('tracking-fps').addEventListener('change', e => {
         trackingOptions.fps = Number(e.target.value); applyTrackingOptions(); restartTracking();
     });
@@ -3215,8 +3344,12 @@ function setupAvatarTracking() {
         trackingOptions = {...trackingDefaults}; applyTrackingOptions(); restartTracking();
     });
     applyTrackingOptions();
-    try { handsToggle.checked = localStorage.getItem('sakura_hand_tracking_enabled') !== 'false'; } catch (_) {}
-    avatarTracking.setHandTracking(handsToggle.checked);
+    let handsEnabled = true;
+    try { handsEnabled = localStorage.getItem('sakura_hand_tracking_enabled') !== 'false'; } catch (_) {}
+    handsToggle.setAttribute('aria-pressed',String(handsEnabled));
+    handsToggle.classList.toggle('active',handsEnabled);
+    handsToggle.textContent = `Hand tracking: ${handsEnabled ? 'On' : 'Off'}`;
+    avatarTracking.setHandTracking(handsEnabled);
     window.addEventListener('sakura-physics-status-changed',()=>updatePhysicsUI(viewer?.physics?.mode));
     const reader = new ChatReader({
         onEnabled: enabled => { if (viewer) viewer.chatReaderActive = enabled; },
@@ -3298,7 +3431,7 @@ function setupAvatarTracking() {
     const refreshCameras = async () => {
         const selected = camera.value || localStorage.getItem('sakura_tracking_camera') || '';
         const devices = await navigator.mediaDevices?.enumerateDevices() || [];
-        camera.replaceChildren(new Option('Default camera', ''));
+        camera.replaceChildren(new Option('Default camera', ''),new Option('Sakura Mobile · paired phone','sakura-mobile'));
         devices.filter(d=>d.kind==='videoinput').forEach((d,i)=>camera.add(new Option(d.label || `Camera ${i+1}`,d.deviceId)));
         camera.value = selected;
         settingsCamera.replaceChildren(...Array.from(camera.options, option => new Option(option.text, option.value)));
@@ -3309,8 +3442,173 @@ function setupAvatarTracking() {
         refreshCameras().catch(error => { cameraStatus.textContent = error.message; });
     });
     installBroadcastCamera({refresh:refreshCameras,select:settingsCamera,status:cameraStatus,open:()=>window.pywebview?.api.open_nvidia_broadcast()});
+    const faceSourceHelp = {
+        webcam: 'Webcam face tracking uses the local MediaPipe tracker. Choose a hand/arm backend below independently.',
+        nvidia_broadcast: 'Uses the NVIDIA Broadcast virtual camera with Sakura’s GPU-accelerated MediaPipe tracker. This is not the separate NVIDIA Broadcast Expression Tracker included with VTube Studio.',
+        nvidia_ar: 'Sakura native RTX mode runs NVIDIA AR SDK Face Expressions directly on the selected camera feed.',
+        nvidia_expressionapp: 'Runs the NVIDIA Broadcast Tracker ExpressionApp engine from the free ~2 GB Steam DLC. VTube Studio itself stays closed; choose the installed MXTracker/v2 folder below.',
+        nvidia_vts: 'Use VTube Studio’s separate NVIDIA RTX/Broadcast Expression Tracker, connect VBridger to VTube Studio, then set VBridger VMC output to 127.0.0.1:39539. Sakura keeps webcam tracking for head pose and reads VMC facial expressions.',
+        vbridger: 'Uses webcam tracking for head position and VBridger VMC packets for facial expressions. Set VBridger output to VMC at 127.0.0.1:39539, then start Sakura tracking.'
+    };
+    const updateFaceSource = (activate = false) => {
+        // Broadcast's virtual webcam cannot replace a paired phone camera.
+        // Native AR SDK consumes the phone JPEG feed without changing its source.
+        const phoneCamera = camera.value === 'sakura-mobile' || avatarTracking.remoteActive;
+        let source = faceTrackingSource.value;
+        if (phoneCamera && ['nvidia_broadcast','nvidia_expressionapp'].includes(source)) {
+            source = 'nvidia_ar';
+            faceTrackingSource.value = source;
+            companionFaceTrackingSource.value = source;
+        }
+        localStorage.setItem('sakura_face_tracking_source', source);
+        const rtxSelected = source === 'nvidia_ar';
+        nvidiaRtxToggle.setAttribute('aria-pressed', String(rtxSelected));
+        nvidiaRtxToggle.textContent = rtxSelected ? 'Disable Sakura native RTX tracker' : 'Enable Sakura native RTX tracker';
+        const expressionAppToggle=document.getElementById('settings-expressionapp-toggle');
+        const expressionAppSelected=source==='nvidia_expressionapp';
+        expressionAppToggle.setAttribute('aria-pressed',String(expressionAppSelected));
+        expressionAppToggle.textContent=expressionAppSelected?'Disable 2 GB NVIDIA tracker':'Enable 2 GB NVIDIA tracker';
+        faceTrackingHelp.textContent = faceSourceHelp[source];
+        avatarTracking.setFaceSource(source);
+        if (activate && phoneCamera && avatarTracking.remoteActive && source === 'nvidia_ar') {
+            void fetch('/api/tracking/nvidia-ar/start',{method:'POST'}).then(async response=>{
+                const data=await response.json();
+                if(!response.ok)throw Error(data.error||'NVIDIA tracker could not start');
+                cameraStatus.textContent='Sakura Mobile camera retained · native NVIDIA RTX expressions enabled';
+            }).catch(error=>{cameraStatus.textContent='Phone tracking remains active · '+error.message;});
+        }
+        vbridgerStatus.hidden = !['vbridger','nvidia_vts'].includes(source);
+        if (source === 'nvidia_broadcast' && activate) {
+            if (trackingBackend.value !== 'nvidia_gpu') {
+                trackingBackend.value = 'nvidia_gpu';
+                localStorage.setItem('sakura_tracking_backend','nvidia_gpu');
+                const renderer=graphicsRenderer();
+                trackingBackendHelp.textContent=backendHelp.nvidia_gpu+(renderer?` WebGL renderer: ${renderer}.`:' The browser does not expose its GPU renderer; it may use an integrated GPU or software rendering.');
+            }
+            document.getElementById('tracking-broadcast-camera').click();
+            cameraStatus.textContent = 'NVIDIA Broadcast camera selected when available. Sakura will use GPU-accelerated MediaPipe on its enhanced feed the next time tracking starts.';
+        } else if (source === 'vbridger' || source === 'nvidia_vts') {
+            vbridgerStatus.textContent = source === 'nvidia_vts'
+                ? 'Configure VTube Studio with its NVIDIA RTX tracker; set VBridger input to VTube Studio and VMC output to 127.0.0.1:39539, then start Sakura tracking.'
+                : 'Start tracking, then configure VBridger VMC output to 127.0.0.1:39539. Camera tracking supplies head pose; VBridger supplies face expression weights.';
+        } else if (source === 'nvidia_ar') {
+            cameraStatus.textContent = 'Sakura native RTX tracker selected. Start tracking to load NVIDIA AR SDK and begin face-expression inference.';
+        } else if (source === 'nvidia_expressionapp') {
+            cameraStatus.textContent = 'VTube Studio NVIDIA Broadcast Tracker engine selected. Sakura will launch ExpressionApp directly; VTube Studio does not need to run.';
+        }
+        if (avatarTracking.enabled) {
+            cameraStatus.textContent = ['webcam','vbridger','nvidia_vts','nvidia_ar','nvidia_expressionapp'].includes(source)
+                ? (source === 'nvidia_vts'
+                    ? 'RTX input selected · waiting for VTube Studio → VBridger VMC data on 127.0.0.1:39539.'
+                    : source === 'nvidia_expressionapp'
+                        ? '2 GB NVIDIA ExpressionApp selected · waiting for tracker output on localhost.'
+                    : source === 'nvidia_ar'
+                        ? 'Starting Sakura’s native NVIDIA AR SDK tracker on the selected camera feed…'
+                    : source === 'vbridger'
+                        ? 'VBridger input selected · waiting for VMC data on 127.0.0.1:39539.'
+                        : 'RTX input disabled · webcam face tracking is active.')
+                : 'Face tracking source saved. Stop and restart tracking to apply the camera/backend change.';
+        }
+    };
+    faceTrackingSource.addEventListener('change', () => {
+        companionFaceTrackingSource.value = faceTrackingSource.value;
+        updateFaceSource(true);
+    });
+    companionFaceTrackingSource.addEventListener('change', () => {
+        faceTrackingSource.value = companionFaceTrackingSource.value;
+        faceTrackingSource.dispatchEvent(new Event('change'));
+    });
+    nvidiaRtxToggle.addEventListener('click', () => {
+        const enable = faceTrackingSource.value !== 'nvidia_ar';
+        faceTrackingSource.value = enable ? 'nvidia_ar' : 'webcam';
+        faceTrackingSource.dispatchEvent(new Event('change'));
+        if (enable && !avatarTracking.enabled) {
+            cameraStatus.textContent = 'Starting Sakura’s native RTX face tracking…';
+            const companionCameraToggle = document.getElementById('companion-camera-enabled');
+            const companionCameraMode = document.getElementById('companion-camera-mode');
+            if (!trackingOnly && !vtuberEnabled) {
+                companionCameraMode.value = 'tracking';
+                companionCameraToggle.checked = true;
+                companionCameraToggle.dispatchEvent(new Event('change'));
+            } else start.click();
+        } else if (!enable) {
+            cameraStatus.textContent = avatarTracking.enabled
+                ? 'RTX expression input disabled · Sakura is using webcam face tracking.'
+                : 'RTX expression input disabled. Start tracking when ready.';
+        }
+    });
+    document.getElementById('settings-expressionapp-toggle').addEventListener('click',()=>{
+        const enable=faceTrackingSource.value!=='nvidia_expressionapp';
+        faceTrackingSource.value=enable?'nvidia_expressionapp':'webcam';
+        faceTrackingSource.dispatchEvent(new Event('change'));
+        if(enable&&!avatarTracking.enabled){
+            cameraStatus.textContent='Starting the NVIDIA ExpressionApp tracker…';
+            const companionCameraToggle=document.getElementById('companion-camera-enabled');
+            const companionCameraMode=document.getElementById('companion-camera-mode');
+            if(!trackingOnly&&!vtuberEnabled){companionCameraMode.value='tracking';companionCameraToggle.checked=true;companionCameraToggle.dispatchEvent(new Event('change'));}
+            else start.click();
+        }
+    });
+    updateFaceSource();
     const sdkFolder=document.getElementById('nvidia-sdk-folder'),sdkStatus=document.getElementById('nvidia-sdk-status');
     sdkFolder.value=currentSettings.nvidia_ar_sdk_folder||'';
+    fetch('/api/tracking/nvidia-sdk',{cache:'no-store'}).then(async response=>{
+        const data=await response.json();if(!response.ok)throw Error(data.error||'SDK check failed');
+        if(data.folder)sdkFolder.value=data.folder;
+        const missing=Object.entries(data.features||{}).filter(([,present])=>!present).map(([name])=>name);
+        sdkStatus.textContent=(data.installed?'SDK Core detected. ':'')+data.message+(data.installed&&missing.length?' Missing feature packages: '+missing.join(', ')+'.':'');
+    }).catch(error=>{sdkStatus.textContent=error.message;});
+
+    const sdkDownload=document.getElementById('nvidia-sdk-download'),sdkImport=document.getElementById('nvidia-sdk-import'),sdkArchive=document.getElementById('nvidia-sdk-archive');
+    const sdkNgcKey=document.getElementById('nvidia-sdk-ngc-key'),sdkInstallFeatures=document.getElementById('nvidia-sdk-install-features');
+    sdkDownload.onclick=async()=>{
+        sdkDownload.disabled=true;
+        try{
+            const response=await fetch('/api/tracking/nvidia-sdk/download',{method:'POST'});const data=await response.json();
+            if(!response.ok)throw Error(data.error||'Could not open download.');
+            sdkStatus.textContent=data.ok?data.message:'Your browser did not open. Use the NVIDIA feature downloads link below, select SDK Core and the Windows x64 version.';
+        }catch(error){sdkStatus.textContent=error.message;}
+        finally{sdkDownload.disabled=false;}
+    };
+    sdkImport.onclick=()=>sdkArchive.click();
+    sdkArchive.onchange=async()=>{
+        const file=sdkArchive.files?.[0];if(!file)return;
+        sdkImport.disabled=true;sdkDownload.disabled=true;sdkStatus.textContent='Importing SDK files… Please wait. No NVIDIA programs will be executed.';
+        try{
+            const body=new FormData();body.append('file',file);
+            const response=await fetch('/api/tracking/nvidia-sdk/import',{method:'POST',body});const data=await response.json();
+            if(!response.ok)throw Error(data.error||'SDK import failed.');
+            sdkFolder.value=data.folder;currentSettings.nvidia_ar_sdk_folder=data.folder;
+            const missing=Object.entries(data.features||{}).filter(([,installed])=>!installed).map(([name])=>name);
+            sdkStatus.textContent=`SDK files imported. ${missing.length?'Missing feature packages: '+missing.join(', ')+'. ':''}${data.message}`;
+        }catch(error){sdkStatus.textContent=error.message;}
+        finally{sdkImport.disabled=false;sdkDownload.disabled=false;sdkArchive.value='';}
+    };
+    let sdkFeaturePoll=null;
+    sdkInstallFeatures.onclick=async()=>{
+        const apiKey=sdkNgcKey.value.trim();
+        if(!apiKey){sdkStatus.textContent='Paste your NVIDIA NGC API key first. Sakura will use it for this install only.';sdkNgcKey.focus();return;}
+        sdkInstallFeatures.disabled=true;sdkStatus.textContent='Starting NVIDIA’s face-tracking feature installer…';
+        try{
+            const response=await fetch('/api/tracking/nvidia-sdk/install-features',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:apiKey,folder:sdkFolder.value.trim()})});
+            const data=await response.json();if(!response.ok)throw Error(data.error||'Could not start NVIDIA feature installation.');
+            sdkNgcKey.value='';
+            sdkStatus.textContent='NVIDIA feature installation started. Keep Sakura open while NVIDIA downloads the GPU-matched packages.';
+            if(sdkFeaturePoll)clearInterval(sdkFeaturePoll);
+            sdkFeaturePoll=setInterval(async()=>{
+                try{
+                    const statusResponse=await fetch('/api/tracking/nvidia-sdk/install-features',{cache:'no-store'}),status=await statusResponse.json();
+                    const tail=(status.output||[]).slice(-3).join(' · ');
+                    if(status.running){sdkStatus.textContent='Installing NVIDIA features… '+tail;return;}
+                    clearInterval(sdkFeaturePoll);sdkFeaturePoll=null;sdkInstallFeatures.disabled=false;
+                    const check=await fetch('/api/tracking/nvidia-sdk',{cache:'no-store'}),sdk=await check.json();
+                    sdkStatus.textContent=status.returncode===0&&sdk.tracking_ready
+                        ?'NVIDIA native face tracker is installed and ready. Select “NVIDIA AR SDK” as the tracking source.'
+                        :(status.message||sdk.message)+(tail?' · '+tail:'');
+                }catch(error){sdkStatus.textContent='Could not read NVIDIA installer status: '+error.message;}
+            },1800);
+        }catch(error){sdkNgcKey.value='';sdkInstallFeatures.disabled=false;sdkStatus.textContent=error.message;}
+    };
     document.getElementById('nvidia-sdk-browse').onclick=async()=>{const path=await window.pywebview?.api.choose_nvidia_sdk_folder();if(path)sdkFolder.value=path;};
     document.getElementById('nvidia-sdk-check').onclick=async()=>{
         try{
@@ -3318,17 +3616,68 @@ function setupAvatarTracking() {
             const response=await fetch('/api/tracking/nvidia-sdk');const data=await response.json();if(!response.ok)throw Error(data.error||'SDK check failed');sdkStatus.textContent=data.message;
         }catch(error){sdkStatus.textContent=error.message;}
     };
+    const expressionFolder=document.getElementById('nvidia-expressionapp-folder');
+    const expressionCamera=document.getElementById('nvidia-expressionapp-camera');
+    const expressionStatus=document.getElementById('nvidia-expressionapp-status');
+    const expressionDownload=document.getElementById('nvidia-expressionapp-download');
+    expressionFolder.value=currentSettings.nvidia_expressionapp_folder||'';
+    expressionCamera.value=currentSettings.nvidia_expressionapp_camera??0;
+    document.getElementById('nvidia-expressionapp-browse').onclick=async()=>{
+        const path=await window.pywebview?.api.choose_nvidia_expressionapp_folder();
+        if(path)expressionFolder.value=path;
+    };
+    document.getElementById('nvidia-expressionapp-save').onclick=async()=>{
+        try{
+            const response=await fetch('/api/tracking/nvidia-expressionapp/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:expressionFolder.value.trim(),camera:Number(expressionCamera.value)||0})});
+            const data=await response.json();if(!response.ok)throw Error(data.error||'Could not save tracker location.');
+            expressionFolder.value=data.folder;expressionCamera.value=data.camera;
+            expressionStatus.textContent=data.folder?'Tracker folder is valid. Choose “Enable 2 GB NVIDIA tracker” to launch it.':'No tracker folder selected.';
+        }catch(error){expressionStatus.textContent=error.message;}
+    };
+    let expressionInstallPoll=null;
+    expressionDownload.onclick=async()=>{
+        expressionDownload.disabled=true;
+        try{
+            const response=await fetch('/api/tracking/nvidia-expressionapp/install',{method:'POST'});
+            const data=await response.json();if(!response.ok)throw Error(data.error||'Could not open the Steam installer.');
+            expressionStatus.textContent=data.message;
+            if(data.installed){expressionFolder.value=data.folder;return;}
+            if(expressionInstallPoll)clearInterval(expressionInstallPoll);
+            let checks=0;
+            expressionInstallPoll=setInterval(async()=>{
+                checks++;
+                try{
+                    const check=await fetch('/api/tracking/nvidia-expressionapp',{cache:'no-store'});
+                    const status=await check.json();
+                    if(status.folder){
+                        clearInterval(expressionInstallPoll);expressionInstallPoll=null;
+                        expressionFolder.value=status.folder;expressionCamera.value=status.camera??0;
+                        expressionStatus.textContent='Tracker download detected and ready. Select “Enable 2 GB NVIDIA tracker” when you want to start camera tracking.';
+                        await fetch('/api/tracking/nvidia-expressionapp/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:status.folder,camera:Number(expressionCamera.value)||0})});
+                    }else if(checks>=180){clearInterval(expressionInstallPoll);expressionInstallPoll=null;}
+                }catch(_){if(checks>=180){clearInterval(expressionInstallPoll);expressionInstallPoll=null;}}
+            },5000);
+        }catch(error){expressionStatus.textContent=error.message;}
+        finally{expressionDownload.disabled=false;}
+    };
+    fetch('/api/tracking/nvidia-expressionapp',{cache:'no-store'}).then(r=>r.json()).then(data=>{
+        if(data.folder&&!expressionFolder.value)expressionFolder.value=data.folder;
+        if(data.error)expressionStatus.textContent=data.error;
+        else if(data.connected)expressionStatus.textContent=`ExpressionApp connected · ${data.fps} FPS.`;
+        else if(data.folder)expressionStatus.textContent='Steam tracker DLC detected. Choose “Enable 2 GB NVIDIA tracker” to start it; Sakura will use its camera index below.';
+    }).catch(error=>{expressionStatus.textContent=error.message;});
     settingsCamera.addEventListener('change', () => {
         camera.value = settingsCamera.value;
         camera.dispatchEvent(new Event('change'));
         cameraStatus.textContent = 'Camera selected. Press Start tracking to use it.';
-        if (avatarTracking.enabled) { avatarTracking.stop(); start.click(); }
+        if (avatarTracking.enabled) cameraStatus.textContent = 'Camera saved. Stop and restart face tracking to use it.';
     });
     document.getElementById('settings-start-tracking').addEventListener('click', () => start.click());
     document.getElementById('settings-stop-tracking').addEventListener('click', () => { stop.click(); cameraStatus.textContent = status.textContent; });
     document.getElementById('settings-calibrate-tracking').addEventListener('click', () => { document.getElementById('tracking-calibrate').click(); cameraStatus.textContent = status.textContent; });
     const setUI = enabled => {
         trackingOnly = enabled;
+        if(!enabled)window.dispatchEvent(new Event('sakura-vtuber-mode-off'));
         updateAppBrand(enabled);
         if(enabled)companionCamera.stop();
         document.body.classList.toggle('tracking-only', enabled);
@@ -3341,12 +3690,16 @@ function setupAvatarTracking() {
         mode.textContent = enabled ? 'VTuber on' : 'VTuber';
         for (const id of aiControls) document.getElementById(id).disabled = enabled;
         document.getElementById('vtuber-mode-btn').hidden = enabled;
+        const agent=document.getElementById('agent-mode-toggle');
+        if(agent){agent.hidden=enabled||window.SAKURA_EDITION==='vtuber';agent.style.display=agent.hidden?'none':'';}
         document.getElementById('chat-reader-mode-btn').hidden = !enabled;
         document.getElementById('vtuber-start-btn').disabled = enabled;
     };
     window.addEventListener('sakura-phone-camera-frame',event=>companionCamera.remoteFrame(event.detail?.image));
     window.addEventListener('sakura-phone-companion-tracking',event=>{
         if(event.detail?.enabled){
+        camera.value=settingsCamera.value='sakura-mobile';
+        localStorage.setItem('sakura_tracking_camera','sakura-mobile');
             companionCamera.stop();
             avatarTracking.stop();
             viewer.setVtuberTrackingMode(true);
@@ -3375,6 +3728,8 @@ function setupAvatarTracking() {
         }catch(error){status.textContent=error.message;}
     });
     window.addEventListener('sakura-phone-tracking',async()=>{
+        camera.value=settingsCamera.value='sakura-mobile';
+        localStorage.setItem('sakura_tracking_camera','sakura-mobile');
         companionCamera.stop();
         setUI(true);continuousMic.stop();lipSync.stop();
         vtuberEnabled=false;++vtuberGeneration;vtuberQueue=[];reactionsEnabled=false;
@@ -3397,15 +3752,19 @@ function setupAvatarTracking() {
     document.getElementById('close-tracking-modal').addEventListener('click',()=>modal.classList.add('hidden'));
     document.getElementById('tracking-mirror').addEventListener('change',e=>{ viewer.userTrackingMirror=e.target.checked; });
     camera.addEventListener('change',e=>{ settingsCamera.value = e.target.value; try { localStorage.setItem('sakura_tracking_camera', e.target.value); } catch (_) {} });
-    handsToggle.addEventListener('change', e => {
-        const enabled = e.target.checked;
+    handsToggle.addEventListener('click', e => {
+        const enabled = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+        e.currentTarget.setAttribute('aria-pressed', String(enabled));
+        e.currentTarget.classList.toggle('active', enabled);
+        e.currentTarget.textContent = `Hand tracking: ${enabled ? 'On' : 'Off'}`;
         avatarTracking.setHandTracking(enabled);
         try { localStorage.setItem('sakura_hand_tracking_enabled', String(enabled)); } catch (_) {}
         if (avatarTracking.enabled) status.textContent = enabled
-            ? 'Body tracking on · shoulders, arms, hands and fingers follow you'
-            : 'Body tracking off · face and head tracking remain on';
+            ? 'Hand tracking on · arms and fingers follow your hands'
+            : 'Hand tracking off · face, head, lean and up/down remain active';
     });
     document.getElementById('tracking-calibrate').addEventListener('click',()=> {
+        if(camera.value==='sakura-mobile'){void fetch('/api/mobile/tracking-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'calibrate'})});viewer.calibrateUserTracking();return;}
         if (!avatarTracking.enabled) { status.textContent = 'Start tracking before calibration.'; return; }
         avatarTracking.calibrate();
         status.textContent = 'Neutral head and hand pose calibrated.';
@@ -3434,7 +3793,14 @@ function setupAvatarTracking() {
             const data=await response.json();
             if(!response.ok) throw new Error(data.error);
             viewer.userTrackingMirror=document.getElementById('tracking-mirror').checked;
-            await avatarTracking.start(camera.value);
+            avatarTracking.setFaceSource(faceTrackingSource.value);
+            if(camera.value==='sakura-mobile'){avatarTracking.stop();
+                if(['nvidia_ar','nvidia_expressionapp','nvidia_broadcast'].includes(avatarTracking.faceSource)){
+                    const init=await fetch('/api/tracking/nvidia-ar/start',{method:'POST'}),info=await init.json();
+                    if(!init.ok)throw Error(info.error||'Native NVIDIA tracker could not initialize for phone frames');
+                    avatarTracking.faceSource='nvidia_ar';faceTrackingSource.value=companionFaceTrackingSource.value='nvidia_ar';localStorage.setItem('sakura_face_tracking_source','nvidia_ar');
+                }
+                const r=await fetch('/api/mobile/tracking-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start'})});const d=await r.json();if(!r.ok)throw Error(d.error);window.dispatchEvent(new CustomEvent('sakura-phone-tracking-requested',{detail:{enabled:true}}));status.textContent='Tracking requested · keep paired Sakura Mobile open';}else await avatarTracking.start(camera.value, trackingBackend.value);
             await refreshCameras();
         } catch(error) {
             // Stay AI-paused when camera initialization fails. The user can
@@ -3445,6 +3811,8 @@ function setupAvatarTracking() {
     stop.addEventListener('click',()=> {
         if(switching) return;
         avatarTracking.stop();
+        window.dispatchEvent(new CustomEvent('sakura-phone-tracking-requested',{detail:{enabled:false}}));
+        if(camera.value==='sakura-mobile')void fetch('/api/mobile/tracking-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'stop'})});
         status.textContent='Tracking off · AI remains paused';
     });
     document.getElementById('tracking-restore-ai').addEventListener('click',async()=> {

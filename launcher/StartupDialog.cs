@@ -80,7 +80,7 @@ sealed class StartupDialog : Form {
  }
  void SelectMode(string mode) {
   if(mode=="local" && !LocalModelDialog.Installed(project)) {
-   if(MessageBox.Show(this,"Are you sure you want to run Local LLM? This downloads an optional runtime and Qwen model to Sakura's folder.","Set up local AI",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+   if(MessageBox.Show(this,"Are you sure you want to run Local LLM? This downloads an optional runtime and your selected vision model to Sakura's folder.","Set up local AI",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
    using(var setup=new LocalModelDialog(project))if(setup.ShowDialog(this)!=DialogResult.OK)return;
   }
   if(mode=="gemini" && keyBox.Text.Trim().Length==0 && !File.Exists(Path.Combine(project,".gemini-key.bin")) && !File.Exists(Path.Combine(project,".cloud-keys.bin"))) {

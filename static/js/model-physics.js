@@ -854,22 +854,23 @@ export default class ModelPhysics {
                     }
                 }
                 if (!penetrates) continue;
-                // A root may start inside the head collider in a valid PMX
-                // rig. Keep only that short scalp attachment untouched;
-                // middle and lower strand points must still be kept outside
-                // skin/clothing even when the authored rest pose intersects.
-                if (fraction <= .18) {
-                    const restPoint = this._collisionRest ||= new THREE.Vector3();
-                    restPoint.lerpVectors(anchor,restTail,fraction).applyMatrix4(c.inverse);
-                    let rootPenetrates;
-                    if (c.shape === 1) rootPenetrates = Math.abs(restPoint.x)<c.size.x+padding
-                        && Math.abs(restPoint.y)<c.size.y+padding && Math.abs(restPoint.z)<c.size.z+padding;
-                    else {
-                        const rootCenter = c.shape===2 ? THREE.MathUtils.clamp(restPoint.y,-c.height/2,c.height/2) : 0;
-                        rootPenetrates = Math.hypot(restPoint.x,restPoint.y-rootCenter,restPoint.z) < c.radius+padding;
-                    }
-                    if (rootPenetrates) continue;
+                // Calibrate to the authored strand at every sample, not just
+                // its root. Coarse PMX head/shoulder volumes can overlap valid
+                // bangs at rest; pushing those out makes the hair fan sideways.
+                // Resist NEW penetration without displacing the rest hairstyle.
+                const restPoint = this._collisionRest ||= new THREE.Vector3();
+                restPoint.lerpVectors(anchor, restTail, fraction).applyMatrix4(c.inverse);
+                let restDepth;
+                if (c.shape === 1) {
+                    restDepth = Math.max(0, Math.min(c.size.x + padding - Math.abs(restPoint.x),
+                        c.size.y + padding - Math.abs(restPoint.y), c.size.z + padding - Math.abs(restPoint.z)));
+                } else {
+                    const restY = c.shape === 2 ? THREE.MathUtils.clamp(restPoint.y, -c.height/2, c.height/2) : 0;
+                    restDepth = Math.max(0, c.radius + padding - Math.hypot(restPoint.x, restPoint.y-restY, restPoint.z));
                 }
+                const penetration = correction.distanceTo(point);
+                if (restDepth > 0 && penetration <= restDepth + 1e-5) continue;
+                if (restDepth > 0) correction.lerp(point, Math.min(1, restDepth / Math.max(penetration, 1e-6)));
                 correction.applyMatrix4(forward);point.applyMatrix4(forward);
                 _collisionDelta.subVectors(correction,point);
                 // With a fixed-length strand, pushing along its own axis is

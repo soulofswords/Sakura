@@ -37,7 +37,7 @@ public class MainActivity extends Activity {
  void requestCall(String person){if(localAvailable&&calls!=null)calls.request(person);}
  private WebView web; private String base="",token=""; private PermissionRequest cameraRequest;
  @Override public void onCreate(Bundle state){
-  super.onCreate(state);current=new java.lang.ref.WeakReference<>(this); web=new WebView(this);setContentView(web);if(localAvailable){calls=new CallController(this);locations=new PhoneLocation(this);microphone=new PhoneMicrophone(this);}
+  super.onCreate(state);getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);current=new java.lang.ref.WeakReference<>(this); web=new WebView(this);setContentView(web);if(localAvailable){calls=new CallController(this);locations=new PhoneLocation(this);microphone=new PhoneMicrophone(this);}
   web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);
   web.getSettings().setMediaPlaybackRequiresUserGesture(false);
   web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);
@@ -166,6 +166,13 @@ public class MainActivity extends Activity {
     String response=call("POST","/pair",new JSONObject().put("code",code).put("device_id",id).put("device_name",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL).toString());JSONObject data=new JSONObject(response);if(data.has("token")){token=data.getString("token");JSONArray old=new JSONArray(remembered()),list=new JSONArray();for(int i=0;i<old.length();i++)if(!base.equals(old.getJSONObject(i).optString("address")))list.put(old.getJSONObject(i));list.put(new JSONObject().put("address",base).put("name",data.optString("name","Sakura")).put("credential",protect(token)));prefs().edit().putString("computers",list.toString()).apply();}return response;
    }catch(Exception error){return error(error);}
   }
+  @JavascriptInterface public void trackingStateAsync(String id){new Thread(()->{try{complete(id,call("GET","/state","{}"));}catch(Exception e){complete(id,error(e));}},"SakuraTrackingState").start();}
+  @JavascriptInterface public void trackingFrameAsync(String id,String body){
+   new Thread(()->{try{
+    if(body.length()>180000)throw new IOException("Tracking packet too large");
+    complete(id,call("POST","/frame",body));
+   }catch(Exception error){complete(id,error(error));}},"SakuraTrackingUpload").start();
+  }
   @JavascriptInterface public String request(String method,String path,String body){
     if(!path.matches("/(state|command|frame|camera|chat|gemini|tools)"))return "{\"error\":\"Unsupported request\"}";
    try{return call(method,path,body);}catch(Exception error){return error(error);}
@@ -173,7 +180,7 @@ public class MainActivity extends Activity {
   private String call(String method,String path,String body)throws Exception{
    if(base.isEmpty())throw new Exception("Connect to your PC first.");
    HttpURLConnection connection=(HttpURLConnection)new URL(base+path).openConnection();connection.setInstanceFollowRedirects(false);
-   connection.setConnectTimeout(5000);connection.setReadTimeout(path.equals("/chat")?120000:10000);connection.setRequestMethod(method);
+   connection.setConnectTimeout(path.equals("/frame")?1000:5000);connection.setReadTimeout(path.equals("/frame")?1000:path.equals("/chat")?120000:10000);connection.setRequestMethod(method);
    connection.setRequestProperty("Content-Type","application/json");if(!token.isEmpty())connection.setRequestProperty("Authorization","Bearer "+token);
    try{if(method.equals("POST")){connection.setDoOutput(true);try(OutputStream output=connection.getOutputStream()){output.write(body.getBytes("UTF-8"));}}
     InputStream input=connection.getResponseCode()<400?connection.getInputStream():connection.getErrorStream();if(input==null)throw new IOException("PC connection failed.");

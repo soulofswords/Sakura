@@ -7,7 +7,7 @@ export default class HeadPoseFilter {
     constructor(){this.reset();}
     reset(){this.rotation=null;this.time=null;this.pending=null;}
     update(face,timestamp,distanceAssist){
-        if(!face?.matrix?.length||!face.landmarks?.length)return face;
+        if(!face?.matrix?.length||!face.landmarks?.length){this.reset();return face;}
         if(face.matrix.length!==16||!Array.from(face.matrix).every(Number.isFinite))return {...face,matrix:null};
         const matrix=new THREE.Matrix4().fromArray(face.matrix),rotationMatrix=new THREE.Matrix4().extractRotation(matrix);
         const target=new THREE.Quaternion().setFromRotationMatrix(rotationMatrix).normalize();

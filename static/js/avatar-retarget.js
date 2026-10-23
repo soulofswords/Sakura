@@ -59,6 +59,35 @@ export function fingerJointCurl(points, finger, segment) {
     }
     return jointCurl(points, previous, joint, joint + 1);
 }
+// Measure abduction in the palm plane. A curled middle finger is not a
+// stable reference axis: use wrist -> middle MCP instead of middle PIP.
+export function fingerSpread(points, finger, left) {
+    if (finger < 1 || finger > 4 || points?.length !== 21) return null;
+    const ids = [0, 5, 9, 17, finger * 4 + 1, finger * 4 + 2];
+    if (ids.some(i => !points[i] || ![points[i].x, points[i].y, points[i].z].every(Number.isFinite))) return null;
+    const vector = (a, b) => new THREE.Vector3(points[a].x-points[b].x, points[a].y-points[b].y, points[a].z-points[b].z);
+    const normal = vector(5,0).cross(vector(17,0));
+    if (normal.lengthSq() < 1e-10) return null;
+    normal.normalize().multiplyScalar(left ? -1 : 1);
+    const reference = vector(9,0), direction = vector(finger*4+2,finger*4+1);
+    reference.addScaledVector(normal, -reference.dot(normal));
+    direction.addScaledVector(normal, -direction.dot(normal));
+    // Fully curled fingers have no reliable in-plane direction. Retain the
+    // last spread instead of interpreting tiny landmark noise as sideways motion.
+    if (reference.lengthSq() < 1e-10 || direction.lengthSq() < 1e-8) return null;
+    reference.normalize(); direction.normalize();
+    return Math.atan2(normal.dot(reference.clone().cross(direction)), reference.dot(direction));
+}
+export function filterFingerValue(previous, target, delta) {
+    if (!Number.isFinite(target)) return Number.isFinite(previous) ? previous : 0;
+    if (!Number.isFinite(previous)) return target;
+    const change = target - previous;
+    if (Math.abs(change) < .008) return previous;
+    // Quiet when held still, responsive when deliberately bending a finger.
+    const cutoff = 3 + Math.min(18, Math.abs(change) * 28);
+    const alpha = 1 - Math.exp(-2 * Math.PI * cutoff * clamp(delta, 0, .1));
+    return previous + change * alpha;
+}
 export default class AvatarRetarget {
     constructor(viewer) {
         this.viewer = viewer;
@@ -91,7 +120,8 @@ export default class AvatarRetarget {
                 const index = finger===0 ? segment : segment+1;
                 const aliases = [(side==='left'?'左':'右')+japanese[finger]+index,
                     (side==='left'?'左':'右')+japanese[finger]+fullwidth[index],
-                    (side==='left'?'Left':'Right')+names[finger]+(segment+1)];
+                    (side==='left'?'Left':'Right')+names[finger]+(segment+1),
+                    'Bip001 '+(side==='left'?'L':'R')+' Finger'+finger+(segment===0?'':segment)];
                 if (child.isBone && aliases.includes(child.name)) bone = child;
             });
             if (bone) this.fingers.push({side,finger,segment,bone,rest:bone.quaternion.clone()});
@@ -132,6 +162,7 @@ export default class AvatarRetarget {
         this.weights = {};
         this.palms = {};
         this.calibrated = false;
+        this.trackedRotations = {};
         this.faceNeutral = {leftEye:.28,rightEye:.28,mouth:.025};
         this.handPresence = {};
         this.handTargets = {};
@@ -142,6 +173,7 @@ export default class AvatarRetarget {
         return new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().fromArray(matrix), 'XYZ');
     }
     calibrate(sample) {
+        this.bodyNeutral=null;this.shoulderNeutral=null;this.heightNeutral=null;
         if (sample?.face?.matrix && sample.face.landmarks?.length) {
             this.neutral.copy(this.rotation(sample.face.matrix)); this.calibrated = true;
         }
@@ -157,6 +189,8 @@ export default class AvatarRetarget {
         this.palms={};
     }
     reset() {
+        if(this.verticalBone && Number.isFinite(this.verticalRest))this.verticalBone.position.y=this.verticalRest;
+        this.verticalOffset=0;this.bodyMotion=null;this.trackedRotations={};
         for (const entry of this.fingers) entry.bone.quaternion.copy(entry.rest);
         for (const name of this.morphs || []) this.viewer.setMorph(name, 0);
         for (const entry of Object.values(this.viewer.animationBones)) entry.bone.rotation.copy(this.viewer.vtuberTrackingMode?(entry.trackingRest||entry.rest):entry.rest);
@@ -189,7 +223,7 @@ export default class AvatarRetarget {
         if (this.root !== this.viewer.model) this.bind();
         if (!this.root) return;
         const options = this.viewer.trackingOptions || {};
-        const response = .02 + clamp(options.smoothing ?? .25) * .2;
+        const response = .02 + clamp(options.smoothing ?? .25,0,1) * .2;
         const alpha = 1-Math.exp(-Math.min(delta,.1)/response);
         const bones = this.viewer.animationBones;
         const fresh = sample && performance.now()-sample.receivedAt < 600;
@@ -243,33 +277,59 @@ export default class AvatarRetarget {
             morph(alias('mouthSmile','にこり','笑い','happy'),Math.max(scores.mouthSmileLeft||0,scores.mouthSmileRight||0));
             morph('U',Math.max(scores.mouthPucker||0,scores.mouthFunnel||0));
         }
-        morph(alias('browInnerUp','困る','sad'),scores.browInnerUp||0);
-        morph(alias('browDownLeft','真面目'),Math.max(scores.browDownLeft||0,scores.browDownRight||0));
+        if(this.viewer.vrm){
+            // Sorrow is not an upward-brow control: many VRM presets lower
+            // the brows. Prefer authored directional controls, then surprise.
+            const up=alias('browInnerUp','browUp','BrowsUp','BrowUp','眉上','上','surprised','Surprised','surprise');
+            const down=alias('browDown','BrowsDown','BrowDown','眉下','下');
+            const raise=Math.max(scores.browInnerUp||0,((scores.browOuterUpLeft||0)+(scores.browOuterUpRight||0))*.5);
+            morph(up,raise);
+            morph(down,Math.max(scores.browDownLeft||0,scores.browDownRight||0));
+        }else{
+            morph(alias('browInnerUp','困る','sad'),scores.browInnerUp||0);
+            morph(alias('browDownLeft','真面目'),Math.max(scores.browDownLeft||0,scores.browDownRight||0));
+        }
         if (!face?.landmarks?.length) for (const name of this.morphs) morph(name,0);
         const rotation=face?.matrix ? this.rotation(face.matrix) : this.neutral;
         const sign=this.viewer.userTrackingMirror===false ? -1 : 1;
         const rotate = (key,x,y,z) => {
             const entry=bones[key]; if(!entry) return;
-            const target=new THREE.Quaternion().setFromEuler(new THREE.Euler(entry.rest.x+x,entry.rest.y+y,entry.rest.z+z,entry.rest.order));
-            entry.bone.quaternion.slerp(target,alpha);
+            // Like Live2D filtered parameters, store the tracking state outside
+            // the rendered rig. Physics may alter the bone later in this frame.
+            this.trackedRotations ||= {};
+            const state=this.trackedRotations[key] ||= {x:0,y:0,z:0};
+            const target={x,y,z};
+            const rotationAlpha=(key==='leftEye'||key==='rightEye')
+                ? 1-Math.exp(-Math.min(delta,.1)/.018) : alpha;
+            for(const axis of ['x','y','z']){
+                const difference=Math.atan2(Math.sin(target[axis]-state[axis]),Math.cos(target[axis]-state[axis]));
+                state[axis]+=difference*rotationAlpha;
+            }
+            entry.bone.quaternion.setFromEuler(new THREE.Euler(entry.rest.x+state.x,entry.rest.y+state.y,entry.rest.z+state.z,entry.rest.order));
         };
         const range = clamp(options.range ?? 1, 0, 2);
         // VRM normalized humanoid bones use the opposite local pitch axis
         // from the PMX rigs. Mirroring affects yaw/roll, not looking up/down.
         const pitchSign=this.viewer.vrm ? -1 : 1;
-        rotate('head',clamp((rotation.x-this.neutral.x)*range*pitchSign,-.7,.7),clamp((rotation.y-this.neutral.y)*sign*range,-.9,.9),clamp((rotation.z-this.neutral.z)*sign*range,-.6,.6));
+        const trackedPitch=face?.matrix ? clamp((rotation.x-this.neutral.x)*range*pitchSign,-.7,.7) : 0;
+        rotate('head',trackedPitch*.88,clamp((rotation.y-this.neutral.y)*sign*range,-.9,.9),clamp((rotation.z-this.neutral.z)*sign*range,-.6,.6));
         const gazeX=((scores.eyeLookInLeft||0)+(scores.eyeLookOutRight||0)-(scores.eyeLookOutLeft||0)-(scores.eyeLookInRight||0))*.2;
         const gazeY=((scores.eyeLookDownLeft||0)+(scores.eyeLookDownRight||0)-(scores.eyeLookUpLeft||0)-(scores.eyeLookUpRight||0))*.15;
         const gaze = clamp(options.gaze ?? 1, 0, 2);
         if (!this.viewer.eyeTrackingEnabled) {
             rotate('leftEye',gazeY*gaze,gazeX*gaze,0); rotate('rightEye',gazeY*gaze,gazeX*gaze,0);
         }
-        const bodyTracking=fresh && sample.handTrackingEnabled !== false;
-        const hands=bodyTracking ? sample.hands || [] : [];
-        const pose=bodyTracking ? sample.pose : null;
+        // Fresh packets alone do not establish a person: empty-camera pose
+        // estimates must not move the body. Keep hands-only operation available.
+        const facePresent=!!(face?.matrix?.length===16 && face?.landmarks?.length>=468);
+        const handPresent=(sample?.hands||[]).some(hand=>this._visibleHand(hand));
+        const poseTracking=fresh && (facePresent||handPresent);
+        const handsTracking=fresh && sample.handTrackingEnabled !== false;
+        const hands=handsTracking ? sample.hands || [] : [];
+        const pose=poseTracking ? sample.pose : null;
         const posePoints=pose?.landmarks || [];
         const poseWorld=pose?.world || [];
-        const poseShouldersValid=[11,12].every(i=>posePoints[i] && (posePoints[i].visibility ?? 1) > .35);
+        const poseShouldersValid=[11,12].every(i=>posePoints[i] && (posePoints[i].visibility ?? 1) > .65);
         let poseScale=this.height;
         let poseDepthScale=this.height;
         if(poseShouldersValid && bones.leftArm && bones.rightArm) {
@@ -280,6 +340,48 @@ export default class AvatarRetarget {
             const worldWidth=poseWorld[11] && poseWorld[12] ? new THREE.Vector3(poseWorld[11].x-poseWorld[12].x,poseWorld[11].y-poseWorld[12].y,poseWorld[11].z-poseWorld[12].z).length() : 0;
             if(avatarWidth>1e-4 && worldWidth>1e-4) poseDepthScale=avatarWidth/worldWidth;
         }
+        const leanPoints=poseWorld.length>=25?poseWorld:posePoints;
+        const finitePoint=p=>p&&['x','y','z'].every(k=>Number.isFinite(p[k]));
+        const visibleTorso=poseShouldersValid&&[23,24].every(i=>finitePoint(leanPoints[i])&&posePoints[i]&&(posePoints[i].visibility??1)>.8);
+        let pitch=0,roll=0,vertical=0;
+        // Shoulder slope remains observable in seated/upper-body camera views.
+        // Hidden hips must not disable sideways lean or supply invented depth.
+        if(poseShouldersValid&&[11,12].every(i=>finitePoint(leanPoints[i]))){
+            const left=posePoints[11],right=posePoints[12];
+            const width=Math.abs(right.x-left.x);
+            if(width>.04){
+                const slope=-Math.atan2(right.y-left.y,width);
+                this.shoulderNeutral ??= slope;
+                roll=clamp((slope-this.shoulderNeutral)*sign,-.3,.3);
+            }
+        }
+        // Match Live2D ParamAngleY: up/down comes from the calibrated face
+        // angle, not image-space shoulder translation. No camera-driven lift.
+        if(visibleTorso){
+            const mid=(a,b,k)=>(leanPoints[a][k]+leanPoints[b][k])*.5;
+            const dy=mid(23,24,'y')-mid(11,12,'y');
+            const dx=mid(11,12,'x')-mid(23,24,'x');
+            const dz=mid(11,12,'z')-mid(23,24,'z');
+            if(Math.abs(dy)>.04){
+                const raw={pitch:Math.atan2(-dz,Math.abs(dy)),roll:Math.atan2(dx,Math.abs(dy))};
+                this.bodyNeutral ||= raw;
+                pitch=clamp(raw.pitch-this.bodyNeutral.pitch,-.25,.25);
+                // Keep the same shoulder roll source when hips enter/leave view.
+                // Switching between torso-axis and shoulder angles caused jumps.
+            }
+        }
+        // Suppress tiny camera fluctuations without a hard snap at the edge.
+        const quiet=(value,threshold)=>Math.sign(value)*Math.max(0,Math.abs(value)-threshold);
+        pitch=quiet(pitch,.03)+trackedPitch*.12;
+        roll=quiet(roll,.018);
+        vertical=quiet(vertical,this.height*.004);
+        // Smooth each pose channel exactly once using the same response as
+        // Live2D head parameters. Avoid cascaded body and bone smoothing.
+        rotate('torso',pitch*.7,0,roll*.7);
+        rotate('chest',pitch*.3,0,roll*.3);
+        // Remove any offset left by older vertical-translation tracking.
+        if(this.verticalBone && Number.isFinite(this.verticalRest))this.verticalBone.position.y=this.verticalRest;
+        this.verticalOffset=0;
         const assignedHands=new Map();
         for (const candidate of hands) {
             let side=candidate.side?.toLowerCase();
@@ -292,7 +394,7 @@ export default class AvatarRetarget {
             if (!assignedHands.has(side) || (candidate.confidence ?? 1)>(assignedHands.get(side).confidence ?? 1)) assignedHands.set(side,candidate);
         }
         for(const side of ['left','right']) {
-            const hand=this._confirmedHand(side,assignedHands.get(side),sample,bodyTracking);
+            const hand=this._confirmedHand(side,assignedHands.get(side),sample,handsTracking);
             const left=side==='left';
             const indices=left ? [11,13,15] : [12,14,16];
             const poseArmValid=!!hand && poseShouldersValid && indices.every(i=>posePoints[i]
@@ -339,7 +441,7 @@ export default class AvatarRetarget {
                 y.crossVectors(z,x).normalize();
                 const palm=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,z));
                 if(!this.palms[side]) this.palms[side]=palm.clone();
-                const motion=this.palms[side].clone().invert().multiply(palm);
+                const motion=palm.clone().multiply(this.palms[side].clone().invert());
                 const entry=bones[side+'Wrist'];
                 const parent=entry.bone.parent.getWorldQuaternion(new THREE.Quaternion());
                 const localMotion=parent.clone().invert().multiply(motion).multiply(parent);
@@ -347,29 +449,31 @@ export default class AvatarRetarget {
                 const rest=new THREE.Quaternion().setFromEuler(entry.rest);
                 const angle=rest.angleTo(target);
                 if(angle>1.2)target.slerpQuaternions(rest,target,1.2/angle);
-                entry.bone.quaternion.slerp(target,alpha);
+                entry.bone.quaternion.slerp(target,(key==='torso'||key==='chest') ? 1 : alpha);
             }
             for (const entry of this.fingers.filter(f=>f.side===side)) {
                 if (!hand) {
                     entry.bone.quaternion.slerp(entry.rest,alpha);
+                    entry.filteredCurl = undefined;
+                    entry.filteredSpread = undefined;
                     continue;
                 }
                 const points=hand?.world || hand?.landmarks;
                 const rawAngle=fingerJointCurl(points,entry.finger,entry.segment);
-                const angle=clamp(rawAngle-.04,0,entry.finger===0?1.1:1.6);
+                const desired=clamp(rawAngle-.02,0,entry.finger===0?1.1:1.6);
+                entry.filteredCurl=filterFingerValue(entry.filteredCurl,desired,delta);
+                const angle=entry.filteredCurl;
                 const target=entry.rest.clone();
                 if(entry.spreadAxis && points?.length===21) {
-                    const vector=(a,b)=>new THREE.Vector3(points[a].x-points[b].x,points[a].y-points[b].y,points[a].z-points[b].z);
-                    const normal=vector(5,0).cross(vector(17,0)).normalize().multiplyScalar(left?-1:1);
-                    const reference=vector(10,9).normalize(), base=entry.finger*4+1;
-                    const direction=vector(base+1,base).normalize();
-                    const spread=Math.atan2(normal.dot(reference.clone().cross(direction)),reference.dot(direction));
-                    if(normal.lengthSq()>1e-8 && reference.lengthSq()>1e-8 && direction.lengthSq()>1e-8) {
-                        target.multiply(new THREE.Quaternion().setFromAxisAngle(entry.spreadAxis,clamp(spread-entry.restSpread,-.45,.45)));
+                    const spread=fingerSpread(points,entry.finger,left);
+                    if (spread !== null) {
+                        entry.filteredSpread=filterFingerValue(entry.filteredSpread,clamp(spread-entry.restSpread,-.45,.45),delta);
                     }
+                    if(Number.isFinite(entry.filteredSpread)) target.multiply(new THREE.Quaternion().setFromAxisAngle(entry.spreadAxis,entry.filteredSpread));
                 }
                 target.multiply(new THREE.Quaternion().setFromAxisAngle(entry.bendAxis,angle));
-                entry.bone.quaternion.slerp(target,alpha);
+                const fingerAlpha=1-Math.exp(-Math.min(delta,.1)/.035);
+                entry.bone.quaternion.slerp(target,fingerAlpha);
             }
         }
     }

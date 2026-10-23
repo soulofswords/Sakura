@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync('android/assets/mobile.js','utf8');
+const begin=source.indexOf("$('phone-companion-camera-facing').onchange=");
+const end=source.indexOf("$('calibrate').onclick",begin);
+let calls=[],elements={'phone-companion-camera-facing':{value:'environment'},'camera-share':{click(){calls.push('restart')}}};
+const context={visionStream:{},companionTracking:false,$:id=>elements[id],stopPhoneVision(){calls.push('stop-video');context.visionStream=null},window:{stopPhoneTracking(){calls.push('stop-tracking')}},setPhoneCameraFacing(value){calls.push(value)}};
+vm.runInNewContext(source.slice(begin,end),context);
+elements['phone-companion-camera-facing'].onchange();
+assert.deepEqual(calls,['stop-video','stop-tracking','environment','restart']);
+calls=[];elements['phone-companion-camera-facing'].value='user';elements['phone-companion-camera-facing'].onchange();
+assert.deepEqual(calls,['stop-tracking','user'],'changing selection with camera off does not activate it');
+calls=[];context.companionTracking=true;elements['phone-companion-camera-facing'].onchange();assert.equal(calls.at(-1),'restart');
+console.log('PASS: front/rear switch restarts active object/tracking camera and stays off when inactive');

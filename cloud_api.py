@@ -32,7 +32,7 @@ def validate(provider,model='',endpoint='',vision=None):
     if vision is not None and type(vision) is not bool:raise ValueError('Choose whether this model supports images.')
     return base,model,default_vision if vision is None else vision
 
-def request(provider,model,key,messages,endpoint='',vision=False,summarizing=False):
+def request(provider,model,key,messages,endpoint='',vision=False,summarizing=False,planning=False):
     if not key:raise ValueError(f'No API key saved for {provider}. Add it in Settings > AI.')
     base,model,_=validate(provider,model,endpoint,vision)
     if any(m.get('images') for m in messages) and not vision:
@@ -48,14 +48,16 @@ def request(provider,model,key,messages,endpoint='',vision=False,summarizing=Fal
             parts=[{'type':'text','text':message['content']}]
             parts += [{'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+image}} for image in message.get('images',[])]
         converted.append({'role':message['role'],'content':parts if provider=='anthropic' or message.get('images') else message['content']})
+    limit=4096 if planning else (2048 if summarizing else 1024)
     if provider=='anthropic':
         route='/messages';headers={'x-api-key':key,'anthropic-version':'2023-06-01'}
-        body={'model':model,'system':systems,'messages':converted,'max_tokens':2048 if summarizing else 1024}
+        body={'model':model,'system':systems,'messages':converted,'max_tokens':limit}
     else:
         route='/chat/completions';headers={'Authorization':'Bearer '+key}
         body={'model':model,'messages':[{'role':'system','content':systems},*converted],'stream':False}
-        if provider=='openai':body['max_completion_tokens']=2048 if summarizing else 1024
-        else:body['max_tokens']=2048 if summarizing else 1024
+        if planning and provider in ('openai','groq'):body['response_format']={'type':'json_object'}
+        if provider=='openai':body['max_completion_tokens']=limit
+        else:body['max_tokens']=limit
     try:
         response=requests.post(base+route,headers=headers,json=body,timeout=(5,45),allow_redirects=False)
     except requests.RequestException:

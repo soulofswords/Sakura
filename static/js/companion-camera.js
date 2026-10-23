@@ -38,7 +38,7 @@ export class CompanionCameraModes {
         this.viewer=viewer;
         this.mode='';
     }
-    async start(mode, deviceId='') {
+    async start(mode, deviceId='', backend='mediapipe', faceSource='webcam') {
         if(!['objects','tracking'].includes(mode))throw new Error('Choose object recognition or face tracking.');
         this.stop();
         this.mode=mode;
@@ -46,7 +46,8 @@ export class CompanionCameraModes {
             if(mode==='objects') await this.objectCamera.start(deviceId);
             else {
                 this.viewer?.setVtuberTrackingMode(true);
-                await this.avatarTracking.start(deviceId);
+                this.avatarTracking.setFaceSource(faceSource);
+                await this.avatarTracking.start(deviceId, backend);
             }
         } catch(error) {
             this.stop();

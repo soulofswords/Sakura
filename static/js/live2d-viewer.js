@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {applyFaceMappings} from './live2d-face-mapping.js?v=1';
+import {applyFaceMappings} from './live2d-face-mapping.js?v=2';
 import {chatReaderLean} from './chat-reader-motion.js?v=1';
 import {renderPixelRatio} from './render-budget.js?v=startup68';
 import {installLive2DControls} from './live2d-controls.js?v=phone-touch73';
@@ -65,7 +65,8 @@ export default class Live2DViewer {
         this.owner=owner;this.expressions=new Map();this.values={};this.filtered={};this.neutral=null;this.pan={x:0,y:0};
         this.gazeTarget=null;this.gazePosition={x:0,y:0};
         this.motion={time:0,talkBlend:0,settle:0,wasTalking:false};
-        this.app=new PIXI.Application({width:innerWidth,height:innerHeight,backgroundAlpha:0,antialias:true,preserveDrawingBuffer:true,autoStart:false,sharedTicker:false,resolution:renderPixelRatio(innerWidth,innerHeight,Math.min(devicePixelRatio,2))});
+        const initialWidth=Math.max(1,owner.container.clientWidth||innerWidth),initialHeight=Math.max(1,owner.container.clientHeight||innerHeight);
+        this.app=new PIXI.Application({width:initialWidth,height:initialHeight,backgroundAlpha:0,antialias:true,preserveDrawingBuffer:true,autoStart:false,sharedTicker:false,resolution:renderPixelRatio(initialWidth,initialHeight,Math.min(devicePixelRatio,2))});
         Object.assign(this.app.view.style,{position:'absolute',inset:'0',width:'100%',height:'100%',visibility:'hidden'});
         owner.container.append(this.app.view);
         installLive2DControls(this.app.view,owner,this);
@@ -74,7 +75,7 @@ export default class Live2DViewer {
     }
     fit(){
         if(!this.avatar)return;
-        const w=innerWidth,h=innerHeight;const resolution=renderPixelRatio(w,h,Math.min(devicePixelRatio*({low:.75,balanced:1.25,high:2}[this.owner.quality]||1),2));
+        const w=Math.max(1,this.owner.container.clientWidth||innerWidth),h=Math.max(1,this.owner.container.clientHeight||innerHeight);const resolution=renderPixelRatio(w,h,Math.min(devicePixelRatio*({low:.75,balanced:1.25,high:2}[this.owner.quality]||1),2));
         if(this.app.renderer.resolution!==resolution || this.app.screen.width!==w || this.app.screen.height!==h){this.app.renderer.resolution=resolution;this.app.renderer.resize(w,h);}
         const m=this.avatar.internalModel;
         // Live2D is a 2D stage: changing the Three.js camera cannot frame it.

@@ -1,3 +1,4 @@
+import json
 import unittest
 import tempfile
 from pathlib import Path
@@ -45,6 +46,51 @@ class ContextTests(unittest.TestCase):
         fitted = LLM._fit_local_messages(messages, 4096, 160)
         self.assertEqual(fitted[-1]['images'], ['middle','latest'])
         self.assertEqual(messages[-1]['images'], ['old','middle','latest'])
+
+    def test_planning_gets_json_mode_and_room_for_a_full_action(self):
+        success = Mock(status_code=200)
+        success.json.return_value = {'message':{'content':'{"tool":"files.write","arguments":{"path":"a.md"}}'}}
+        with tempfile.TemporaryDirectory() as folder:
+            llm = LLM(Path(folder) / 'memory.json')
+            llm.configure_local('qwen3:4b', fallback=False, context=4096, timeout=8)
+            with patch('llm.requests.post', return_value=success) as post:
+                reply = llm._request_raw([{'role':'system','content':'Plan one step.'},{'role':'user','content':'{}'}],
+                                         structured=True, planning=True)
+            payload = post.call_args.kwargs['json']
+            self.assertEqual(payload['format'], 'json')
+            self.assertGreaterEqual(payload['options']['num_predict'], 1024)
+            self.assertGreaterEqual(payload['options']['num_ctx'], 8192)
+            self.assertEqual(payload['options']['temperature'], 0.1)
+            self.assertNotIn('Speak directly to the user in your own voice', json.dumps(payload['messages']))
+            self.assertEqual(reply, '{"tool":"files.write","arguments":{"path":"a.md"}}')
+            # A plan cut off by the token limit must stay cut off, not be
+            # "finished" into spoken prose that the runtime cannot parse.
+            success.json.return_value = {'message':{'content':'{"tool":"files"},"reason":"earl'},'done_reason':'length'}
+            with patch('llm.requests.post', return_value=success):
+                self.assertEqual(llm._request_raw([{'role':'user','content':'{}'}],structured=True,planning=True),
+                                 '{"tool":"files"},"reason":"earl')
+            # Ordinary companion replies keep the short cap that makes them begin quickly.
+            success.json.return_value = {'message':{'content':'Sure.'}}
+            with patch('llm.requests.post', return_value=success) as post:
+                llm._request_raw([{'role':'user','content':'hello'}])
+            self.assertEqual(post.call_args.kwargs['json']['options']['num_predict'], 192)
+            self.assertNotIn('format', post.call_args.kwargs['json'])
+
+    def test_gemini_planning_requests_json_without_disabling_thinking(self):
+        ok = Mock(status_code=200, ok=True, headers={})
+        ok.json.return_value = {'candidates':[{'content':{'parts':[{'text':'{"done":true,"summary":"ok"}'}]}}]}
+        with tempfile.TemporaryDirectory() as folder:
+            llm = LLM(Path(folder) / 'memory.json')
+            llm.gemini_model = 'gemini-2.5-flash'; llm.gemini_api_key = 'synthetic-key'
+            with patch('llm.requests.post', return_value=ok) as post:
+                llm._request_gemini([{'role':'user','content':'{}'}], planning=True)
+            config = post.call_args.kwargs['json']['generationConfig']
+            self.assertEqual(config['responseMimeType'], 'application/json')
+            self.assertNotIn('thinkingConfig', config)
+            self.assertGreaterEqual(config['maxOutputTokens'], 4096)
+            with patch('llm.requests.post', return_value=ok) as post:
+                llm._request_gemini([{'role':'user','content':'hello'}])
+            self.assertEqual(post.call_args.kwargs['json']['generationConfig']['thinkingConfig'], {'thinkingBudget': 0})
 
     def test_reported_context_overflow_retries_once(self):
         failure = Mock(status_code=400)

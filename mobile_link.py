@@ -28,7 +28,7 @@ class MobileLink:
             and re.fullmatch(r'[0-9a-f]{64}',str(value.get('token_hash','')))}
         self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={}
         self.pc_port=8766;self.port=8772 if EDITION=='vtuber' else 8771;self.code_expires=0;self.thread=None
-        self.model_transfer=None;self.model_package=None;self.transfer_request=None
+        self.model_transfer=None;self.model_package=None;self.transfer_request=None;self.tracking_control=None;self.tracking_sequence=0
         self.api=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
         self.api.add_api_route('/pair',self.pair,methods=['POST'])
         self.api.add_api_route('/state',self.phone_state,methods=['GET'])
@@ -123,8 +123,18 @@ class MobileLink:
                 return JSONResponse(response.json(),response.status_code)
         except (httpx.HTTPError,ValueError):return JSONResponse({'error':'PC tool unavailable. Retry when Sakura is ready.'},503)
 
+    def control_tracking(self, payload):
+        if not self.enabled or not self.devices:raise ValueError('Enable Connect to Phone and pair Sakura Mobile first.')
+        action=payload.get('action')
+        if action not in ('start','stop','calibrate','hands'):raise ValueError('Unsupported tracking action')
+        if action=='hands' and type(payload.get('enabled')) is not bool:raise ValueError('Hand tracking enabled must be a boolean')
+        with self.lock:
+            self.tracking_sequence+=1
+            self.tracking_control={'id':self.tracking_sequence,'action':action,'enabled':payload.get('enabled') if action=='hands' else None,'expires':time.time()+15}
+        return {'ok':True}
+
     async def phone_state(self):
-        return {**self.state,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request}
+        return {**self.state,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request,'tracking_control':self.tracking_control}
 
     def transfer_result(self,identifier,status,error=''):
         if status not in ('preparing','cancelled','failed'):raise ValueError('Invalid transfer status.')
@@ -217,7 +227,7 @@ class MobileLink:
         data=await request.json();face=data.get('face',{})
         matrix=face.get('matrix')
         import math
-        if not isinstance(matrix,list) or len(matrix)!=16 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in matrix):
+        if matrix is not None and (not isinstance(matrix,list) or len(matrix)!=16 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in matrix)):
             return JSONResponse({'error':'Invalid face pose'},400)
         landmarks=face.get('landmarks',[]);blendshapes=face.get('blendshapes',[])
         if not isinstance(landmarks,list) or len(landmarks)>500 or not isinstance(blendshapes,list) or len(blendshapes)>100:
@@ -227,7 +237,45 @@ class MobileLink:
         if any(not isinstance(p,dict) or not isinstance(p.get('categoryName'),str) or not isinstance(p.get('score'),(int,float)) or not math.isfinite(p['score']) for p in blendshapes):
             return JSONResponse({'error':'Invalid face blendshapes'},400)
         clean={'matrix':matrix,'landmarks':landmarks,'blendshapes':blendshapes}
-        with self.lock:self.frame={'face':clean,'hands':[],'pose':None,'headPoseFiltered':data.get('headPoseFiltered') is True,'timestamp':time.time()*1000}
+        camera=data.get('cameraFrame')
+        if camera is not None:
+            import base64,binascii
+            try:
+                if not isinstance(camera,dict):raise ValueError()
+                width,height=camera.get('width'),camera.get('height')
+                if type(width) is not int or type(height) is not int or not 1<=width<=960 or not 1<=height<=960:raise ValueError()
+                image=camera.get('image')
+                if not isinstance(image,str) or len(image)>140000:raise ValueError()
+                jpeg=base64.b64decode(image,validate=True)
+                if not jpeg.startswith(b'\xff\xd8\xff'):raise ValueError()
+            except (ValueError,binascii.Error):return JSONResponse({'error':'Invalid tracking camera image'},400)
+            if self.state.get('tracking_face_source')=='nvidia_ar':
+                from nvidia_ar_tracker import tracker
+                if tracker.snapshot()['running']:
+                    tracker.submit_frame(jpeg,width,height)
+                    shapes=tracker.snapshot().get('blendshapes',{})
+                    if shapes:clean['blendshapes']=[{'categoryName':k,'score':v} for k,v in shapes.items()]
+
+        def points(value, count):
+            return isinstance(value,list) and len(value)==count and all(isinstance(p,dict)
+                and all(type(p.get(k)) in (int,float) and math.isfinite(p[k]) for k in ('x','y','z'))
+                and ('visibility' not in p or type(p['visibility']) in (int,float) and math.isfinite(p['visibility'])) for p in value)
+        hands=data.get('hands',[]);pose=data.get('pose')
+        if not isinstance(hands,list) or len(hands)>2:
+            return JSONResponse({'error':'Invalid hand signals'},400)
+        for hand in hands:
+            if (not isinstance(hand,dict) or hand.get('side') not in ('Left','Right','left','right')
+                or not points(hand.get('landmarks'),21)
+                or hand.get('world') is not None and not points(hand['world'],21)
+                or type(hand.get('confidence',1)) not in (int,float)
+                or not math.isfinite(hand.get('confidence',1)) or not 0<=hand.get('confidence',1)<=1):
+                return JSONResponse({'error':'Invalid hand landmarks'},400)
+        if pose is not None and (not isinstance(pose,dict) or not points(pose.get('landmarks'),33)
+            or pose.get('world') is not None and not points(pose['world'],33)):
+            return JSONResponse({'error':'Invalid body pose'},400)
+        enabled=data.get('handTrackingEnabled',True) is not False
+        with self.lock:self.frame={'face':clean,'hands':hands if enabled else [],'pose':pose,
+            'handTrackingEnabled':enabled,'headPoseFiltered':data.get('headPoseFiltered') is True,'timestamp':time.time()*1000}
         return {'ok':True}
 
     async def chat(self,request:Request):

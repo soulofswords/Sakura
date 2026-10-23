@@ -79,13 +79,42 @@ class AgentTests(unittest.TestCase):
         self.runtime.cancel(self.run['id'])
         with patch('agent_runtime.run_process') as execute,self.assertRaises(ValueError):self.runtime.decide(action['id'],True)
         execute.assert_not_called()
-    def test_planner_only_proposes_and_stops_before_action(self):
-        model=Mock();model._request_raw.return_value=json.dumps({'tool':'files.list','arguments':{'path':'.'},'reason':'Find the CV'})
+    def test_planner_proposes_a_write_and_stops_before_action(self):
+        model=Mock();model._request_raw.return_value=json.dumps(
+            {'tool':'files.write','arguments':{'path':'draft.md','content':'# Plan\n\nApproved wording.'},'reason':'Save the draft'})
         with patch.object(self.runtime,'_execute') as execute:
             result=self.runtime.plan(self.run['id'],model)
         execute.assert_not_called();self.assertEqual(result['status'],'awaiting_approval')
         self.assertTrue(model._request_raw.call_args.kwargs['structured'])
+        self.assertTrue(model._request_raw.call_args.kwargs['planning'])
         self.assertIn('brief, natural, respectful speech',model._request_raw.call_args.args[0][0]['content'])
+        context=json.loads(model._request_raw.call_args.args[0][1]['content'])
+        self.assertNotIn('inputSchema',json.dumps(context['tools']))
+        self.assertIn('files.write',[item['name'] for item in context['tools']])
+    def test_planner_runs_read_only_steps_without_a_click_then_stops_at_the_write(self):
+        model=Mock()
+        model._request_raw.side_effect=[
+            json.dumps({'tool':'files.list','arguments':{'path':'.'},'reason':'Find the source','plan':'read it, then write'}),
+            json.dumps({'tool':'files.read','arguments':{'path':'notes.txt'},'reason':'Read the source'}),
+            json.dumps({'tool':'files.write','arguments':{'path':'out.md','content':'# Result\n\nFrom the notes.'},'reason':'Save it'})]
+        (self.root/'notes.txt').write_text('Only approved facts',encoding='utf-8')
+        result=self.runtime.plan(self.run['id'],model)
+        self.assertEqual([step['tool'] for step in result['steps']],['files.list','files.read','files.write'])
+        self.assertEqual([step['status'] for step in result['steps']],['completed','completed','pending'])
+        self.assertEqual([bool(step.get('auto')) for step in result['steps']],[True,True,False])
+        self.assertEqual(result['status'],'awaiting_approval')
+        self.assertEqual(result['plan'],'read it, then write')
+    def test_auto_continue_off_keeps_every_step_pending(self):
+        run=self.runtime.new_run('Read my notes',str(self.root),auto_continue=False)
+        model=Mock();model._request_raw.return_value=json.dumps({'tool':'files.list','arguments':{'path':'.'},'reason':'List the folder'})
+        with patch.object(self.runtime,'_execute') as execute:
+            result=self.runtime.plan(run['id'],model)
+        execute.assert_not_called();self.assertEqual(result['steps'][0]['status'],'pending')
+    def test_auto_continue_never_approves_a_shell_command(self):
+        model=Mock();model._request_raw.return_value=json.dumps({'tool':'shell.run','arguments':{'command':'Remove-Item draft.md'},'reason':'Clean up'})
+        with patch.object(self.runtime,'_execute') as execute:
+            result=self.runtime.plan(self.run['id'],model)
+        execute.assert_not_called();self.assertEqual(result['steps'][0]['status'],'pending')
     def test_planner_ignores_trailing_provider_text_after_one_valid_object(self):
         value=_decode_plan('{"tool":"files.list","arguments":{"path":"."},"reason":"Find resume"}\nprovider footer')
         self.assertEqual(value['tool'],'files.list')
@@ -128,6 +157,82 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(restored.clear_history(),{'ok':True})
         self.assertFalse(store.exists())
         self.assertEqual(AgentRuntime(Connections(self.root/'persisted-connections.json'),store_path=store).runs,{})
+
+
+class RuntimeLimitsTests(unittest.TestCase):
+    """The Agent panel must stay usable across a long session, not only in a first task."""
+
+    def setUp(self):
+        self.folder=tempfile.TemporaryDirectory();self.addCleanup(self.folder.cleanup)
+        self.root=Path(self.folder.name)
+        self.store=self.root/'history.json'
+        self.runtime=AgentRuntime(Connections(self.root/'connections.json'),store_path=self.store)
+
+    def fill(self,status):
+        for index in range(30):
+            run=self.runtime.new_run(f'Task {index}',str(self.root))
+            self.runtime.runs[run['id']]['status']=status
+
+    def test_a_full_session_evicts_a_run_instead_of_refusing_new_work(self):
+        self.fill('failed')
+        before=len(self.runtime.runs)
+        self.runtime.new_run('One more task',str(self.root))
+        self.assertEqual(len(self.runtime.runs),before)
+
+    def test_evicting_a_run_drops_its_stored_approvals(self):
+        oldest=self.runtime.new_run('Oldest task',str(self.root))['id']
+        self.runtime.propose(oldest,'files.list',{'path':'.'})
+        self.assertTrue(any(action.get('run_id')==oldest for action in self.runtime.actions.values()))
+        self.runtime.runs[oldest]['status']='completed'
+        for index in range(30):self.runtime.new_run(f'Filler {index}',str(self.root))
+        self.assertFalse(any(action.get('run_id')==oldest for action in self.runtime.actions.values()))
+
+    def test_only_tasks_waiting_on_a_click_block_a_new_one(self):
+        self.fill('awaiting_approval')
+        self.runtime.runs[next(iter(self.runtime.runs))]['status']='running'
+        with self.assertRaisesRegex(ValueError,'waiting for your approval'):
+            self.runtime.new_run('Cannot start yet',str(self.root))
+
+    def test_cancel_marks_the_step_record_not_only_the_action(self):
+        run=self.runtime.new_run('Cancel me',str(self.root))
+        pending=self.runtime.propose(run['id'],'files.list',{'path':'.'})['steps'][-1]
+        cancelled=self.runtime.cancel(run['id'])
+        self.assertEqual(cancelled['steps'][-1]['status'],'rejected')
+        self.assertEqual(cancelled['status'],'cancelled')
+        self.assertNotIn(pending['id'],self.runtime.actions)
+        self.assertFalse(self.store.read_text(encoding='utf-8').count('"pending"'))
+
+    def test_a_decided_action_is_forgotten_by_the_pending_table(self):
+        run=self.runtime.new_run('Finish me',str(self.root))
+        with self.runtime.lock:live=len(self.runtime.actions)
+        action=self.runtime.propose(run['id'],'files.list',{'path':'.'})['steps'][-1]
+        self.runtime.decide(action['id'],True)
+        with self.runtime.lock:self.assertEqual(len(self.runtime.actions),live)
+
+    def test_records_are_returned_without_tamper_check_internals(self):
+        (self.root/'cv.txt').write_text('Real resume text',encoding='utf-8')
+        run=self.runtime.new_run('Hide internals',str(self.root))
+        self.runtime.propose(run['id'],'files.read',{'path':'cv.txt'})
+        shown=self.runtime.state(run['id'])['steps'][-1]
+        self.assertNotIn('bindings',shown);self.assertNotIn('approval_digest',shown);self.assertNotIn('schema_hash',shown)
+        self.assertEqual([item['id'] for item in self.runtime.states()],
+                         [item['id'] for item in self.runtime.runs.values()])
+        live=[action for action in self.runtime.actions.values() if action.get('tool')=='files.read']
+        self.assertIn('file_hash',live[0]['bindings'])
+        self.runtime.decide(live[0]['id'],True)
+
+    def test_the_history_file_stays_inside_its_budget(self):
+        from agent_runtime import MAX_STORE_BYTES
+        run=self.runtime.new_run('Oversized',str(self.root))
+        action=self.runtime.propose(run['id'],'files.list',{'path':'.'})
+        step=self.runtime.runs[run['id']]['steps'][-1]
+        # A preview field that the old per-key truncation never covered.
+        step['result']={'tools':[{'description':'y'*40000} for _ in range(200)]}
+        self.runtime._save_runs()
+        self.assertLessEqual(self.store.stat().st_size,MAX_STORE_BYTES)
+        restored=AgentRuntime(Connections(self.root/'second-connections.json'),store_path=self.store)
+        stored=restored.runs[run['id']]['steps'][-1]['result']['tools'][0]['description']
+        self.assertLess(len(stored),40000);self.assertIn('Stored history truncated',stored)
 
 
 class ConnectionTests(unittest.TestCase):

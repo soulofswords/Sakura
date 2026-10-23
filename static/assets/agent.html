@@ -53,7 +53,7 @@
 <label>Reusable skill<select id="selected-skill"><option value="">No skill</option></select></label>
 <p id="planner-provider-status" class="muted">Choose which configured AI plans each step.</p>
 <p class="notice">Files stay in this folder. Sakura can read source documents and create new DOCX or Markdown drafts after you approve each step. It will not overwrite the original. Approved shell commands and MCP processes run with your user permissions; the workspace is not a sandbox. Results read by a cloud model are sent to that selected provider.</p>
-<label><input id="auto-plan" type="checkbox" checked style="width:auto"> Automatically suggest the next step after a successful approved action</label>
+<label><input id="auto-plan" type="checkbox" checked style="width:auto"> Work through read-only steps (folder listings, file reads, web search) on their own. Anything that writes a file, runs a command, posts or changes your calendar still stops for your approval.</label>
 <div class="row"><button id="create">Create task</button><button id="plan">Suggest next step</button><button id="cancel">Cancel task</button></div></section>
 <section id="review" class="card" hidden></section>
 <section class="card"><h2>Task progress</h2><div id="progress">Select or create a task to begin.</div></section>
@@ -105,7 +105,7 @@ function renderRun(run){
  progress.append(node('h3',run.goal),node('p','Workspace: '+run.workspace),node('span',run.status,'badge'));
  if(run.summary)progress.append(node('p',run.summary));
  for(const step of run.steps){
-  const detail=node('details');detail.append(node('summary',step.tool+' · '+step.status),node('pre',JSON.stringify(step.arguments,null,2)));
+  const detail=node('details');detail.append(node('summary',step.tool+' · '+(step.auto?'auto-read · '+step.status:step.status)),node('pre',JSON.stringify(step.arguments,null,2)));
   if(step.result)detail.append(node('pre',JSON.stringify(step.result,null,2)));progress.append(detail);
  }
  const pending=run.steps.findLast(s=>s.status==='pending');if(pending)renderReview(pending);
@@ -142,7 +142,7 @@ $('save-connection').onclick=()=>perform(async()=>{
  const data={name:$('connection-name').value,transport:$('transport').value,url:$('mcp-url').value,token:$('mcp-token').value,command:$('mcp-command').value,args:JSON.parse($('mcp-args').value||'[]'),env:JSON.parse($('mcp-env').value||'{}')};
  await api('connections',data);$('mcp-token').value='';$('mcp-env').value='';await refresh();
 });
-$('create').onclick=()=>perform(async()=>{const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value});selected=run.id;renderReview(null);renderRun(run);announce('All right, I will work through this one step at a time and check with you before anything runs.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
+$('create').onclick=()=>perform(async()=>{const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value,auto_continue:$('auto-plan').checked===true});selected=run.id;renderReview(null);renderRun(run);announce('All right. I will read what I need on my own and stop for your approval before anything changes.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
  $('plan').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderReview(null);const planned=await api('tasks/'+selected+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));await refresh();});
 $('propose').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderRun(await api('tasks/'+selected+'/propose',{tool:$('tool').value,arguments:JSON.parse($('tool-args').value)}));await refresh();});
 $('cancel').onclick=()=>perform(async()=>{if(!selected)return;renderReview(null);renderRun(await api('tasks/'+selected+'/cancel',{}));await refresh();});

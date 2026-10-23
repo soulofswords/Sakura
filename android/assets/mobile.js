@@ -65,9 +65,9 @@ $('camera-share')?.addEventListener('click',async()=>{
     window.stopPhoneTracking();
     try{
         const facing=$('phone-companion-camera-facing').value;tracker.cameraFacingMode=facing;$('camera-facing').value=facing;localStorage.setItem('sakura-phone-camera',facing);
-        const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:facing,width:{ideal:480},height:{ideal:360}}});
+        const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{exact:facing},width:{ideal:480},height:{ideal:360}}});
         if(!connected){stream.getTracks().forEach(t=>t.stop());return;}
-        visionStream=stream;const video=$('phone-camera-preview');video.srcObject=stream;await video.play();
+        visionStream=stream;const video=$('phone-camera-preview');video.srcObject=stream;video.style.transform=facing==='user'?'scaleX(-1)':'none';await video.play();
         command({type:'camera-start'});$('camera-share').textContent='Stop object recognition';
         status('Object recognition on · camera images go to the paired PC');
         const canvas=document.createElement('canvas');
@@ -81,11 +81,19 @@ $('camera-share')?.addEventListener('click',async()=>{
     }catch(error){stopPhoneVision();status(error.message);}
 });
 window.addEventListener('pagehide',()=>{stopPhoneVision();if(remoteTracking)window.stopPhoneTracking();});
-const viewer={live2d:true,setUserTracking(value){remoteTracking=value;},updateUserTracking(data){
-    if(!remoteTracking||frameBusy||!data.face?.matrix)return;
-    frameBusy=true;try{request('/frame',{face:{...data.face,matrix:Array.from(data.face.matrix)},headPoseFiltered:data.headPoseFiltered===true});}catch(error){status(error.message);}finally{frameBusy=false;}
+let pcNvidiaFrames=false;const rtxCanvas=document.createElement('canvas');
+const viewer={live2d:false,setUserTracking(value){remoteTracking=value;},async updateUserTracking(data){
+    if(!remoteTracking||frameBusy)return;
+    frameBusy=true;try{
+    let cameraFrame;
+    if(pcNvidiaFrames&&tracker.video?.videoWidth){
+        const w=Math.min(480,tracker.video.videoWidth),h=Math.round(w*tracker.video.videoHeight/tracker.video.videoWidth);
+        rtxCanvas.width=w;rtxCanvas.height=h;rtxCanvas.getContext('2d',{alpha:false}).drawImage(tracker.video,0,0,w,h);
+        cameraFrame={image:rtxCanvas.toDataURL('image/jpeg',.6).split(',')[1],width:w,height:h};
+    }
+    await nativeJob('trackingFrameAsync',JSON.stringify({cameraFrame,face:{...data.face,matrix:data.face?.matrix?Array.from(data.face.matrix):null},headPoseFiltered:data.headPoseFiltered===true,hands:data.hands||[],pose:data.pose||null,handTrackingEnabled:data.handTrackingEnabled!==false}));}catch(error){status(error.message);}finally{frameBusy=false;}
 },calibrateUserTracking(){command({type:'calibrate'});}};
-const tracker=new AvatarTracking(viewer,status);tracker.handTrackingEnabled=false;tracker.frameRate=24;
+const tracker=new AvatarTracking(viewer,status);tracker.handTrackingEnabled=true;tracker.frameRate=30;tracker.inferenceWidth=640;tracker.poseStride=2;tracker.preferGPU=true;
 tracker.cameraFacingMode=localStorage.getItem('sakura-phone-camera')==='environment'?'environment':'user';
 $('camera-facing').value=tracker.cameraFacingMode;
 $('phone-companion-camera-facing').value=tracker.cameraFacingMode;
@@ -111,13 +119,22 @@ $('tracking').onclick=async()=>{if(remoteTracking){window.stopPhoneTracking();re
 $('phone-companion-camera-mode').onchange=()=>{if(visionStream)stopPhoneVision();if(companionTracking)window.stopPhoneTracking();$('camera-share').textContent=$('phone-companion-camera-mode').value==='tracking'?'Start face tracking':'Start object recognition';};
 function setPhoneCameraFacing(value){$('camera-facing').value=value;$('phone-companion-camera-facing').value=value;tracker.cameraFacingMode=value;localStorage.setItem('sakura-phone-camera',value);$('camera').style.transform=value==='user'?'scaleX(-1)':'none';}
 $('camera-facing').onchange=()=>{const restart=remoteTracking,wasCompanion=companionTracking;window.stopPhoneTracking();setPhoneCameraFacing($('camera-facing').value);if(wasCompanion)$('camera-share').click();else if(restart)$('tracking').click();};
-$('phone-companion-camera-facing').onchange=()=>{const restart=companionTracking;window.stopPhoneTracking();setPhoneCameraFacing($('phone-companion-camera-facing').value);if(restart)$('camera-share').click();};
+$('phone-companion-camera-facing').onchange=()=>{
+    const value=$('phone-companion-camera-facing').value;
+    const restart=companionTracking||Boolean(visionStream);
+    // Release the previous camera before opening the other Android lens.
+    if(visionStream)stopPhoneVision();
+    window.stopPhoneTracking();
+    setPhoneCameraFacing(value);
+    if(restart)$('camera-share').click();
+};
 $('calibrate').onclick=()=>{try{command({type:'calibrate'});status('PC neutral pose calibrated');}catch(error){status(error.message);}};
 $('clear').onclick=()=>{try{command({type:'clear-expressions'});active.clear();renderExpressions();}catch(error){status(error.message);}};
 function renderExpressions(){const list=$('expressions');list.replaceChildren();for(const name of expressions){const button=document.createElement('button');button.textContent=name;button.classList.toggle('active',active.has(name));button.onclick=()=>{try{const enabled=!active.has(name);command({type:'expression',name,enabled});if(enabled)active.add(name);else active.delete(name);button.classList.toggle('active',enabled);}catch(error){status(error.message);}};list.append(button);}}
 $('gemini').onclick=()=>{try{request('/gemini',{key:$('key').value});$('key').value='';status('Gemini selected on the PC');}catch(error){status(error.message);}};
 $('send').onclick=()=>{const text=$('message').value.trim();if(!text)return;$('send').disabled=true;status('Sakura is thinking…');setTimeout(()=>{try{const data=request('/chat',{text});$('conversation').textContent+='You: '+text+'\nSakura: '+data.reply+'\n\n';$('message').value='';status('Connected');}catch(error){status(error.message);}finally{$('send').disabled=false;}},30);};
-setInterval(()=>{if(!connected||frameBusy||selectedMode!=='pc')return;try{const data=request('/state');if(data.avatar){$('avatar').src='data:image/jpeg;base64,'+data.avatar;$('avatar').style.display='block';}else $('avatar').style.display='none';const next=data.expressions||[];if(JSON.stringify(next)!==JSON.stringify(expressions)){expressions=next;active.clear();renderExpressions();}}catch(error){connected=false;stopPhoneVision(false);window.stopPhoneTracking();status(error.message);autoReconnect();}},2000);
+let phoneStateBusy=false,lastTrackingControl=0;
+setInterval(async()=>{if(!connected||phoneStateBusy||selectedMode!=='pc')return;phoneStateBusy=true;try{const data=await nativeJob('trackingStateAsync');pcNvidiaFrames=data.tracking_face_source==='nvidia_ar';const c=data.tracking_control;if(c&&c.id!==lastTrackingControl&&c.expires*1000>Date.now()){lastTrackingControl=c.id;if(c.action==='stop')window.stopPhoneTracking();else if(c.action==='hands')tracker.setHandTracking(c.enabled===true);else if(c.action==='calibrate')$('calibrate').click();else if(c.action==='start'&&!remoteTracking&&!companionTracking)$('tracking').click();}if(data.avatar){$('avatar').src='data:image/jpeg;base64,'+data.avatar;$('avatar').style.display='block';}else $('avatar').style.display='none';const next=data.expressions||[];if(JSON.stringify(next)!==JSON.stringify(expressions)){expressions=next;active.clear();renderExpressions();}}catch(error){connected=false;stopPhoneVision(false);window.stopPhoneTracking();status(error.message);autoReconnect();}finally{phoneStateBusy=false;}},500);
 if(!standaloneAvailable){$('pc-mode').classList.remove('hidden');setTimeout(autoReconnect,100);}
 
 // Explicit paired-device tools. No background clipboard polling.

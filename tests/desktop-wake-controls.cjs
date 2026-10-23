@@ -12,6 +12,7 @@ const settings={wake_word_enabled:false,wake_word:'hey sakura'};
 (async()=>{
  const controls=context.create({continuousMic:{stop(){calls.push(['browser-mic-stop']);}},settings:()=>settings,blocked:()=>blocked,receive:async text=>{calls.push(['question',text]);},status:text=>calls.push(['status',text])});
  await controls.sync();assert.equal(enabled,false);assert.equal(calls.some(c=>c[0]==='download'),false,'No automatic wake pack download');
+ await context.window.receiveDesktopWakeCommand('late audio');assert.equal(calls.some(c=>c[0]==='question'),false,'Disabled wake input rejects late commands');
  settings.wake_word_enabled=true;await controls.sync();assert.equal(enabled,false,'Missing pack never opens the microphone');
  await element('desktop-wake-download').onclick();assert.equal(enabled,true);
  assert.ok(calls.some(c=>c[0]==='browser-mic-stop'),'Browser recorder is released before native wake detection');

@@ -1,0 +1,6 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const s=fs.readFileSync('android/assets/mobile.js','utf8');
+const start=s.indexOf('async updateUserTracking(data){')+'async updateUserTracking(data)'.length,end=s.indexOf('},calibrateUserTracking',start)+1;
+let release,uploads=0,payload;const c={remoteTracking:true,frameBusy:false,pcNvidiaFrames:false,Array,JSON,status(){},nativeJob(name,body){payload=JSON.parse(body);uploads++;return new Promise(r=>release=r)}};
+const fn=vm.runInNewContext('(async function(data)'+s.slice(start,end)+')',c);
+(async()=>{const frame={face:{matrix:[1]},hands:[]};const first=fn(frame);assert.equal(uploads,1);await fn(frame);assert.equal(uploads,1,'slow upload must not queue stale frames');release({ok:true});await first;assert.equal(c.frameBusy,false);const second=fn(frame);assert.equal(uploads,2);release({ok:true});await second;const bodyOnly=fn({face:{matrix:null},hands:[{side:'Left'}],pose:{landmarks:[]}});assert.equal(uploads,3);assert.equal(payload.face.matrix,null);assert.equal(payload.hands.length,1);release({ok:true});await bodyOnly;console.log('PASS: asynchronous single-flight tracking uploads drop stale frames and resume after completion');})().catch(e=>{console.error(e);process.exitCode=1});

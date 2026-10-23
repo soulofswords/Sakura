@@ -275,6 +275,16 @@ def list_models(folder=''):
     try:
         response = requests.get(url + '/api/tags', timeout=3)
         response.raise_for_status()
-        return [{'name': m['name'], 'size': m.get('size', 0)} for m in response.json().get('models', [])]
+        models=response.json().get('models', [])
+        # Ollama 0.40 can expose migrated runner manifests as duplicate names
+        # and internal llamacpp:<digest> aliases. These are not user models.
+        public_digests={m.get('digest') for m in models if not m.get('name','').startswith('llamacpp:')}
+        unique={}
+        for item in models:
+            name=item['name']
+            if name.startswith('llamacpp:') and item.get('digest') in public_digests:continue
+            row={'name':name,'size':item.get('size',0)}
+            if name not in unique or row['size']>unique[name]['size']:unique[name]=row
+        return list(unique.values())
     except (requests.RequestException, ValueError, KeyError) as exc:
         raise ValueError('Could not read local models. Start Ollama or check the selected folder.') from exc

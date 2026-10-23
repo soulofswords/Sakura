@@ -74,6 +74,7 @@ def get_settings():
     default = {
         "llm_provider": "ollama",
         "ollama_model": OLLAMA_MODEL,
+        "game_ollama_model": "", "game_cloud_auto_enabled": True,
         "ollama_models_folder": "",
         "ollama_context": 4096,
         "gemini_fallback_enabled": False,
@@ -86,6 +87,7 @@ def get_settings():
         "news_area": "",
         "evidence_confidence_threshold": 0.9,
         "response_restriction_level": "off",
+        "web_search_enabled": True,
         "phone_link_enabled":False,
         "phone_system_access_enabled":False,
         "phone_clipboard_enabled":False,
@@ -134,7 +136,19 @@ def save_settings(data: dict):
     cur.update(data)
     if cur.get('llm_provider') not in ('ollama','auto'):cur['last_cloud_provider']=cur['llm_provider']
     cur['selected_voice']=canonical_voice_id(cur.get('selected_voice',DEFAULT_VOICE_ID))
-    SETTINGS_FILE.write_text(json.dumps(cur, indent=2), encoding="utf-8")
+    # Write beside the real file, then swap: a crash mid-write cannot leave a
+    # truncated settings file that get_settings() silently falls back to defaults.
+    handle = tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=str(SETTINGS_FILE.parent),
+                                         prefix='.settings-', suffix='.tmp', delete=False)
+    try:
+        with handle:
+            json.dump(cur, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(handle.name, SETTINGS_FILE)
+    except BaseException:
+        Path(handle.name).unlink(missing_ok=True)
+        raise
     return cur
 
 def public_settings(settings):
@@ -146,11 +160,14 @@ def public_settings(settings):
     from credentials import get_cloud_key
     try:result['cloud_key_set']=bool(get_cloud_key(settings.get('llm_provider',''),settings.get('cloud_endpoint','')))
     except (OSError,ValueError):result['cloud_key_set']=False
+    try:result['brave_key_set']=bool(get_cloud_key('brave'))
+    except (OSError,ValueError):result['brave_key_set']=False
     return result
 
 
 def configure_saved_ai(model,settings):
     provider=settings.get('llm_provider','ollama')
+    model.web_search_enabled=bool(settings.get('web_search_enabled',True))
     if provider in ('ollama','gemini'):
         model.configure_provider(provider,settings.get('gemini_model','gemini-flash-latest'),get_gemini_key())
     else:
@@ -297,10 +314,16 @@ async def lifespan(_app: FastAPI):
         phone_link.stop()
         from spout_output import output as spout_sender
         await run_in_threadpool(spout_sender.stop)
+        from virtual_camera import output as virtual_camera_sender
+        await run_in_threadpool(virtual_camera_sender.stop)
         from rvc_manager import stop_rvc_service
         await run_in_threadpool(stop_rvc_service)
         from youtube_chat import chat as youtube_inbox
         await run_in_threadpool(youtube_inbox.stop)
+        from nvidia_ar_tracker import tracker as nvidia_face_tracker
+        await run_in_threadpool(nvidia_face_tracker.stop)
+        from nvidia_expressionapp_tracker import tracker as nvidia_dlc_tracker
+        await run_in_threadpool(nvidia_dlc_tracker.stop)
         from ollama_runtime import stop
         await run_in_threadpool(stop)
 
@@ -391,10 +414,199 @@ async def spout_status():
     from spout_output import output
     return output.status()
 
+@app.post('/api/virtual-camera/configure')
+async def configure_virtual_camera(payload: dict):
+    from virtual_camera import output
+    if type(payload.get('enabled')) is not bool:
+        return JSONResponse({'error':'enabled must be true or false'},400)
+    try:
+        return await run_in_threadpool(output.configure,payload['enabled'],'Sakura')
+    except ValueError as error:
+        return JSONResponse({'error':str(error)},400)
+
+@app.post('/api/virtual-camera/frame')
+async def virtual_camera_frame(request: Request, width: int, height: int):
+    from virtual_camera import output
+    if not 1 <= width <= 1280 or not 1 <= height <= 1280:
+        return JSONResponse({'error':'Invalid frame dimensions'},400)
+    expected=width*height*4
+    pixels=bytearray()
+    async for chunk in request.stream():
+        if len(pixels)+len(chunk)>expected:
+            return JSONResponse({'error':'Frame exceeds expected size'},400)
+        pixels.extend(chunk)
+    try:
+        output.submit(request.headers.get('x-camera-session',''),bytes(pixels),width,height)
+        return {'ok':True,'device':output.status()['device']}
+    except ValueError:
+        return JSONResponse({'error':output.error or 'Virtual camera session stopped. Enable it again.'},409)
+
 @app.get('/api/tracking/nvidia-sdk')
 async def nvidia_sdk_status():
     from nvidia_ar_setup import sdk_status
     return await run_in_threadpool(sdk_status,get_settings().get('nvidia_ar_sdk_folder',''))
+
+@app.post('/api/tracking/nvidia-sdk/download')
+async def download_nvidia_sdk():
+    from nvidia_ar_setup import CORE_DOWNLOAD_URL
+    if sys.platform!='win32':
+        return JSONResponse({'error':'This package is for Windows x64 RTX PCs.'},400)
+    opened=await run_in_threadpool(webbrowser.open,CORE_DOWNLOAD_URL)
+    return {'ok':bool(opened),'url':CORE_DOWNLOAD_URL,'message':'Download opened in your browser. Sign in to your own NVIDIA account if requested. After it finishes, choose Import downloaded SDK ZIP. Download progress is shown in your browser.'}
+
+@app.post('/api/tracking/nvidia-sdk/import')
+async def import_nvidia_sdk(file: UploadFile = File(...)):
+    from nvidia_ar_setup import import_sdk_archive
+    try:
+        result=await run_in_threadpool(import_sdk_archive,file.file,BASE_DIR/'optional'/'nvidia-ar')
+        save_settings({'nvidia_ar_sdk_folder':result['folder']})
+        return result
+    except Exception as error:
+        return JSONResponse({'error':str(error)},400)
+    finally:
+        await file.close()
+
+def _started_locally(request: Request):
+    """Allow same-origin and native-webview calls; refuse POSTs driven by another website.
+
+    A cross-origin page cannot read these responses, but a multipart or JSON POST still
+    executes, so the endpoints that launch installers have to check who is asking.
+    """
+    origin = str(request.headers.get('origin') or '').strip()
+    if not origin:
+        # No Origin means a non-browser caller (the desktop window or a local script),
+        # unless the browser itself reports the request as cross-site.
+        return str(request.headers.get('sec-fetch-site') or '').lower() != 'cross-site'
+    from urllib.parse import urlsplit
+    try:
+        host = (urlsplit(origin).hostname or '').strip('[]')
+    except ValueError:
+        return False
+    return host in ('localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1')
+
+
+@app.post('/api/tracking/nvidia-sdk/install-features')
+async def install_nvidia_sdk_features(request: Request):
+    from nvidia_ar_feature_installer import installer
+    from nvidia_ar_setup import sdk_status
+    if not _started_locally(request):
+        return JSONResponse({'error':'NVIDIA feature installation can only be started from this computer.'},403)
+    try:
+        payload=await request.json()
+        api_key=str(payload.get('api_key','')).strip()
+        folder=str(payload.get('folder') or get_settings().get('nvidia_ar_sdk_folder','')).strip()
+        detected=await run_in_threadpool(sdk_status,folder)
+        if not detected.get('installed'):
+            return JSONResponse({'error':'Install NVIDIA AR SDK Core first, then install the face-tracking features.'},409)
+        save_settings({'nvidia_ar_sdk_folder':detected['folder']})
+        result=await run_in_threadpool(installer.start,detected['folder'],api_key)
+        # Never echo or persist the submitted NGC key.
+        return result
+    except (ValueError,FileNotFoundError,RuntimeError) as error:
+        return JSONResponse({'error':str(error)},400)
+    except Exception as error:
+        return JSONResponse({'error':f'Could not start NVIDIA feature setup: {error}'},400)
+
+@app.get('/api/tracking/nvidia-sdk/install-features')
+async def nvidia_sdk_features_install_status():
+    from nvidia_ar_feature_installer import installer
+    return installer.status()
+
+@app.get('/api/tracking/nvidia-ar')
+async def nvidia_ar_tracking_status():
+    from nvidia_ar_tracker import tracker
+    return tracker.snapshot()
+
+@app.post('/api/tracking/nvidia-ar/start')
+async def start_nvidia_ar_tracking():
+    from nvidia_ar_setup import sdk_status
+    from nvidia_ar_tracker import tracker
+    detected=await run_in_threadpool(sdk_status,get_settings().get('nvidia_ar_sdk_folder',''))
+    if not detected.get('tracking_ready'):
+        return JSONResponse({'error':detected.get('message','NVIDIA AR SDK is not ready.'),'sdk':detected},409)
+    try:
+        return await run_in_threadpool(tracker.start,detected['folder'])
+    except Exception as error:
+        return JSONResponse({'error':str(error)},500)
+
+@app.post('/api/tracking/nvidia-ar/frame')
+async def submit_nvidia_ar_frame(request: Request, width: int, height: int):
+    from nvidia_ar_tracker import tracker
+    try:
+        payload=await request.body()
+        await run_in_threadpool(tracker.submit_frame,payload,width,height)
+        return {'ok':True}
+    except (ValueError,RuntimeError) as error:
+        return JSONResponse({'error':str(error)},409)
+
+@app.post('/api/tracking/nvidia-ar/stop')
+async def stop_nvidia_ar_tracking():
+    from nvidia_ar_tracker import tracker
+    await run_in_threadpool(tracker.stop)
+    return {'ok':True,'running':False}
+
+@app.get('/api/tracking/nvidia-expressionapp')
+async def nvidia_expressionapp_status():
+    from nvidia_expressionapp_tracker import tracker, detect_installed_folder
+    result=tracker.snapshot()
+    result['folder']=get_settings().get('nvidia_expressionapp_folder') or detect_installed_folder()
+    result['camera']=get_settings().get('nvidia_expressionapp_camera',0)
+    return result
+
+@app.post('/api/tracking/nvidia-expressionapp/install')
+async def install_nvidia_expressionapp():
+    if sys.platform!='win32':return JSONResponse({'error':'The Steam NVIDIA Broadcast Tracker DLC runs on Windows only.'},400)
+    from nvidia_expressionapp_tracker import detect_installed_folder
+    detected=detect_installed_folder()
+    if detected:
+        save_settings({'nvidia_expressionapp_folder':detected})
+        return {'ok':True,'installed':True,'folder':detected,'message':'NVIDIA tracker DLC is already installed and ready in Sakura.'}
+    # Steam performs the authenticated download and keeps the DLC associated
+    # with the user's VTube Studio base-app account; Sakura must not mirror it.
+    uri='steam://install/2178540'
+    opened=await run_in_threadpool(webbrowser.open,uri)
+    if not opened:
+        opened=await run_in_threadpool(webbrowser.open,'https://store.steampowered.com/app/2178540/VTube_Studio__NVIDIA_Broadcast_Tracker/')
+    return {'ok':bool(opened),'installed':False,'message':'Steam was opened for the NVIDIA Broadcast Tracker DLC. Confirm Install in Steam; Sakura will detect it when the download finishes.' if opened else 'Could not open Steam. Start Steam and try again.'}
+
+@app.post('/api/tracking/nvidia-expressionapp/settings')
+async def save_nvidia_expressionapp_settings(request: Request):
+    payload=await request.json()
+    folder=str(payload.get('folder','')).strip()
+    camera=max(0,min(5,int(payload.get('camera',0))))
+    if folder:
+        from nvidia_expressionapp_tracker import ExpressionAppTracker
+        try:folder=str(ExpressionAppTracker.validate_folder(folder))
+        except (ValueError,OSError) as error:return JSONResponse({'error':str(error)},400)
+    save_settings({'nvidia_expressionapp_folder':folder,'nvidia_expressionapp_camera':camera})
+    return {'ok':True,'folder':folder,'camera':camera}
+
+@app.post('/api/tracking/nvidia-expressionapp/start')
+async def start_nvidia_expressionapp_tracking():
+    from nvidia_expressionapp_tracker import tracker, detect_installed_folder
+    config=get_settings()
+    folder=str(config.get('nvidia_expressionapp_folder','')).strip() or detect_installed_folder()
+    if not folder:return JSONResponse({'error':'Choose the installed VTube Studio NVIDIA tracker folder first. This is the Steam DLC MXTracker/v2 folder.'},409)
+    try:
+        save_settings({'nvidia_expressionapp_folder':folder})
+        return await run_in_threadpool(tracker.start,folder,config.get('nvidia_expressionapp_camera',0))
+    except Exception as error:return JSONResponse({'error':str(error)},409)
+
+@app.post('/api/tracking/nvidia-expressionapp/stop')
+async def stop_nvidia_expressionapp_tracking():
+    from nvidia_expressionapp_tracker import tracker
+    await run_in_threadpool(tracker.stop)
+    return {'ok':True,'running':False}
+
+@app.get('/api/tracking/vbridger')
+async def vbridger_tracking_status():
+    """Receive VBridger VMC blendshape packets on localhost UDP."""
+    from vbridger_receiver import receiver
+    try:
+        await run_in_threadpool(receiver.start)
+    except OSError as error:
+        return JSONResponse({'connected':False,'blendshapes':{},'error':f'Could not listen on 127.0.0.1:39539 ({error}). Close any other VMC receiver or change its port.'},409)
+    return receiver.snapshot()
 
 @app.post('/api/spout/configure')
 async def configure_spout(payload: dict):
@@ -558,6 +770,92 @@ async def assistant_system_status():
     try:return await run_in_threadpool(system_status)
     except (OSError,RuntimeError) as error:return JSONResponse({'error':str(error)},503)
 
+
+@app.post('/api/game-mode/cloud-fallback')
+async def game_mode_cloud_fallback(payload: dict):
+    """Temporarily route Game Mode replies to the saved cloud provider under VRAM pressure."""
+    if type(payload.get('active')) is not bool:
+        return JSONResponse({'error': 'active must be true or false.'}, 400)
+    if not llm or getattr(app.state, 'tracking_only', False):
+        return JSONResponse({'error': 'AI replies are unavailable in this mode.'}, 409)
+    cfg = get_settings()
+    active = payload['active']
+    try:
+        if active:
+            if cfg.get('game_cloud_auto_enabled') is False:
+                return {'ok':True,'active':False,'reason':'Automatic game cloud fallback is disabled.'}
+            if cfg.get('llm_provider') != 'ollama':
+                return {'ok': True, 'active': False, 'reason': 'Local LLM is not selected.'}
+            provider = cfg.get('last_cloud_provider', 'gemini')
+            if provider == 'gemini':
+                key = get_gemini_key()
+                if not key:
+                    return {'ok': True, 'active': False, 'reason': 'No saved Gemini key is available.'}
+                # Switching replies alone would leave Ollama resident in VRAM.
+                # Unload its active models first so the fallback frees GPU memory.
+                await run_in_threadpool(_unload_game_local_models)
+                await run_in_threadpool(llm.configure_provider, 'gemini', cfg.get('gemini_model', 'gemini-flash-latest'), key)
+            else:
+                from cloud_api import PROVIDERS
+                from credentials import get_cloud_key
+                if provider not in PROVIDERS:
+                    return {'ok': True, 'active': False, 'reason': 'No saved cloud provider is configured.'}
+                endpoint = cfg.get('cloud_endpoint', '')
+                key = get_cloud_key(provider, endpoint)
+                if not key:
+                    return {'ok': True, 'active': False, 'reason': f'No saved {provider} key is available.'}
+                await run_in_threadpool(_unload_game_local_models)
+                await run_in_threadpool(llm.configure_cloud, provider, cfg.get('cloud_model', ''), key, endpoint, cfg.get('cloud_vision', False))
+            app.state.game_cloud_fallback_active = True
+            app.state.game_cloud_fallback_provider = provider
+            return {'ok': True, 'active': True, 'provider': provider}
+
+        if getattr(app.state, 'game_cloud_fallback_active', False):
+            fallback_provider = getattr(app.state, 'game_cloud_fallback_provider', '')
+            # If the user changed providers in Settings while Game Mode was
+            # active, preserve that newer choice instead of forcing local.
+            if cfg.get('llm_provider') == 'ollama' and getattr(llm, 'provider', '') == fallback_provider:
+                await run_in_threadpool(llm.configure_local, (cfg.get('game_ollama_model') if getattr(app.state,'game_model_active',False) else '') or cfg.get('ollama_model', OLLAMA_MODEL),
+                    cfg.get('ollama_models_folder', ''), cfg.get('gemini_fallback_enabled', False),
+                    cfg.get('ollama_context', 4096), cfg.get('local_timeout', 20))
+            app.state.game_cloud_fallback_active = False
+            app.state.game_cloud_fallback_provider = ''
+            return {'ok': True, 'active': False, 'provider': getattr(llm, 'provider', cfg.get('llm_provider'))}
+        return {'ok': True, 'active': False, 'provider': getattr(llm, 'provider', cfg.get('llm_provider'))}
+    except (ValueError, OSError, RuntimeError) as error:
+        return JSONResponse({'error': str(error)}, 503)
+
+
+def _unload_game_local_models():
+    if not llm or not getattr(llm, 'base_url', ''):
+        return
+    import requests
+    with llm._lock:
+        try:
+            probe = requests.get(llm.base_url + '/api/tags', timeout=(2, 5))
+            probe.raise_for_status()
+        except requests.RequestException as error:
+            # A stopped/unavailable Ollama server has no resident model to free.
+            chain, seen = [error], set()
+            import errno
+            while chain:
+                item = chain.pop()
+                if id(item) in seen: continue
+                seen.add(id(item))
+                if isinstance(error, requests.ConnectionError) and getattr(item, 'errno', None) in (errno.ECONNREFUSED, 10061): return
+                chain.extend(value for value in (getattr(item, '__cause__', None),
+                    getattr(item, '__context__', None), getattr(item, 'reason', None),
+                    *getattr(item, 'args', ())) if isinstance(value, BaseException))
+            raise RuntimeError('Could not contact the local model runtime to free VRAM.') from None
+        for model_name in {getattr(llm, 'model', ''), getattr(llm, 'vision_model', '')} - {''}:
+            try:
+                response = requests.post(llm.base_url + '/api/generate',
+                    json={'model': model_name, 'keep_alive': 0, 'stream': False}, timeout=(3, 120))
+                if response.status_code != 404:
+                    response.raise_for_status()
+            except requests.RequestException:
+                raise RuntimeError('Could not unload the local model to free VRAM. Staying on local AI.') from None
+
 @app.get('/api/assistant-tools/runs')
 async def assistant_runs():
     from assistant_tools import runs
@@ -591,6 +889,12 @@ async def assistant_device_action(payload:dict):
         args={'action':operation,'value':value}
     try:return await run_in_threadpool(execute,kind,args)
     except (OSError,ValueError,RuntimeError) as error:return JSONResponse({'error':str(error)},503)
+
+@app.post('/api/mobile/tracking-control')
+async def mobile_tracking_control(payload:dict):
+    from mobile_link import link
+    try:return link.control_tracking(payload)
+    except ValueError as error:return JSONResponse({'error':str(error)},409)
 
 @app.get('/api/mobile/link')
 async def mobile_link_info():
@@ -718,6 +1022,128 @@ async def serve_model_file(file_path: str, fallback: str = "") :
             return Response(content=buffer.getvalue(), media_type='image/png', headers={'X-Sakura-Asset-Fallback': 'missing'})
 
     return JSONResponse({"error": f"File not found: {norm}"}, status_code=404)
+
+
+# ── opt-in VTuber Collab model packages ──────────────────────────
+_COLLAB_MODEL_ROOT = Path(tempfile.gettempdir()) / 'sakura-collab-models'
+_COLLAB_MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+_COLLAB_PACKAGE_MAX_BYTES = 300 * 1024 * 1024
+_COLLAB_PACKAGE_MAX_FILES = 150
+
+
+@app.post('/api/collab/package')
+async def collab_model_package(payload: dict):
+    """Create a bounded archive of the currently selected model's folder."""
+    import io, zipfile, urllib.parse
+    try:
+        relative = urllib.parse.unquote(str(payload.get('path') or '')).replace('\\', '/').strip('/')
+        if not relative or any(part in {'', '.', '..'} for part in relative.split('/')):
+            return JSONResponse({'error': 'Choose a valid model path.'}, 400)
+        source = (MODELS_DIR / relative).resolve()
+        source.relative_to(MODELS_DIR.resolve())
+        if not source.is_file() or source.suffix.lower() not in {'.pmx', '.vrm', '.json'}:
+            return JSONResponse({'error': 'The selected file is not a supported avatar model.'}, 400)
+        folder = source.parent
+        files = sorted(p for p in folder.rglob('*') if p.is_file() and not p.is_symlink() and '__MACOSX' not in p.parts and not p.name.startswith('._'))
+        if len(files) > _COLLAB_PACKAGE_MAX_FILES:
+            return JSONResponse({'error': f'Model package has more than {_COLLAB_PACKAGE_MAX_FILES} files.'}, 413)
+        total = sum(p.stat().st_size for p in files)
+        if total > _COLLAB_PACKAGE_MAX_BYTES:
+            return JSONResponse({'error': 'Model package exceeds the 300 MB collab limit.'}, 413)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+            for path in files:
+                archive.write(path, path.relative_to(folder).as_posix())
+        if output.tell() > _COLLAB_PACKAGE_MAX_BYTES:
+            return JSONResponse({'error': 'Compressed model package exceeds the 300 MB collab limit.'}, 413)
+        entry = source.relative_to(folder).as_posix()
+        return Response(output.getvalue(), media_type='application/zip', headers={
+            'X-Sakura-Collab-Entry': urllib.parse.quote(entry, safe='/'),
+            'X-Sakura-Collab-Name': urllib.parse.quote(source.name, safe=''),
+            'Content-Disposition': 'attachment; filename="sakura-avatar.zip"',
+        })
+    except (ValueError, OSError) as exc:
+        return JSONResponse({'error': f'Could not package the selected model: {exc}'}, 400)
+
+
+@app.post('/api/collab/import')
+async def collab_import_model(request: Request):
+    """Receive an invited peer's explicitly shared avatar into a temp folder."""
+    import io, secrets, zipfile, urllib.parse
+    try:
+        body = await request.body()
+        if not body or len(body) > _COLLAB_PACKAGE_MAX_BYTES:
+            return JSONResponse({'error': 'The transferred model package is empty or exceeds 300 MB.'}, 413)
+        entry = urllib.parse.unquote(str(request.headers.get('x-sakura-collab-entry', ''))).replace('\\', '/').strip('/')
+        if not entry or any(part in {'', '.', '..'} for part in entry.split('/')):
+            return JSONResponse({'error': 'The model package entry is invalid.'}, 400)
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(body))
+        except zipfile.BadZipFile:
+            return JSONResponse({'error': 'The transferred model package is not a valid ZIP.'}, 400)
+        infos = [item for item in archive.infolist() if not item.is_dir()]
+        if len(infos) > _COLLAB_PACKAGE_MAX_FILES:
+            return JSONResponse({'error': 'The model package contains too many files.'}, 413)
+        if sum(item.file_size for item in infos) > 600 * 1024 * 1024:
+            return JSONResponse({'error': 'The uncompressed model package exceeds the 600 MB limit.'}, 413)
+        if entry not in {item.filename for item in infos}:
+            return JSONResponse({'error': 'The model entry file is missing from the package.'}, 400)
+        safe_infos=[];seen=set()
+        for item in infos:
+            name=item.filename.replace('\\', '/')
+            if name.startswith('/') or any(part in {'', '.', '..'} for part in name.split('/')):
+                return JSONResponse({'error': 'Unsafe path in transferred model package.'}, 400)
+            if name in seen:
+                return JSONResponse({'error': 'Duplicate path in transferred model package.'}, 400)
+            seen.add(name);safe_infos.append((item,name))
+        token = secrets.token_urlsafe(18)
+        destination = (_COLLAB_MODEL_ROOT / token).resolve()
+        destination.mkdir(parents=True, exist_ok=False)
+        for item,name in safe_infos:
+            target = (destination / name).resolve()
+            target.relative_to(destination)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(item) as source, target.open('wb') as output:
+                import shutil
+                shutil.copyfileobj(source, output, 1024 * 1024)
+        return {'ok': True, 'model_url': f'/collab-models/{token}/' + '/'.join(urllib.parse.quote(part) for part in entry.split('/'))}
+    except (ValueError, OSError, zipfile.BadZipFile) as exc:
+        return JSONResponse({'error': f'Could not import the shared model: {exc}'}, 400)
+
+
+@app.get('/collab-models/{token}/{file_path:path}')
+async def collab_model_file(token: str, file_path: str):
+    import re, urllib.parse
+    if not re.fullmatch(r'[A-Za-z0-9_-]{16,40}', token):
+        return JSONResponse({'error': 'Invalid temporary model session.'}, 404)
+    relative = urllib.parse.unquote(file_path).replace('\\', '/').strip('/')
+    if not relative or any(part in {'', '.', '..'} for part in relative.split('/')):
+        return JSONResponse({'error': 'Invalid model asset path.'}, 400)
+    root = (_COLLAB_MODEL_ROOT / token).resolve()
+    target = (root / relative).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return JSONResponse({'error': 'Forbidden'}, 403)
+    if not target.is_file():
+        return JSONResponse({'error': 'Shared model asset not found.'}, 404)
+    return FileResponse(str(target))
+
+
+@app.delete('/api/collab/import/{token}')
+async def collab_remove_import(token: str):
+    import re, shutil
+    if not re.fullmatch(r'[A-Za-z0-9_-]{16,40}', token):
+        return JSONResponse({'error': 'Invalid temporary model session.'}, 404)
+    root = _COLLAB_MODEL_ROOT.resolve()
+    target = (_COLLAB_MODEL_ROOT / token).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return JSONResponse({'error': 'Forbidden'}, 403)
+    if target.is_dir():
+        shutil.rmtree(target, ignore_errors=True)
+    return {'ok': True}
 
 
 # ── routes ─────────────────────────────────────────────────────
@@ -1026,6 +1452,35 @@ async def list_voices():
     }
 
 
+VOICE_FOLDER_NAME = re.compile(r'^[a-z0-9_]{1,48}$')
+MAX_RVC_BYTES = 512 * 1024 * 1024
+
+
+def _rvc_target(folder, filename, suffix):
+    """Only one plain, correctly-typed file name may land in this character's own folder."""
+    given = Path(str(filename or '')).name
+    if not given or given != Path(given).name or Path(given).is_absolute():
+        raise ValueError(f'Upload one {suffix} file, not a folder or a renamed archive.')
+    target = (folder / given).resolve()
+    if target.parent != folder.resolve() or target.suffix.lower() != suffix:
+        raise ValueError(f'That {suffix} file name is not allowed.')
+    return target
+
+
+async def _drain_upload(upload, target, limit):
+    written = 0
+    try:
+        with target.open('wb') as handle:
+            while chunk := await upload.read(1024 * 1024):
+                written += len(chunk)
+                if written > limit:
+                    raise ValueError('Voice files must be under 512 MB.')
+                handle.write(chunk)
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+
+
 @app.post("/api/voices/upload")
 async def upload_voice_model(
     character_name: str = Form(...),
@@ -1034,20 +1489,23 @@ async def upload_voice_model(
 ):
     """Upload custom RVC .pth and .index character voice files."""
     name_clean = character_name.strip().lower().replace(" ", "_")
+    if not VOICE_FOLDER_NAME.match(name_clean):
+        return JSONResponse({'error': 'Use up to 48 letters, numbers, underscores or spaces for the character name.'}, 400)
     target_dir = VOICES_DIR / name_clean
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save .pth file
-    pth_path = target_dir / pth_file.filename
-    pth_content = await pth_file.read()
-    pth_path.write_bytes(pth_content)
-
-    # Save .index file if provided
-    index_path = None
-    if index_file and index_file.filename:
-        index_path = target_dir / index_file.filename
-        index_content = await index_file.read()
-        index_path.write_bytes(index_content)
+    pth_path = index_path = None
+    try:
+        pth_path = _rvc_target(target_dir, pth_file.filename, '.pth')
+        if index_file and index_file.filename:
+            index_path = _rvc_target(target_dir, index_file.filename, '.index')
+        target_dir.mkdir(parents=True, exist_ok=True)
+        # Save the index first: a failed .pth then leaves the previous voice pair untouched.
+        if index_path:
+            await _drain_upload(index_file, index_path, MAX_RVC_BYTES)
+        await _drain_upload(pth_file, pth_path, MAX_RVC_BYTES)
+    except ValueError as error:
+        return JSONResponse({'error': str(error)}, 400)
+    except OSError as error:
+        return JSONResponse({'error': f'Could not write the voice files: {error}'}, 400)
 
     rel_pth = str(pth_path.relative_to(BASE_DIR)).replace("\\", "/")
     rel_index = str(index_path.relative_to(BASE_DIR)).replace("\\", "/") if index_path else None
@@ -1179,11 +1637,22 @@ async def update_app_settings(payload: dict):
     if 'ollama_model' in payload and (not isinstance(payload['ollama_model'], str) or
             not re.fullmatch(r'[A-Za-z0-9._:/-]{1,150}', payload['ollama_model'])):
         return JSONResponse({'error': 'Enter a valid local model name.'}, 400)
+    if 'game_ollama_model' in payload and (not isinstance(payload['game_ollama_model'],str) or
+            (payload['game_ollama_model'] and not re.fullmatch(r'[A-Za-z0-9._:/-]{1,150}',payload['game_ollama_model']))):
+        return JSONResponse({'error':'Choose a valid game model name.'},400)
+    if 'game_cloud_auto_enabled' in payload and type(payload['game_cloud_auto_enabled']) is not bool:
+        return JSONResponse({'error':'Choose whether automatic game cloud fallback is enabled.'},400)
     for field, minimum, maximum in (('ollama_context', 1024, 8192), ('local_timeout', 5, 120)):
         if field in payload and (type(payload[field]) is not int or not minimum <= payload[field] <= maximum):
             return JSONResponse({'error': f'{field} must be between {minimum} and {maximum}.'}, 400)
     if 'gemini_fallback_enabled' in payload and type(payload['gemini_fallback_enabled']) is not bool:
         return JSONResponse({'error': 'Choose whether Gemini fallback is enabled.'}, 400)
+    if 'web_search_enabled' in payload and type(payload['web_search_enabled']) is not bool:
+        return JSONResponse({'error': 'Choose whether Sakura may look answers up online.'}, 400)
+    brave_key = payload.pop('brave_key', None)
+    if brave_key is not None and (not isinstance(brave_key, str) or len(brave_key) > 200
+            or any(ord(c) < 32 or ord(c) > 126 for c in brave_key)):
+        return JSONResponse({'error': 'Invalid Brave Search API key.'}, 400)
     try:
         if 'ollama_models_folder' in payload:
             payload['ollama_models_folder'] = validate_folder(payload['ollama_models_folder'])
@@ -1205,11 +1674,17 @@ async def update_app_settings(payload: dict):
         if provider in PROVIDERS:
             if payload.get('clear_cloud_key'):set_cloud_key(provider,'',payload.get('cloud_endpoint',''))
             elif cloud_key and cloud_key.strip():set_cloud_key(provider,cloud_key.strip(),payload.get('cloud_endpoint',''))
+        if payload.get('clear_brave_key'):
+            set_cloud_key('brave','')
+        elif brave_key and brave_key.strip():
+            set_cloud_key('brave',brave_key.strip())
         if payload.get('clear_gemini_key'):
             set_gemini_key('')
         elif key and key.strip():
             set_gemini_key(key.strip())
         updated = save_settings(payload)
+        if llm and 'web_search_enabled' in payload:
+            llm.web_search_enabled = payload['web_search_enabled']
         if llm and (cloud_key is not None or any(field in payload for field in ('llm_provider','gemini_model','gemini_api_key','clear_gemini_key','cloud_model','cloud_endpoint','cloud_vision','clear_cloud_key'))):
             await run_in_threadpool(configure_saved_ai,llm,updated)
     except OSError:
@@ -1261,6 +1736,38 @@ async def local_models(payload: dict):
         return {'models': models}
     except (ValueError, OSError) as exc:
         return JSONResponse({'error': str(exc)}, 400)
+
+@app.get('/api/ollama/manager')
+async def model_manager_status():
+    from local_model_manager import manager
+    return {'catalog':manager.catalog(),'job':manager.status()}
+
+@app.post('/api/ollama/manager/{operation}')
+async def manage_local_model(operation: str, payload: dict):
+    from local_model_manager import manager
+    if EDITION=='vtuber' or getattr(app.state,'tracking_only',False):
+        return JSONResponse({'error':'Manage language models in Companion AI mode.'},409)
+    try:
+        cfg=get_settings()
+        folder=payload.get('folder',cfg.get('ollama_models_folder',''))
+        model=str(payload.get('model','')).strip()
+        if operation=='search':
+            from local_model_manager import registry_search
+            return await run_in_threadpool(registry_search,payload.get('query',''),payload.get('family',''))
+        if operation=='details':
+            from local_model_manager import model_details
+            return await run_in_threadpool(model_details,model,folder)
+        if operation=='import':
+            from local_model_manager import import_gguf
+            return await run_in_threadpool(import_gguf,manager,model,payload.get('paths'),folder)
+        if operation=='download':return await run_in_threadpool(manager.download,model,folder)
+        if operation=='delete':
+            if payload.get('confirm')!=model:raise ValueError('Confirm the exact model to uninstall.')
+            protected=[cfg.get('game_ollama_model'),cfg.get('ollama_model'),getattr(llm,'model',''),getattr(llm,'vision_model',cfg.get('ollama_vision_model',''))]
+            return await run_in_threadpool(manager.remove,model,folder,protected)
+        raise ValueError('Unknown model operation.')
+    except Exception as error:
+        return JSONResponse({'error':str(error)},400)
 
 @app.post('/api/llm/models')
 async def discover_cloud_models(payload:dict):
@@ -2047,3 +2554,24 @@ if __name__ == "__main__":
     print("  ──────────────────────────────────────────")
     print()
     gui_server.launch()
+
+
+@app.post('/api/game-mode/model')
+async def game_mode_model(payload: dict):
+    if type(payload.get('active')) is not bool:return JSONResponse({'error':'active must be true or false'},400)
+    if not llm or EDITION=='vtuber' or getattr(app.state,'tracking_only',False):return JSONResponse({'error':'AI model switching requires Companion AI mode.'},409)
+    cfg=get_settings();active=payload['active']
+    if cfg.get('llm_provider')!='ollama':return {'ok':True,'model':None,'provider':cfg.get('llm_provider')}
+    model=(cfg.get('game_ollama_model') if active else '') or cfg['ollama_model']
+    try:
+        if getattr(app.state,'game_cloud_fallback_active',False):
+            app.state.game_model_active=active
+            return {'ok':True,'model':model,'provider':getattr(llm,'provider','')}
+        from local_model_manager import model_details
+        if active and cfg.get('game_ollama_model'):
+            details=await run_in_threadpool(model_details,model,cfg.get('ollama_models_folder',''))
+            if not details['vision']:raise ValueError('The game model must support vision for screen understanding. Select a vision model in AI settings.')
+        await run_in_threadpool(llm.configure_local,model,cfg.get('ollama_models_folder',''),cfg.get('gemini_fallback_enabled',False),cfg.get('ollama_context',4096),cfg.get('local_timeout',20),validate=True)
+        app.state.game_model_active=active
+        return {'ok':True,'model':model,'provider':'ollama'}
+    except Exception as error:return JSONResponse({'error':str(error)},400)

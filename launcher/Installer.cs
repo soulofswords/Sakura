@@ -18,6 +18,8 @@ using System.Security.Cryptography;
 [assembly: AssemblyVersion("1.1.0.0")]
 
 sealed class Installer : Form {
+ static readonly string[] LocalIds=new string[]{"2b","4b","qwen38-27b","gemma3-4b","gemma3-12b","gemma3-27b","qwen35-4b","qwen35-9b"};
+ static readonly string[] LocalLabels=new string[]{"Cloud API key — skip local AI download","Qwen3-VL 2B (Vision) — 8 GB RAM / 4 GB VRAM recommended","Qwen3-VL 4B (Vision) — 16 GB RAM / 8 GB VRAM recommended","Qwen 3.8 27B (Vision) — 48 GB RAM / 24 GB VRAM recommended","Gemma 3 4B (Vision) — 16 GB RAM / 8 GB VRAM recommended","Gemma 3 12B (Vision) — 32 GB RAM / 16 GB VRAM recommended","Gemma 3 27B (Vision) — 48 GB RAM / 24 GB VRAM recommended","Qwen 3.5 4B (Vision) — 16 GB RAM / 8 GB VRAM recommended","Qwen 3.5 9B (Vision) — 32 GB RAM / 16 GB VRAM recommended"};
  readonly TextBox destination;
  readonly ComboBox mode;
  readonly Label status;
@@ -43,7 +45,7 @@ sealed class Installer : Form {
   browse.Click+=(s,e)=>BrowseDestination();
   Controls.Add(new Label {Text="Optional local AI (downloads after installation)",Location=new Point(30,206),Size=new Size(560,28)});
   mode=new ComboBox {Location=new Point(30,239),Size=new Size(560,30),DropDownStyle=ComboBoxStyle.DropDownList};
-  mode.Items.AddRange(new object[]{"Gemini API key — skip local AI download","Qwen 2B — 8 GB RAM / 4 GB VRAM recommended","Qwen 4B — 16 GB RAM / 6–8 GB VRAM recommended"});mode.SelectedIndex=0;Controls.Add(mode);
+  mode.Items.AddRange(LocalLabels);mode.DropDownWidth=850;mode.SelectedIndex=0;Controls.Add(mode);
   status=new Label {Text=InstallationStatus(destination.Text),Location=new Point(30,283),Size=new Size(560,35)};Controls.Add(status);
   destination.TextChanged+=(s,e)=>status.Text=InstallationStatus(destination.Text);
   desktopShortcut=new CheckBox {Text="Create desktop shortcut",Checked=true,Location=new Point(30,320),Size=new Size(280,27)};Controls.Add(desktopShortcut);
@@ -222,7 +224,7 @@ sealed class Installer : Form {
     key.SetValue("DisplayIcon",exe);key.SetValue("UninstallString","\""+Path.Combine(target,"Sakura","Uninstall.exe")+"\"");
    }
    status.Text=resultStatus;
-   if(local>0)Process.Start(new ProcessStartInfo(exe,"--setup-local "+(local==1?"2b":"4b")){WorkingDirectory=target});
+   if(local>0)Process.Start(new ProcessStartInfo(exe,"--setup-local "+LocalIds[local-1]){WorkingDirectory=target});
    else if(launch.Checked)Process.Start(new ProcessStartInfo(exe){WorkingDirectory=target});
    FinishInstallation();
   }catch(Exception error){status.Text="Installation failed: "+error.Message;install.Enabled=true;mode.Enabled=true;destination.Enabled=true;browse.Enabled=true;launch.Enabled=true;desktopShortcut.Enabled=true;}

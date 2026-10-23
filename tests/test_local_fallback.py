@@ -43,8 +43,10 @@ class LocalFallbackTests(unittest.TestCase):
             llm.configure_local('llama3.2:3b', fallback=True, context=2048, timeout=8)
             failed = Mock()
             failed.raise_for_status.side_effect = requests.HTTPError('Insufficient memory')
-            with patch('llm.requests.post', return_value=failed) as post, patch.object(llm, '_request_gemini', return_value='Hello.'):
-                self.assertEqual(llm.chat('hello'), 'Hello.')
+            # A greeting must not be used here: safe_smalltalk answers "hello" before any
+            # provider is contacted, which would hide the fallback path being tested.
+            with patch('llm.requests.post', return_value=failed) as post, patch.object(llm, '_request_gemini', return_value='Out of memory, so I used the cloud.'):
+                self.assertEqual(llm.chat('What colour do I like?'), 'Out of memory, so I used the cloud.')
                 self.assertEqual(post.call_args.kwargs['json']['model'], 'llama3.2:3b')
                 self.assertEqual(post.call_args.kwargs['json']['options']['num_ctx'], 2048)
                 self.assertEqual(post.call_args.kwargs['timeout'], (3, 8))
@@ -56,8 +58,10 @@ class LocalFallbackTests(unittest.TestCase):
                 llm.configure_provider('ollama', api_key=key)
                 llm.configure_local('llama3.2:3b', fallback=enabled)
                 with patch('llm.requests.post', side_effect=requests.ConnectionError), patch.object(llm, '_request_gemini') as fallback:
-                    llm.chat('hello')
+                    reply=llm.chat('What colour do I like?')
                     fallback.assert_not_called()
+                    self.assertIsInstance(reply, str)
+                    self.assertTrue(reply.strip())
 
     def test_folder_must_be_an_ollama_store_and_default_does_not_launch(self):
         with tempfile.TemporaryDirectory() as folder:

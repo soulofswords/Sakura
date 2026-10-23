@@ -36,6 +36,7 @@ class LLM:
         self.trusted_memory: list[dict] = []
         self.evidence_confidence_threshold = .9
         self.response_restriction_level = 'off'
+        self.web_search_enabled = True
         self.persist_memory = (memory_path is not None) if persist_memory is None else bool(persist_memory)
         self.memory_path = Path(memory_path) if memory_path is not None else BASE_DIR / "conversation-memory.json"
         self.summary = ""
@@ -171,6 +172,15 @@ class LLM:
         with self._provider_lock:configuration=(self.gemini_api_key,self.gemini_model)
         return test_generation('gemini',*configuration)
 
+    def search_credentials(self):
+        """Keys for the web providers: (Gemini key, Gemini model, Brave key)."""
+        with self._provider_lock: gemini = (self.gemini_api_key, self.gemini_model)
+        try:
+            from credentials import get_cloud_key
+            return (*gemini, get_cloud_key('brave'))
+        except Exception:
+            return (*gemini, '')
+
     def configure_local(self, model, folder='', fallback=False, context=4096, timeout=20, validate=False):
         if getattr(self, 'tracking_only', False):
             raise ValueError('Stop VTuber tracking before loading an AI model.')
@@ -190,13 +200,22 @@ class LLM:
                 except requests.RequestException as exc:
                     raise ValueError('Could not switch local models. Check that Ollama is available and try again.') from exc
             self.model = model
-            if model.lower().startswith('qwen3-vl:'):
+            from local_model_setup import MODELS as selectable_vision_models
+            if model in selectable_vision_models.values() or model.lower().startswith('qwen3-vl:'):
                 self.vision_model = model
+            else:
+                try:
+                    details=requests.post(f'{base_url}/api/show',json={'model':model},timeout=10)
+                    details.raise_for_status()
+                    if 'vision' in details.json().get('capabilities',[]):self.vision_model=model
+                except requests.RequestException:
+                    pass
             self.base_url = base_url
             self.context_length = int(context)
             self.fallback_enabled = bool(fallback)
             self.local_timeout = int(timeout)
             self.local_runtime_used = True
+            self.provider = 'ollama'
 
     def warmup(self):
         """Preload the local model without generating a reply or changing memory."""
@@ -212,7 +231,7 @@ class LLM:
         except requests.RequestException:
             pass
 
-    def _request_gemini(self, messages, summarizing=False, configuration=None):
+    def _request_gemini(self, messages, summarizing=False, configuration=None, planning=False):
         if configuration is None:
             with self._provider_lock:
                 configuration = (self.gemini_model, self.gemini_api_key)
@@ -230,13 +249,18 @@ class LLM:
                          for image in message.get('images', []))
             contents.append({'role': 'model' if message['role'] == 'assistant' else 'user', 'parts': parts})
         generation_config = {'temperature': 0.1 if summarizing else 0.7, 'maxOutputTokens': 4096}
+        if planning:
+            # Constrained JSON plus room for tool arguments; spoken-reply limits
+            # would truncate a plan and reasoning-off would weaken multi-step choices.
+            generation_config = {'temperature': 0.1, 'maxOutputTokens': 8192,
+                                 'responseMimeType': 'application/json'}
         if gemini_model == 'gemini-flash-latest' or (gemini_model.startswith('gemini-3') and 'flash' in gemini_model):
             generation_config['thinkingConfig'] = {'thinkingLevel': 'low'}
             # Only use minimal on models documented to support it. The latest
             # alias can move to models which support low but not minimal.
             if gemini_model in ('gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'):
                 generation_config['thinkingConfig'] = {'thinkingLevel': 'minimal'}
-        elif gemini_model.startswith('gemini-2.5-flash'):
+        elif gemini_model.startswith('gemini-2.5-flash') and not planning:
             generation_config['thinkingConfig'] = {'thinkingBudget': 0}
         attempts = 3 if summarizing else 2
         for attempt in range(attempts):
@@ -478,7 +502,10 @@ class LLM:
                     return dialogue
         return text
 
-    def _request_raw(self, messages, *, summarizing=False, model=None, structured=False):
+    def _request_raw(self, messages, *, summarizing=False, model=None, structured=False, planning=False):
+        if planning:
+            # An agent plan is a machine-readable action, not spoken companion text.
+            structured = True
         if getattr(self, 'tracking_only', False):
             raise ValueError('AI is paused in VTuber tracking mode.')
         if not summarizing:
@@ -521,6 +548,16 @@ class LLM:
                 'Hinglish':'Reply in conversational Hinglish: Hindi mixed with English, written in Latin script for the Hinglish voice. Every response must include natural Hindi phrasing, not English-only sentences. Example: Haan, yeh kaafi achha tha. Chalo, ab agla step dekhte hain.',
                 'English':'Reply in English only. Do not mirror Hindi, Hinglish or other languages from the user or past messages.'}.get(language, 'Reply in English only.')
             messages = [*messages, {'role':'system','content':'Selected speech language: '+language+'. '+instruction+' This selection overrides language-mirroring instructions in the personality and conversation history.'}]
+        if not summarizing and not structured:
+            messages = [*messages, {'role':'system','content':
+                'For practical help such as cooking, talk like a helpful person working alongside the user. '
+                'Give the next useful step in one or two short spoken sentences and wait for their response. '
+                'Keep track of ingredients, quantities, progress and corrections actually stated in this conversation. '
+                'Ask one relevant question only when needed to choose the next step. '
+                'If the user requests the full recipe or a detailed explanation, provide it. '
+                'Describe visual observations only from a current supplied image or camera tool result; '
+                'otherwise ask what they see. Never claim to see, taste, remember or complete an action without evidence. '
+                'Avoid repetitive praise, forced jokes, stock follow-ups and restarting the explanation every turn.'}]
         messages = ([m for m in messages if m['role'] == 'system']
                     + [m for m in messages if m['role'] != 'system'])
         with self._provider_lock:
@@ -530,11 +567,11 @@ class LLM:
             cloud = (self.cloud_model,self.cloud_api_key,self.cloud_endpoint,self.cloud_vision)
         if provider == "gemini":
             self.last_backend = 'gemini'
-            return self._request_gemini(messages, summarizing, configuration)
+            return self._request_gemini(messages, summarizing, configuration, planning)
         if provider != 'ollama':
             from cloud_api import request
             self.last_backend=provider
-            return request(provider,cloud[0],cloud[1],messages,cloud[2],cloud[3],summarizing)
+            return request(provider,cloud[0],cloud[1],messages,cloud[2],cloud[3],summarizing,planning)
         base_url, local_model, context, fallback, timeout = local
         self.local_runtime_used = True
         has_images = any(message.get('images') for message in messages)
@@ -552,6 +589,16 @@ class LLM:
             request_payload['options']['num_ctx'] = max(context, 4096)
             request_payload['options']['num_predict'] = 320 if getattr(self,'reply_language','English') in ('Hindi','Hinglish') else 160
             request_payload['options']['temperature'] = 0.2
+        if planning:
+            # Chat replies stay short so a spoken answer begins quickly, but a plan
+            # carries tool arguments and sometimes a whole document. The 192-token
+            # chat limit cut planner JSON off mid-object, so requests asking for
+            # exact JSON would always fail. Ollama's JSON mode also stops the
+            # model from wrapping the action in prose.
+            request_payload['format'] = 'json'
+            request_payload['options']['temperature'] = 0.1
+            request_payload['options']['num_predict'] = 1536
+            request_payload['options']['num_ctx'] = max(context, 8192)
         request_payload['messages'] = self._fit_local_messages(messages,
             request_payload['options']['num_ctx'], request_payload['options']['num_predict'])
         try:
@@ -592,10 +639,18 @@ class LLM:
                         except (ValueError, OSError):
                             pass
                         image_messages[-1]['images'] = [latest]
+                    retry_predict = request_payload['options']['num_predict']
+                    if planning:
+                        # The fitter reserves output tokens out of the context, so keeping a
+                        # plan-sized budget inside a shrunken context empties the prompt.
+                        retry_predict = min(retry_predict, max(256, int(available * 0.25)))
+                        if available < 2048:
+                            raise ValueError('This local model context is too small to plan with. '
+                                             'Raise the Ollama context in Settings > AI, or choose Google Gemini for the Agent.')
                     request_payload = {**request_payload,
-                        'options': {**request_payload['options'], 'num_ctx': available},
+                        'options': {**request_payload['options'], 'num_ctx': available, 'num_predict': retry_predict},
                         'messages': self._fit_local_messages(retry_messages,
-                            max(512, int(available * 0.65)), request_payload['options']['num_predict'])}
+                            max(512, int(available * 0.65)), retry_predict)}
                     response = requests.post(f"{base_url}/api/chat", json=request_payload,
                                              timeout=(3, timeout if fallback else 120))
             if response.status_code == 400:
@@ -606,7 +661,7 @@ class LLM:
             response.raise_for_status()
             result = response.json()
             reply = result["message"]["content"]
-            if result.get('done_reason') == 'length' and not summarizing:
+            if result.get('done_reason') == 'length' and not summarizing and not planning:
                 print('  Local reply reached its output limit; finishing complete spoken sentences.')
                 reply=self._finish_limited_reply(reply)
                 if not reply:return self._generation_failure(getattr(self,'reply_language','English'))
@@ -620,7 +675,7 @@ class LLM:
             if not fallback or not configuration[1] or has_images:
                 raise
             self.last_backend = 'gemini-fallback'
-            return self._request_gemini(messages, summarizing, configuration)
+            return self._request_gemini(messages, summarizing, configuration, planning)
 
     def _refresh_summary(self):
         # Memory is a verbatim ledger, not an LLM-generated narrative.
@@ -913,6 +968,14 @@ class LLM:
         if answer is not None:
             self.last_evidence=answer
             return answer.text
+        # Looked up before the lock so a slow source never blocks memory writes.
+        web_note = ''
+        if self.web_search_enabled and not cohost and not attachments and not screen_image:
+            from response_evidence import web_context
+            try:
+                web_note = web_context(user_message, self.search_credentials(), self.assistant_name)
+            except Exception:
+                web_note = ''
         with self._lock:
             language=getattr(self,'reply_language','English')
             persona = ('You are '+self.assistant_name+', a warm, practical AI companion. '+
@@ -938,6 +1001,8 @@ class LLM:
                 'Answer the latest user question first. A supplied screen is optional context, '
                 'not a request to repeat the last screen description. Respect corrections and '
                 'continue the ongoing topic; do not restart with a self-introduction.'})
+            if web_note:
+                messages.append({'role':'system','content':web_note})
             # Include uncompressed dialogue while its summary is prepared in the background.
             # Older turns are retained in the compact summary.  Keeping only
             # recent dialogue avoids sending a huge prompt before every reply.

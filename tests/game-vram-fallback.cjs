@@ -1,0 +1,20 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('static/js/app.js','utf8');
+const block=source.slice(source.indexOf('async function setGameCloudFallback('),source.indexOf('async function pollVtuberChat()'));
+let vram=95,posts=[];
+const ctx={currentSettings:{llm_provider:'ollama'},gameCloudFallbackActive:false,lastGameVramNotice:'',listeningStatus:{},fetch:async(url,options)=>{const body=JSON.parse(options.body);posts.push(body.active);return{ok:true,json:async()=>({ok:true,active:body.active,provider:body.active?'openai':'ollama'})};}};
+vm.createContext(ctx);vm.runInContext(block,ctx);
+(async()=>{
+  const game=()=>({gpus:[{name:'GPU',vram_total_bytes:12*1024**3,vram_used_bytes:Math.floor(vram/100*12*1024**3),vram_percent:vram}]});
+  await ctx.updateGameVramFallback(game());
+  assert.equal(ctx.gameCloudFallbackActive,true,'high VRAM should request cloud fallback');
+  assert.deepEqual(posts,[true]);
+  vram=80;
+  await ctx.updateGameVramFallback(game());
+  assert.equal(ctx.gameCloudFallbackActive,false,'recovered VRAM should restore local mode');
+  assert.deepEqual(posts,[true,false]);
+  ctx.currentSettings.llm_provider='gemini';vram=99;
+  await ctx.updateGameVramFallback(game());
+  assert.deepEqual(posts,[true,false],'cloud-selected sessions are left alone');
+  console.log('PASS: VRAM pressure temporarily routes local Game Mode to cloud, hysteresis restores local, and configured cloud mode is untouched.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

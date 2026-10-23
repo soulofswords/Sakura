@@ -1,5 +1,5 @@
 import {waitForModelGpu} from './model-presentation.js?v=switch85';
-import Live2DViewer from './live2d-viewer.js?v=fbx89';
+import Live2DViewer from './live2d-viewer.js?v=collab-fit1';
 import ModelBlockTransition from './model-block-transition.js?v=switch85';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
 import * as THREE from 'three';
@@ -11,9 +11,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/static/vendor/vrm/three-vrm.module.min.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import AvatarRetarget from './avatar-retarget.js?v=vrm-pitch14';
+import AvatarRetarget from './avatar-retarget.js?v=vrm-brows131';
 import ArmClearance from './arm-clearance.js?v=clearance1';
-import ModelPhysics from './model-physics.js?v=authored-cloth76';
+import ModelPhysics from './model-physics.js?v=rest-clearance112';
 import ModelRigMonitor from './model-rig-monitor.js?v=authored-cloth76';
 import ModelRepairStore from './model-repair-store.js?v=1';
 import {ModelBones} from './model-bones.js?v=persistent5';
@@ -195,6 +195,12 @@ export default class ModelViewer {
         // Direct manipulation should follow the pointer immediately. Orbit
         // damping kept the camera chasing each drag for dozens of frames.
         this.controls.enableDamping = false;
+        // OrbitControls' left-pan can lose its gesture in the embedded desktop
+        // WebView when the drag crosses canvas bounds. Use our captured pointer
+        // path below for mouse panning; retain OrbitControls for right-rotate,
+        // wheel zoom and native touch gestures.
+        this.renderer.domElement.style.touchAction = 'none';
+        this.renderer.domElement.style.cursor = 'grab';
         this.controls.target.set(0, 13, 0);
         this.controls.maxPolarAngle = Math.PI / 2 + 0.1;
         this.desktopMode = new URLSearchParams(location.search).has('desktop');
@@ -225,19 +231,25 @@ export default class ModelViewer {
         this.physicsInfo = null;
         this._hairDragVector = new THREE.Vector3();
         this._hairDragAxis = new THREE.Vector3();
-        let hairPointer = null;
+        let modelPanPointer = null;
         this.renderer.domElement.addEventListener('pointerdown', event => {
-            if (event.button === 0 && this.controls.enabled)
-                hairPointer = {id:event.pointerId, x:event.clientX, y:event.clientY, generation:this.loadGeneration};
+            if (event.button === 0 && this.controls.enabled && event.pointerType !== 'touch') {
+                modelPanPointer = {id:event.pointerId, x:event.clientX, y:event.clientY};
+                this.renderer.domElement.style.cursor = 'grabbing';
+                try { this.renderer.domElement.setPointerCapture(event.pointerId); } catch (_) {}
+            }
         });
         this.renderer.domElement.addEventListener('pointermove', event => {
-            if (!hairPointer || hairPointer.id !== event.pointerId) return;
-            if (hairPointer.generation === this.loadGeneration)
-                this.applyHairScreenDrag(event.clientX-hairPointer.x,event.clientY-hairPointer.y);
-            hairPointer.x=event.clientX; hairPointer.y=event.clientY;
+            if (modelPanPointer?.id === event.pointerId && this.controls.enabled) {
+                const dx=event.clientX-modelPanPointer.x,dy=event.clientY-modelPanPointer.y;
+                this._panCameraByScreenDelta(dx,dy);
+                modelPanPointer.x=event.clientX;modelPanPointer.y=event.clientY;
+            }
         });
         for (const type of ['pointerup','pointercancel','lostpointercapture'])
-            this.renderer.domElement.addEventListener(type, () => {hairPointer=null;});
+            this.renderer.domElement.addEventListener(type, () => {
+                modelPanPointer=null;this.renderer.domElement.style.cursor='grab';
+            });
         window.addEventListener('sakura-window-drag', event => {
             this.applyHairScreenDrag(event.detail?.dx,event.detail?.dy);
         });
@@ -255,12 +267,26 @@ export default class ModelViewer {
         this.vtuberTrackingMode = false;
 
         // Event listeners
-        window.addEventListener('resize', this.onResize.bind(this));
+        this._resizeHandler=()=>this.onResize();
+        window.addEventListener('resize', this._resizeHandler);
 
         // Start animation loop
         this.clock = new THREE.Clock();
         this.animate = this.animate.bind(this);
-        requestAnimationFrame(this.animate);
+        this.animationFrame=requestAnimationFrame(this.animate);
+    }
+
+    destroy() {
+        if(this.destroyed)return;
+        this.destroyed=true;
+        if(this.animationFrame)cancelAnimationFrame(this.animationFrame);
+        window.removeEventListener('resize',this._resizeHandler);
+        this._disposeLive2D();
+        if(this.model)this._disposeObject(this.model);
+        if(this.placeholderGroup)this._disposeObject(this.placeholderGroup);
+        this.physics?.detach?.();
+        this.renderer?.dispose?.();
+        this.renderer?.domElement?.remove?.();
     }
 
     _createPlaceholder() {
@@ -291,9 +317,25 @@ export default class ModelViewer {
 
     _configureModelControls() {
         this.controls.screenSpacePanning = true;
-        this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+        // Left mouse panning is handled explicitly with pointer capture in the
+        // constructor, avoiding lost drags in pywebview/Chromium surfaces.
+        this.controls.mouseButtons.LEFT = -1;
         this.controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
         this.controls.touches.ONE = THREE.TOUCH.PAN;
+    }
+
+    _panCameraByScreenDelta(dx,dy) {
+        if(!Number.isFinite(dx)||!Number.isFinite(dy)||(!dx&&!dy))return;
+        const height=Math.max(1,this.renderer.domElement.clientHeight||this.container.clientHeight);
+        const distance=this.camera.position.distanceTo(this.controls.target);
+        const worldPerPixel=2*distance*Math.tan(THREE.MathUtils.degToRad(this.camera.fov)*0.5)/height;
+        this.camera.updateMatrixWorld();
+        const right=new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld,0);
+        const up=new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld,1);
+        const offset=right.multiplyScalar(-dx*worldPerPixel).addScaledVector(up,dy*worldPerPixel);
+        this.camera.position.add(offset);
+        this.controls.target.add(offset);
+        this.controls.update();
     }
 
     _holdPresentedFrame() {
@@ -743,6 +785,7 @@ export default class ModelViewer {
 
         // Check if textures.json exists for this model
         let textureMap = {};
+        let preserveAuthoredMaterials = false;
         let materialTextures = {};
         this.pmxTextureSlots = [];
         try {
@@ -750,6 +793,7 @@ export default class ModelViewer {
             if (res.ok) {
                 const data = await res.json();
                 materialTextures = data.materials?.[decodeURIComponent(url.substring(lastSlash + 1))] || {};
+                preserveAuthoredMaterials = data.preserve_materials === true;
                 if (data.textures) {
                     textureMap = data.textures;
                     console.log('📄 Found textures.json mapping for model:', Object.keys(textureMap).length, 'entries');
@@ -877,7 +921,7 @@ export default class ModelViewer {
                         this.textureReview = review;
                         // Texture failures use the authored material path until
                         // the user compares the exact file in PMX Editor.
-                        this.pmxReferenceMode = !!(review?.required_missing ?? review?.missing)?.length || !!this.preferPmxReference || !!(textureReview && !review);
+                        this.pmxReferenceMode = !!(review?.required_missing ?? review?.missing)?.length || preserveAuthoredMaterials || !!this.preferPmxReference || !!(textureReview && !review);
                         // Keep comparison available as an explicit action.
                         // Missing optional shine maps must not launch an
                         // external editor or switch the entire material mode.
@@ -890,6 +934,7 @@ export default class ModelViewer {
                         // compile, otherwise eye highlights become opaque white.
                         this._preparePmxMaterials(mmd);
                         repairNoseSkin(mmd);
+                        this._repairDancerSkirtAtlas(mmd);
                         this._fixPmxLayeredSurfaces(mmd);
                         await this.physics.initialize?.(mmd);
                         report('shaders');
@@ -1229,11 +1274,39 @@ export default class ModelViewer {
         const nanallyProfile = [...authoredTextureNames].some(name => /(?:^|\/)player_010_nanally_hair_01_d\.tga$/.test(name))
             && [...authoredTextureNames].some(name => /(?:^|\/)t_player_010_nanally_face_d\.tga$/.test(name));
         const shenheProfile = ['颜', '肌', '肌2', '髪spa+', '神之眼AL'].every(name => materialNames.has(name));
+        // This qipao port uses traditional hair names and a separate highlight pass.
+        const shenheQipaoProfile = ['髮', '髮+', '肌2', '裙内'].every(name => materialNames.has(name))
+            && [...authoredTextureNames].some(name => /(?:^|\/)spa_h\.png$/i.test(name));
+        // Casual Miku's facial expression cards share the same "face" name
+        // and are authored at 0.99 opacity. Treating them as blended cards
+        // disables depth writes, so the blue sphere region in face.png draws
+        // over the skin. PMXView treats these as opaque facial layers.
+        const casualMikuFaceProfile = materialNames.has('face')
+            && [...authoredTextureNames].some(name => /(?:^|\/)face_mikuap_b\.tga$/i.test(name))
+            && [...authoredTextureNames].some(name => /(?:^|\/)face\.png$/i.test(name));
+        this.isShenheQipaoModel = shenheQipaoProfile;
         this.isRacingOutfitModel = racingOutfitProfile;
         root.traverse(child => {
             for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
                 if (!material) continue;
                 if (!material.isMMDToonMaterial) continue;
+                // Large generic PMX garment panels often share a cutout atlas
+                // with tiny ornaments. The atlas-wide alpha flag must not turn
+                // the solid garment into a transparent accessory surface.
+                const materialIndex = Array.isArray(child.material) ? child.material.indexOf(material) : 0;
+                const panelIndices = (child.geometry?.groups || []).filter(g => g.materialIndex === materialIndex)
+                    .reduce((sum, g) => sum + g.count, 0);
+                const solidPanel = material.opacity >= .999 && panelIndices >= 6000
+                    && /^(?:材質[0-9]*|material[0-9]*)$/iu.test(material.name || '');
+                if (casualMikuFaceProfile && material.name === 'face' &&
+                    /(?:^|\\|\/)face(?:_mikuap_b)?\.(?:tga|png)$/i.test(material.userData?.MMD?.mapFileName || '')) {
+                    // These are stacked face/eye/mouth expression cards, not
+                    // translucent glass. Preserve opaque depth ordering.
+                    material.opacity = 1;
+                    material.transparent = false;
+                    material.alphaTest = 0;
+                    material.depthWrite = true;
+                }
                 const textureCutout = material.map?.transparent === true && material.opacity >= 0.999;
                 if (material.map?.transparent === true) material.transparent = true;
                 if (textureCutout) {
@@ -1243,7 +1316,16 @@ export default class ModelViewer {
                 // MMD alpha morphs mark solid faces as transparent even at
                 // rest. Keep their depth so hidden expression cards/back hair
                 // cannot draw through the face. Genuine translucency still blends.
-                if (material.transparent && !textureCutout) material.depthWrite = material.opacity >= .999;
+                // PMX commonly uses 0.98/0.99 for otherwise solid layered
+                // faces, hair and clothing. Keep their depth like PMXView;
+                // disabling it reveals back surfaces through the front layer.
+                // Model profiles below and saved user overrides retain priority.
+                if (material.transparent && !textureCutout) material.depthWrite = material.opacity >= .98;
+                if (solidPanel) {
+                    material.transparent = false;
+                    material.alphaTest = 0;
+                    material.depthWrite = true;
+                }
                 const hairMapFile = String(material.userData?.MMD?.mapFileName || material.map?.name || '').replace(/\\/g, '/');
                 const taffyHair = /^f头发(?:[23])?$/u.test(material.name || '') && /(?:^|\/)taffy_hair_color\.png$/i.test(hairMapFile)
                     && material.opacity >= .999;
@@ -1254,6 +1336,29 @@ export default class ModelViewer {
                     material.transparent = false;
                     material.alphaTest = Math.max(material.alphaTest || 0, .2);
                     material.depthWrite = true;
+                }
+                if (shenheQipaoProfile && material.name === '髮') {
+                    // Retain the source hair ramp's cool silver shadow tint under
+                    // the bright companion stage, instead of clipping to white.
+                    material.diffuse?.setRGB(0.86, 0.89, 0.93);
+                    material.color?.setRGB(0.86, 0.89, 0.93);
+                }
+                // Haku's long-hair shell is authored at 0.99 alpha, but still
+                // needs depth writes. Its main outfit uses the atlas as opaque
+                // artwork; auto-detected atlas alpha exposes the body beneath.
+                const hakuOffice = [...authoredTextureNames].some(n => /(?:^|\/)hair_hakuap\.tga$/i.test(n))
+                    && [...authoredTextureNames].some(n => /(?:^|\/)white_d\.png$/i.test(n));
+                if (hakuOffice) {
+                    const mapName = String(material.userData?.MMD?.mapFileName || '').replace(/\\/g, '/');
+                    if (/hair_hakuap\.tga$/i.test(mapName)) {
+                        material.depthWrite = true;
+                        material.alphaTest = Math.max(material.alphaTest || 0, 0.01);
+                    }
+                    if (material.name === '材質1' && /white_d\.png$/i.test(mapName)) {
+                        material.transparent = false;
+                        material.depthWrite = true;
+                        material.alphaTest = 0;
+                    }
                 }
                 if (this.pmxReferenceMode || princessProfile || nanallyProfile) {
                     // Keep PMX diffuse, ambient, toon, sphere and sidedness
@@ -1399,6 +1504,27 @@ export default class ModelViewer {
                 back.side = THREE.FrontSide;
                 front.needsUpdate = back.needsUpdate = true;
             }
+        });
+    }
+
+    _repairDancerSkirtAtlas(root) {
+        // Scoped runtime atlas repair; original PMX and texture files stay intact.
+        // This dress contains skirt vertices sampling unrelated transparent atlas regions.
+        root.traverse(mesh => {
+            if (!Array.isArray(mesh.material)) return;
+            const index=mesh.material.findIndex(m=>m.name==='Profissional Do Sexo Dress'
+                && /(?:^|[\\/])5\.png$/i.test(m.userData?.MMD?.mapFileName||''));
+            const g=mesh.geometry, p=g?.attributes?.position, uv=g?.attributes?.uv, ix=g?.index;
+            if(index<0||!p||!uv||!ix) return;
+            const group=g.groups.find(g=>g.materialIndex===index); if(!group)return;
+            const visited=new Set();
+            for(let o=group.start;o<group.start+group.count;o++) {
+                const i=ix.getX(o);if(visited.has(i))continue;visited.add(i);
+                const y=p.getY(i);if(y>=15.35)continue;
+                uv.setXY(i,.905+THREE.MathUtils.clamp((p.getX(i)+1.25)/2.5,0,1)*.085,
+                    .787+THREE.MathUtils.clamp((15.35-y)/3.3,0,1)*.055);
+            }
+            uv.needsUpdate=true;
         });
     }
 
@@ -1565,6 +1691,24 @@ export default class ModelViewer {
     }
 
     updateUserTracking(sample) { this.userTrackingSample = {...sample, receivedAt: performance.now()}; }
+
+    setCollaboratorPose(pose) { this.collaboratorPose = pose && typeof pose === 'object' ? pose : null; }
+
+    _applyCollaboratorPose() {
+        const pose=this.collaboratorPose;
+        if(!pose)return;
+        if(this.live2d&&pose.parameters){
+            const core=this.live2d.avatar?.internalModel?.coreModel;
+            if(core)for(const [id,value]of Object.entries(pose.parameters))if(Number.isFinite(value)&&core.getParameterIndex(id)>=0)core.setParameterValueById(id,value);
+            return;
+        }
+        if(!this.model||pose.kind!=='3d')return;
+        let boneIndex=0,meshIndex=0;
+        this.model.traverse(node=>{
+            if(node.isBone){const data=pose.bones?.[boneIndex++];if(data){if(data.q?.length===4)node.quaternion.fromArray(data.q);if(data.p?.length===3)node.position.fromArray(data.p);}}
+            if(node.isMesh&&node.morphTargetInfluences){const values=pose.morphs?.[meshIndex++];if(values)for(let i=0;i<Math.min(values.length,node.morphTargetInfluences.length);i++)if(Number.isFinite(values[i]))node.morphTargetInfluences[i]=values[i];}
+        });
+    }
     setTrackingMouthEnabled(enabled) {
         this.trackingMouthEnabled = Boolean(enabled);
         this.avatarRetarget?.setMouthTracking(this.trackingMouthEnabled);
@@ -1713,7 +1857,15 @@ export default class ModelViewer {
         }
         // VTuber playback animates lips only. It must never activate the AI
         // companion's idle lean, conversational hands or thinking gestures.
-        if(this.vtuberTrackingMode)return;
+        if(this.vtuberTrackingMode){
+            // Physics/recalibration can restore the authored A/T bind pose after
+            // loading. Keep untracked VTuber arms at the computed relaxed pose.
+            if(!this.userTracking)for(const side of ['left','right'])for(const part of ['Arm','Elbow','Wrist']){
+                const entry=this.animationBones[side+part];
+                if(entry?.trackingRest)entry.bone.rotation.copy(entry.trackingRest);
+            }
+            return;
+        }
         const alpha = 1 - Math.exp(-Math.min(delta, 0.1) / 0.22);
         this.talkBlend += ((this.activity === 'talking' ? 1 : 0) - this.talkBlend) * alpha;
         this.thinkBlend += ((this.activity === 'thinking' ? 1 : 0) - this.thinkBlend) * alpha;
@@ -1758,7 +1910,7 @@ export default class ModelViewer {
         // Keep the AI companion's weight gently shifting after speech ends.
         // The layered slow waves avoid a visible loop or the old six-second
         // settle-then-freeze behavior; webcam VTuber tracking stays untouched.
-        const companionSway = this.vtuberTrackingMode ? 0
+        const companionSway = this.vtuberTrackingMode || this.isShenheQipaoModel ? 0
             : Math.sin(elapsed * .43) * .034 + Math.sin(elapsed * .23 + 1.4) * .008;
         const motif = motion.beat % 7;
         const phrase=speechGestureWeights(this.gestureStyle,phase,motif);
@@ -2163,7 +2315,8 @@ export default class ModelViewer {
     }
 
     animate() {
-        requestAnimationFrame(this.animate);
+        if(this.destroyed)return;
+        this.animationFrame=requestAnimationFrame(this.animate);
         if(window.sakuraNativeHidden){this.clock?.getDelta();return;}
         try {
             this._renderFrame();
@@ -2214,7 +2367,7 @@ export default class ModelViewer {
         const rawDelta = this.clock.getDelta();
         const delta = Number.isFinite(rawDelta) ? Math.min(.05, Math.max(0, rawDelta)) : 0;
         const elapsed = this.clock.getElapsedTime();
-        if(this.live2d){this.reactionExpressions?.update(delta);this.autoExpressions?.update(delta);this.live2d.render(delta);return;}
+        if(this.live2d){this.reactionExpressions?.update(delta);this.autoExpressions?.update(delta);this._applyCollaboratorPose();this.live2d.render(delta);return;}
         this._prepareCompanionSurface();
 
         // RGB Aura / Breathing cycle
@@ -2294,6 +2447,7 @@ export default class ModelViewer {
         this.rigMonitor?.sample();
         this.boneControls?.apply();
         this.controls.update();
+        this._applyCollaboratorPose();
         if (this.characterGlow > 0 && this.bloomPass) {
             this.renderer.setRenderTarget(this.bloomBase);
             this.renderer.clear();

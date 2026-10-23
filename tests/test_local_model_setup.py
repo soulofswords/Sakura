@@ -39,7 +39,7 @@ class SetupTests(unittest.TestCase):
             (blobs/'sha256-def').write_bytes(b'defg')
             self.assertTrue(setup.installed(root))
 
-    def run_pull(self,lines,expected_error=False):
+    def run_pull(self,lines,expected_error=False,choice='2b',vision=True):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);settings=root/'settings.json'
             original={'llm_provider':'gemini','user_title':'Master','selected_model':'models/miku.pmx'}
@@ -47,14 +47,17 @@ class SetupTests(unittest.TestCase):
             pull=MagicMock();pull.__enter__.return_value=pull
             pull.iter_lines.return_value=[json.dumps(line).encode() for line in lines]
             show=MagicMock()
-            with patch.object(setup,'ensure_runtime'),patch.object(setup.shutil,'disk_usage',return_value=MagicMock(free=20*1024**3)),patch.object(setup.requests,'post',side_effect=[pull,show]) as request,patch('ollama_runtime.server_for_folder',return_value='http://127.0.0.1:11435'),patch('ollama_runtime.stop') as stop,patch.object(setup,'progress'):
+            show.json.return_value={'capabilities':['completion','vision'] if vision else ['completion']}
+            with patch.object(setup,'ensure_runtime'),patch.object(setup.shutil,'disk_usage',return_value=MagicMock(free=80*1024**3)),patch.object(setup.requests,'post',side_effect=[pull,show]) as request,patch('ollama_runtime.server_for_folder',return_value='http://127.0.0.1:11435'),patch('ollama_runtime.stop') as stop,patch.object(setup,'progress'):
                 if expected_error:
-                    with self.assertRaises(RuntimeError):setup.install('2b',root)
+                    with self.assertRaises(RuntimeError):setup.install(choice,root)
                     self.assertEqual(json.loads(settings.read_text()),original)
                 else:
-                    setup.install('2b',root)
+                    setup.install(choice,root)
                     result=json.loads(settings.read_text());self.assertEqual(result['llm_provider'],'ollama')
-                    self.assertEqual(result['ollama_model'],setup.MODELS['2b']);self.assertEqual(result['ollama_context'],2048)
+                    self.assertEqual(result['ollama_model'],setup.MODELS[choice]);self.assertEqual(result['ollama_context'],2048 if choice=='2b' else 4096)
+                    self.assertEqual(result['ollama_vision_model'],setup.MODELS[choice])
+                    self.assertEqual(request.call_args_list[0].kwargs['json']['model'],setup.MODELS[choice])
                     self.assertEqual(result['selected_model'],original['selected_model'])
                     self.assertTrue((root/'llm-models/manifests').is_dir())
                     self.assertEqual(request.call_count,2)
@@ -62,6 +65,29 @@ class SetupTests(unittest.TestCase):
     def test_success_only_changes_provider_after_verified_download(self):self.run_pull([{'status':'success'}])
     def test_download_error_preserves_gemini_and_stops_owned_server(self):self.run_pull([{'error':'quota'}],True)
     def test_empty_or_partial_download_preserves_settings(self):self.run_pull([{'status':'pulling manifest'}],True)
+    def test_model_catalog_is_consistent_with_windows_selectors(self):
+        root=Path(__file__).resolve().parents[1]
+        dialog=(root/'launcher/LocalModelDialog.cs').read_text(encoding='utf-8')
+        installer=(root/'launcher/Installer.cs').read_text(encoding='utf-8')
+        self.assertEqual(setup.MODEL_OPTIONS[2][1], 'qwen3.8:27b')
+        for key, tag, label, ram, vram, disk, download in setup.MODEL_OPTIONS:
+            self.assertIn('"'+key+'"',dialog)
+            self.assertIn('"'+key+'"',installer)
+            self.assertGreaterEqual(disk,8)
+        self.assertGreaterEqual(setup.MODEL_OPTIONS[2][4],24)
+
+    def test_large_model_checks_disk_before_starting_runtime(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(setup.shutil,'disk_usage',return_value=MagicMock(free=12*1024**3)), patch.object(setup,'ensure_runtime') as runtime:
+            with self.assertRaises(RuntimeError):setup.install('qwen38-27b',Path(directory))
+            runtime.assert_not_called()
+
+    def test_gemma_and_large_qwen_use_the_selected_model_for_vision(self):
+        for choice in ('gemma3-4b','qwen38-27b','qwen35-9b'):
+            with self.subTest(choice=choice):self.run_pull([{'status':'success'}],choice=choice)
+
+    def test_download_without_vision_preserves_previous_settings(self):
+        self.run_pull([{'status':'success'}],expected_error=True,vision=False)
+
     def test_only_allowlisted_models(self):
         with self.assertRaises(ValueError):setup.install('llama')
     def test_checksum_mismatch_cannot_install_runtime(self):

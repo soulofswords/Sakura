@@ -14,7 +14,7 @@ export function desktopWakeControls({continuousMic,settings,blocked,receive,stat
         finally{syncing=false;}
     }
     download.onclick=async()=>{if(installing||!api()?.install_wake_pack)return;installing=true;download.disabled=true;download.textContent='Downloading wake pack…';try{const result=await api().install_wake_pack();if(result.error)throw Error(result.error);await sync(true);}catch(error){label.textContent=error.message;}finally{installing=false;download.textContent='Download offline PC wake pack · 55 MB';await refresh();}};
-    window.receiveDesktopWakeCommand=async text=>{if(blocked()){await pause(false);return false;}try{await receive(String(text).slice(0,10000));return true;}finally{await pause(false);}};
+    window.receiveDesktopWakeCommand=async text=>{if(blocked()||!enabled||!settings().wake_word_enabled){await pause(false);return false;}try{await receive(String(text).slice(0,10000));return true;}finally{await pause(false);}};
     window.stopDesktopWakeFromTray=async()=>{enabled=false;last='false|';document.getElementById('wake-word-toggle').checked=false;document.getElementById('wake-word-toggle').dispatchEvent(new Event('change'));await refresh();};
     window.addEventListener('sakura-native-visibility',event=>{window.sakuraNativeHidden=!!event.detail?.hidden;});
     setInterval(()=>{refresh();sync();},2000);window.addEventListener('pywebviewready',()=>{refresh();sync();});

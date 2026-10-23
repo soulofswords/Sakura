@@ -50,7 +50,29 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
         toggle.scrollIntoView({block:'center'});
     };
     for(const id of ['connect-phone-btn','tracking-connect-phone-btn','settings-connect-phone-btn'])document.getElementById(id)?.addEventListener('click',connectPhone);
+    let remoteSamples=0,remoteStarted=0;
+    // A phone that is already streaming does not resend tracking-start after
+    // the PC window restarts. Accept its frames after an explicit PC Start.
+    window.addEventListener('sakura-phone-tracking-requested',event=>{
+        remote=event.detail?.enabled===true;
+        remoteKind=remote?'vtuber':'';
+        if(getTracker())getTracker().remoteActive=remote;
+        if(remote){filter=new HeadPoseFilter();remoteSamples=0;remoteStarted=performance.now();}
+        getViewer()?.setVtuberTrackingMode(remote);
+        getViewer()?.setUserTracking(remote);
+    });
+    const trackingStatus=message=>{
+        for(const id of ['tracking-status','settings-camera-status']){
+            const label=document.getElementById(id);if(label)label.textContent=message;
+        }
+    };
     let state={};
+    document.getElementById('tracking-hands-enabled')?.addEventListener('click',e=>{
+        if(!enabled)return;
+        fetch('/api/mobile/tracking-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'hands',enabled:e.currentTarget.getAttribute('aria-pressed')==='true'})})
+            .then(async r=>{if(!r.ok)throw Error((await r.json()).error||'Could not update phone hand tracking');})
+            .catch(error=>{status.textContent='Phone tracking: '+error.message;});
+    });
     document.getElementById('send-model-mobile')?.addEventListener('click',async()=>{
         const button=document.getElementById('send-model-mobile');button.disabled=true;
         try{
@@ -64,10 +86,11 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
     async function poll(){
         if(!enabled||busy||!getViewer())return;
         busy=true;const viewer=getViewer();
+        if(getTracker())getTracker().remoteActive=remote;
         try{
             if(performance.now()-lastState>1500){
                 state={edition:window.SAKURA_EDITION||'companion',expressions:viewer.allMorphNames||[],
-                    model:viewer.lastModelUrl||'',tracking:remote,avatar:viewer.model?viewer.captureAvatar():null};lastState=performance.now();
+                    model:viewer.lastModelUrl||'',tracking:remote,tracking_face_source:getTracker()?.faceSource||'webcam',avatar:viewer.model&&!remote?viewer.captureAvatar():null};lastState=performance.now();
             }
             const response=await fetch('/api/mobile/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)});
             if(!response.ok)return;
@@ -76,11 +99,11 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
                 if(command.type==='request-model'){
                     void import('./mobile-model-transfer.js?v=phone-touch73').then(module=>module.openMobileModelTransfer(command.request_id)).catch(error=>{status.textContent=error.message;});
                 }else if(command.type==='tracking-start'){
-                    getTracker()?.stop();remote=true;remoteKind='vtuber';filter=new HeadPoseFilter();
+                    getTracker()?.stop();remote=true;remoteKind='vtuber';filter=new HeadPoseFilter();remoteSamples=0;remoteStarted=performance.now();trackingStatus('Sakura Mobile · waiting for tracking frames');
                     window.dispatchEvent(new CustomEvent('sakura-phone-tracking',{detail:true}));
                     viewer.setVtuberTrackingMode(true);viewer.setUserTracking(true);
                 }else if(command.type==='companion-tracking-start'){
-                    getTracker()?.stop();remote=true;remoteKind='companion';filter=new HeadPoseFilter();
+                    getTracker()?.stop();remote=true;remoteKind='companion';filter=new HeadPoseFilter();remoteSamples=0;remoteStarted=performance.now();trackingStatus('Sakura Mobile · waiting for tracking frames');
                     window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:true}}));
                     viewer.setVtuberTrackingMode(true);viewer.setUserTracking(true);
                 }else if(command.type==='companion-tracking-stop'){
@@ -104,13 +127,21 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
             if(remote&&data.frame){
                 data.frame.timestamp=performance.now();
                 if(!data.frame.headPoseFiltered)data.frame.face=filter.update(data.frame.face,data.frame.timestamp);
-                viewer.updateUserTracking({...data.frame,handTrackingEnabled:false});
-                lastRemoteFrame=performance.now();
+                const handsOn=document.getElementById('tracking-hands-enabled')?.getAttribute('aria-pressed')==='true';
+                viewer.updateUserTracking({...data.frame,hands:handsOn ? data.frame.hands : [],handTrackingEnabled:handsOn&&data.frame.handTrackingEnabled!==false});
+                lastRemoteFrame=performance.now();remoteSamples++;
+                const elapsed=lastRemoteFrame-remoteStarted;
+                if(elapsed>=1000){
+                    const fps=Math.round(remoteSamples*1000/elapsed);
+                    trackingStatus(`Sakura Mobile · ${fps} received FPS · ${data.frame.face?.matrix?'face tracked':'face not detected'} · ${(data.frame.hands||[]).length} hands`);
+                    remoteSamples=0;remoteStarted=lastRemoteFrame;
+                }
             }else if(remote&&performance.now()-lastRemoteFrame>600){
+                trackingStatus('Sakura Mobile · waiting for fresh tracking frames');
                 viewer.updateUserTracking({face:{landmarks:[],blendshapes:[],matrix:null},hands:[],pose:null,handTrackingEnabled:false});
             }
         }catch(error){status.textContent='Phone connection: '+error.message;}
         finally{busy=false;}
     }
-    setInterval(()=>poll(),33);
+    setInterval(()=>poll(),16);
 }

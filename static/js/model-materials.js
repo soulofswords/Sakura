@@ -35,7 +35,7 @@ export class ModelMaterials {
                 for(const material of (Array.isArray(mesh.material)?mesh.material:[mesh.material])) {
                     if(!material||seen.has(material)||!material.color)continue;seen.add(material);
                     this.entries.push({id:`mat:${this.entries.length}`,name:material.name||`Material ${this.entries.length+1}`,kind:'material',material,
-                        base:{map:material.map,color:material.color.clone(),opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite}});
+                        base:{map:material.map,color:material.color.clone(),opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite,alphaTest:material.alphaTest}});
                 }
             });
         }
@@ -58,8 +58,11 @@ export class ModelMaterials {
         e.material.color.copy(e.base.color);
         const opacity=setting?.opacity??1;
         e.material.opacity=opacity>1?e.base.opacity+(1-e.base.opacity)*(opacity-1):e.base.opacity*opacity;
-        e.material.transparent=e.base.transparent||e.material.opacity<.999;
-        e.material.depthWrite=e.material.opacity<.999?false:e.base.depthWrite;
+        const forceOpaque=opacity>1&&e.material.opacity>=.999;
+        e.material.transparent=forceOpaque?false:(e.base.transparent||e.material.opacity<.999);
+        e.material.depthWrite=forceOpaque?true:(e.material.opacity<.999?false:e.base.depthWrite);
+        e.material.alphaTest=forceOpaque&&e.base.map?.transparent===true
+            ?Math.max(e.base.alphaTest||0,.01):(e.base.alphaTest||0);
         try {
             if(!setting||(setting.strength===0&&opacity<=1)){e.material.map=source;return;}
             const target=new THREE.Color(setting.color).convertLinearToSRGB();
@@ -116,7 +119,7 @@ export class ModelMaterials {
         this.revision=(this.revision||0)+1;
         if(this.renderer&&this.drawOriginal)this.renderer.drawMesh=this.drawOriginal;
         for(const e of this.entries){
-            if(e.kind==='material'){e.material.map=e.base.map;e.material.color.copy(e.base.color);e.material.opacity=e.base.opacity;e.material.transparent=e.base.transparent;e.material.depthWrite=e.base.depthWrite;e.material.needsUpdate=true;e.generated?.dispose();}
+            if(e.kind==='material'){e.material.map=e.base.map;e.material.color.copy(e.base.color);e.material.opacity=e.base.opacity;e.material.transparent=e.base.transparent;e.material.depthWrite=e.base.depthWrite;e.material.alphaTest=e.base.alphaTest;e.material.needsUpdate=true;e.generated?.dispose();}
             if(e.kind==='atlas'&&this.live?.avatar)this.live.avatar.textures[e.index]=e.base;
         }
         for(const [id,texture]of this.replacements){if(id.startsWith('atlas:'))texture.destroy(true);else texture.dispose();}

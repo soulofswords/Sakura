@@ -6,6 +6,56 @@ import httpx
 from mobile_link import MobileLink
 
 class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pc_controls_paired_phone_tracking(self):
+        await self.pair()
+        self.assertTrue(self.link.control_tracking({'action':'start'})['ok'])
+        c=(await self.client.get('/state')).json()['tracking_control']
+        self.assertEqual(c['action'],'start');self.assertGreater(c['expires'],time.time())
+        self.link.control_tracking({'action':'stop'})
+        self.assertGreater((await self.client.get('/state')).json()['tracking_control']['id'],c['id'])
+        with self.assertRaises(ValueError):self.link.control_tracking({'action':'execute'})
+
+    async def test_phone_hands_and_pose_reach_pc(self):
+        await self.pair()
+        point={'x':.1,'y':.2,'z':.3,'visibility':.9}
+        hand={'side':'Left','confidence':.99,'landmarks':[point]*21,'world':[point]*21}
+        pose={'landmarks':[point]*33,'world':[point]*33}
+        payload={'face':{'matrix':[1.0]*16},'hands':[hand],'pose':pose}
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,200)
+        frame=self.link.poll({})['frame'];self.assertEqual(frame['hands'],[hand]);self.assertEqual(frame['pose'],pose)
+        payload['hands'][0]['landmarks']=[point]*22
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,400)
+        payload['hands']=[];payload['pose']=None
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,200)
+        self.assertEqual(self.link.poll({})['frame']['hands'],[])
+
+    async def test_body_tracking_survives_missing_face(self):
+        await self.pair()
+        point={'x':.1,'y':.2,'z':.3,'visibility':.9}
+        hand={'side':'Left','confidence':.99,'landmarks':[point]*21}
+        payload={'face':{'matrix':None,'landmarks':[],'blendshapes':[]},'hands':[hand],'pose':{'landmarks':[point]*33}}
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,200)
+        frame=self.link.poll({})['frame']
+        self.assertEqual(frame['hands'],[hand]);self.assertIsNone(frame['face']['matrix'])
+        payload['face']['matrix']=[1]*15
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,400)
+
+    async def test_phone_camera_image_reaches_native_nvidia_without_virtual_webcam(self):
+        import base64
+        from unittest.mock import patch
+        await self.pair()
+        self.link.state['tracking_face_source']='nvidia_ar'
+        jpeg=b'\xff\xd8\xfftest'
+        payload={'face':{'matrix':None},'hands':[], 'cameraFrame':{'image':base64.b64encode(jpeg).decode(),'width':480,'height':360}}
+        with patch('nvidia_ar_tracker.tracker') as tracker:
+            tracker.snapshot.return_value={'running':True,'blendshapes':{'jawOpen':.3}}
+            result=await self.client.post('/frame',json=payload)
+            self.assertEqual(result.status_code,200)
+            tracker.submit_frame.assert_called_once_with(jpeg,480,360)
+            self.assertEqual(self.link.poll({})['frame']['face']['blendshapes'],[{'categoryName':'jawOpen','score':.3}])
+        payload['cameraFrame']['width']=99999
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,400)
+
     async def test_requested_complete_folder_reaches_authenticated_download(self):
         import zipfile
         import io

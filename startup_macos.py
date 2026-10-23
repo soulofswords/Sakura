@@ -7,7 +7,7 @@ from PySide6.QtCore import QProcess
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QDialog, QVBoxLayout, QLabel,
     QLineEdit, QPushButton, QMessageBox, QComboBox, QProgressBar)
-from local_model_setup import installed
+from local_model_setup import installed, MODEL_OPTIONS
 
 BASE = Path(__file__).resolve().parent
 STYLE = '''QWidget{background:#0c0f1a;color:#f0f4ff;font:15px;} QPushButton,
@@ -20,10 +20,13 @@ class Download(QDialog):
         self.setMinimumWidth(560); self.setStyleSheet(STYLE)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel('Choose your local companion'))
-        self.choice = QComboBox(); self.choice.addItems(['Qwen 2B', 'Qwen 4B'])
+        self.choice = QComboBox(); self.choice.addItems([row[2]+' · Vision' for row in MODEL_OPTIONS])
         layout.addWidget(self.choice)
-        guidance = QLabel('2B: 8 GB unified memory minimum; 16 GB preferred.\n4B: 16 GB unified memory recommended.\nM1 or newer, macOS 14+. Allow 8–10 GB free disk.\nThese are recommendations; other apps share your memory.')
-        guidance.setWordWrap(True); layout.addWidget(guidance)
+        guidance = QLabel(); guidance.setWordWrap(True);layout.addWidget(guidance)
+        def selected_specs():
+            row=MODEL_OPTIONS[self.choice.currentIndex()]
+            guidance.setText(f'Recommended: {max(row[3],row[4]+8)} GB Apple unified memory.\nDownload: {row[6]}; free disk: {row[5]} GB.\nWindows recommendation: {row[3]} GB RAM + {row[4]} GB VRAM.\nM1 or newer, macOS 14+. Estimates depend on context, images and other apps. CPU/RAM offload is slower.')
+        self.choice.currentIndexChanged.connect(selected_specs);selected_specs()
         self.status = QLabel('No downloads until you press Download.'); self.status.setWordWrap(True);layout.addWidget(self.status)
         self.bar = QProgressBar();self.bar.setRange(0,0);self.bar.hide();layout.addWidget(self.bar)
         self.button = QPushButton('Download and use local AI');layout.addWidget(self.button)
@@ -37,7 +40,7 @@ class Download(QDialog):
         cancel = QPushButton('Cancel');cancel.clicked.connect(self.reject);layout.addWidget(cancel)
     def start(self):
         self.button.setEnabled(False);self.choice.setEnabled(False);self.bar.show()
-        self.worker.start(sys.executable, ['-u', str(BASE/'local_model_setup.py'), '--install', '2b' if self.choice.currentIndex()==0 else '4b'])
+        self.worker.start(sys.executable, ['-u', str(BASE/'local_model_setup.py'), '--install', MODEL_OPTIONS[self.choice.currentIndex()][0]])
     def output(self):
         import json
         self.pending += bytes(self.worker.readAllStandardOutput()).decode('utf-8',errors='replace')
@@ -91,7 +94,7 @@ class Chooser(QDialog):
             os.environ['SAKURA_START_API_PROVIDER']=provider
             os.environ['SAKURA_START_CLOUD_MODEL']=self.model.text().strip()
         if mode=='local' and not installed():
-            if QMessageBox.question(self,'Set up local AI','Are you sure you want to run Local LLM? A runtime and your selected Qwen model will be downloaded.')!=QMessageBox.Yes:return
+            if QMessageBox.question(self,'Set up local AI','Are you sure you want to run Local LLM? A runtime and your selected vision model will be downloaded.')!=QMessageBox.Yes:return
             if Download().exec()!=QDialog.Accepted:return
         self.mode=mode;self.accept()
 

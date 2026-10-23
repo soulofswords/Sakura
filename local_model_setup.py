@@ -14,7 +14,18 @@ import zipfile
 import requests
 
 BASE = Path(__file__).resolve().parent
-MODELS = {'2b': 'qwen3-vl:2b-instruct', '4b': 'qwen3-vl:4b-instruct'}
+MODEL_OPTIONS = [
+    ('2b','qwen3-vl:2b-instruct','Qwen3-VL 2B',8,4,8,'~2 GB'),
+    ('4b','qwen3-vl:4b-instruct','Qwen3-VL 4B',16,8,10,'~3.3 GB'),
+    ('qwen38-27b','qwen3.8:27b','Qwen 3.8 27B',48,24,35,'~18 GB'),
+    ('gemma3-4b','gemma3:4b','Gemma 3 4B',16,8,10,'~3.4 GB'),
+    ('gemma3-12b','gemma3:12b','Gemma 3 12B',32,16,20,'~8.2 GB'),
+    ('gemma3-27b','gemma3:27b','Gemma 3 27B',48,24,35,'~17 GB'),
+    ('qwen35-4b','qwen3.5:4b','Qwen 3.5 4B',16,8,12,'~4 GB'),
+    ('qwen35-9b','qwen3.5:9b','Qwen 3.5 9B',32,16,20,'~7.6 GB'),
+]
+MODELS = {row[0]:row[1] for row in MODEL_OPTIONS}
+MODEL_DISK = {row[0]:row[5] for row in MODEL_OPTIONS}
 RELEASE = 'https://github.com/ollama/ollama/releases/download/v0.40.2/'
 RUNTIMES = {
     'win32': ('ollama-windows-amd64.zip', 'e29ad1d5063dd4b54b2492d9b00adab2cff9621bfa654b6c92aa8d6f1fdfe7fc'),
@@ -113,9 +124,9 @@ def ensure_runtime(base=BASE):
 
 def install(choice, base=BASE):
     if choice not in MODELS:
-        raise ValueError('Choose Qwen 2B or Qwen 4B.')
-    if shutil.disk_usage(base).free < 8 * 1024**3:
-        raise RuntimeError('Please free at least 8 GB before installing local AI.')
+        raise ValueError('Choose a supported vision model from the selector.')
+    if shutil.disk_usage(base).free < MODEL_DISK[choice] * 1024**3:
+        raise RuntimeError(f'Please free at least {MODEL_DISK[choice]} GB before installing this model and runtime.')
     ensure_runtime(base)
     store = base / 'llm-models'
     for folder in ('blobs', 'manifests'):
@@ -142,6 +153,8 @@ def install(choice, base=BASE):
                 raise RuntimeError('Model download ended before completion. Retry to resume.')
         check = requests.post(url + '/api/show', json={'model': MODELS[choice]}, timeout=30)
         check.raise_for_status()
+        if 'vision' not in check.json().get('capabilities', []):
+            raise RuntimeError('This runtime did not confirm vision support for the downloaded model. Update Ollama and retry. Your previous model settings were preserved.')
         settings = base / 'settings.json'
         cfg = json.loads(settings.read_text(encoding='utf-8-sig')) if settings.exists() else {}
         cfg.update(llm_provider='ollama', ollama_model=MODELS[choice],
@@ -166,7 +179,7 @@ if __name__ == '__main__':
         sys.exit(0 if installed() else 2)
     try:
         if not args.install:
-            parser.error('Use --check or --install 2b|4b')
+            parser.error('Use --check or --install with a model selector ID')
         install(args.install)
     except Exception as error:
         progress(str(error))

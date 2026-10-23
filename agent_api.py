@@ -15,6 +15,20 @@ from agent_calendar import google_calendar
 
 def agent_router(model_getter,enabled=lambda:True,provider_status=None):
     router=APIRouter();token=secrets.token_urlsafe(40)
+    def web_keys():
+        """Search providers use the keys the user already saved; empty means keyless."""
+        try:
+            model = model_getter('current')
+            gemini = str(getattr(model, 'gemini_api_key', '') or ''), str(getattr(model, 'gemini_model', '') or '')
+        except Exception:
+            gemini = '', ''
+        try:
+            from credentials import get_cloud_key
+            brave = get_cloud_key('brave')
+        except Exception:
+            brave = ''
+        return (*gemini, brave)
+    runtime.web_credentials = web_keys
     def local(request:Request):
         if not enabled():raise HTTPException(409,'Agent tools are available only in Companion AI modes.')
         if not request.client or request.client.host not in ('127.0.0.1','::1'):raise HTTPException(403,'Agent approvals must be made on this PC.')
@@ -53,7 +67,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None):
         return {'connections':runtime.connections.public(),'tools':runtime.catalog(),
                 'providers':await call(provider_status) if provider_status else [],
                 'skills':await call(runtime.skills.list),
-                'runs':[runtime.state(identifier) for identifier in list(runtime.runs)],
+                'runs':await call(runtime.states),
                 'linkedin':await call(linkedin.status),'calendar':await call(google_calendar.status)}
 
     @router.post('/api/agent/connections',dependencies=guard)
@@ -67,7 +81,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None):
     async def discover(identifier:str):return await call(runtime.discover_proposal,identifier)
 
     @router.post('/api/agent/tasks',dependencies=guard)
-    async def task(payload:dict):return await call(runtime.new_run,payload.get('goal'),payload.get('workspace'))
+    async def task(payload:dict):return await call(runtime.new_run,payload.get('goal'),payload.get('workspace'),payload.get('auto_continue',True))
 
     @router.delete('/api/agent/tasks',dependencies=guard)
     async def clear_tasks():return await call(runtime.clear_history)

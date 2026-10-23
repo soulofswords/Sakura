@@ -28,3 +28,4 @@ pytchat==0.5.5
 
 # Optional Windows-only frame sharing (inactive until user enables it)
 SpoutGL==0.1.1; sys_platform == "win32"
+pyvirtualcam==0.15.0; sys_platform == "win32"

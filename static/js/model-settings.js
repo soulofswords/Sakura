@@ -1,7 +1,7 @@
-import {ModelMaterials,storedRemap} from './model-materials.js?v=opacity-boost3';
+import {ModelMaterials,storedRemap} from './model-materials.js?v=opacity-boost4';
 import {installColorDial} from './color-dial.js?v=assistant69';
 import {installMouthSettings} from './mouth-settings.js?v=audio-route5';
-import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=1';
+import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=2';
 import {installBoneSettings} from './model-bones.js?v=persistent5';
 import {installTextureDiagnostics} from './texture-diagnostics.js?v=1';
 

@@ -185,6 +185,61 @@ def tool_evidence(text, method):
     return Evidence(text, 'Verified', 1.0, _sources(text, method), method)
 
 
+PRIVATE_MARKERS = re.compile(
+    r'\b(?:my|me|your|password|secret|token|API key|email|clipboard|file|folder|address|bank)\b'
+    r'|[\w.+-]+@[\w.-]+|\bsk-[\w-]+', re.I)
+SENSITIVE_TOPICS = re.compile(
+    r'\b(?:medical|medicine|diagnosis|symptom|dosage|prescription|legal advice|lawsuit|immigration'
+    r'|tax filing|investment advice|suicide|self-harm)\b', re.I)
+CREATIVE_TASKS = re.compile(
+    r'\b(?:translate|write a|compose|imagine|story|joke|poem|song|roleplay|fiction|pretend|opinion'
+    r'|should i|what should)\b', re.I)
+FACT_SEEKING = re.compile(
+    r'[?？]|\b(?:what|who|when|where|which|why|how (?:much|many|long|old|is|are|does)|is|are|does|do'
+    r'|price|cost|specs?|specifications|vram|memory|release|latest|current|today|news|weather|version)\b'
+    r'|\b(?:क्या|कितना|कितने|कब|कौन|कहाँ|कैसा)\b', re.I)
+
+
+def _search_query(text, name=''):
+    query = re.sub(r'^(?:hey|hi|hello|okay|ok|so|now|please)[,!]?\s+', '', text.strip(), flags=re.I)
+    if name:
+        query = re.sub(r'^(?:hey |ok )*' + re.escape(name) + r'[,!]?\s*', '', query, flags=re.I)
+    query = re.sub(r'^(?:can you|could you|do you know|tell me|i want to know)\s+(?:please\s+)?'
+                   r'(?:me|that|this)?\s*', '', query, flags=re.I)
+    return re.sub(r'\s+', ' ', query).strip(' .!?')[:160]
+
+
+def web_context(text, credentials=None, name=''):
+    """Web evidence for the generation path, or an unverified-answer warning.
+
+    Returns '' when the question must never leave the device; social, personal,
+    creative and high-stakes questions are refused before any network call.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return ''
+    if PRIVATE_MARKERS.search(text) or SENSITIVE_TOPICS.search(text) or CREATIVE_TASKS.search(text):
+        return ''
+    if conversational_request(text) or medium_conversation(text) or not FACT_SEEKING.search(text):
+        return ''
+    query = _search_query(text, name)
+    if len(query) < 8:
+        return ''
+    import agent_web
+    try:
+        found = agent_web.lookup(query, credentials)
+    except (agent_web.requests.RequestException, ValueError):
+        found = None
+    if not found:
+        return ('No usable web result was found for this question. Answer from what you know, but '
+                'state clearly in one short line that you could not verify it. Never invent an exact '
+                'specification, price, version or date.')
+    excerpt = found['text'][:2500]
+    return (f"Web lookup just now ({found['provider']}). From {found['title']} - {found['url']}:\n"
+            f"{excerpt}\nAnswer using only these facts and name the source briefly. Do not add any "
+            'number or detail that is missing above; if it does not answer the question, say what is '
+            'missing instead of guessing.')
+
+
 def web_retrieve(text):
     """General reference retrieval only. Current/product/high-stakes claims need dedicated sources."""
     if high_risk_topic(text):

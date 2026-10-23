@@ -31,7 +31,7 @@
             color: #b9fbff; background: #151021; font: 14px 'Segoe UI', sans-serif;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/style.css?v=files105">
+    <link rel="stylesheet" href="/static/css/style.css?v=sdk-links109">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -149,6 +149,7 @@
             <button id="dance-btn" type="button">Dance</button>
             <button id="dance-stop-btn" type="button">Stop dance</button>
             <button id="pmx-editor-btn" type="button" class="hidden" title="Open the selected PMX in its native editor">PMX Editor</button>
+            <button id="virtual-camera-toggle" type="button" aria-pressed="false" title="Send your character to an installed OBS Virtual Camera">Virtual Camera: Off</button>
             <button id="connect-phone-btn" type="button" title="Pair the Android app for face tracking, expressions or companion chat">📱 Connect to Phone</button>
             <label class="model-size-control no-drag" for="model-size">Size <input id="model-size" type="range" min="40" max="180" step="5" value="100" aria-label="Model display size"><output id="model-size-value">100%</output></label>
             <button id="interrupt-btn" type="button" title="Interrupt the current reply">⏹ Stop speaking</button>
@@ -156,6 +157,7 @@
             <button id="eye-tracking-btn" type="button" aria-pressed="false" title="Make Sakura's eyes follow your mouse cursor">👀 Eyes off</button>
             <button id="auto-game-btn" type="button" aria-pressed="false" title="Detect games, use Qwen 2B and enable occasional screen reactions">🎮 Auto game off</button>
             <button id="tracking-mode-btn" type="button" title="Webcam face and hand tracking with chat AI unloaded">VTuber</button>
+            <button id="vtuber-collab-btn" type="button" title="Share your avatar with another Sakura user">Collab</button>
             <button id="vtuber-mode-btn" type="button" title="AI YouTube chat and screen co-hosting">AI VTuber</button>
             <button id="chat-reader-mode-btn" type="button" hidden title="Read YouTube chat aloud with camera tracking off">Chat Reader</button>
             <button id="settings-btn" title="Settings">⚙️</button>
@@ -301,8 +303,8 @@
                     <button id="tracking-connect-phone-btn" type="button">📱 Connect to Phone</button>
                 </div>
                 <label><input id="tracking-mirror" type="checkbox" checked> Mirror movement</label>
-                <label><input id="tracking-hands-enabled" type="checkbox" checked> Track shoulders, arms, hands and fingers</label>
-                <p class="modal-hint">Show each full hand inside the camera frame to move its arm. When a hand leaves the frame, that arm and its fingers return to rest. Shoulders alone do not activate arm tracking.</p>
+                <button id="tracking-hands-enabled" class="tracking-toggle-btn active" type="button" aria-pressed="true">Hand tracking: On</button>
+                <p class="modal-hint">Face/head tracking and body lean/up-down stay active with normal tracking. This separate option controls only hand-driven arms and fingers.</p>
                 <div class="save-actions"><button id="tracking-start" type="button">Start tracking</button><button id="tracking-calibrate" type="button">Calibrate neutral face</button><button id="tracking-stop" type="button">Stop tracking</button><button id="tracking-restore-ai" type="button">Return to assistant</button></div>
                 <label for="reader-chat-link">YouTube livestream / chat link</label>
                 <input id="reader-chat-link" type="url" placeholder="https://www.youtube.com/watch?v=…">
@@ -456,6 +458,11 @@
                 <div class="setting-group checkbox-group">
                     <label><input id="preserve-configuration" type="checkbox" checked> Preserve configuration on reinstall</label>
                     <p class="modal-hint">Keep your settings when updating or reinstalling. Turning this off resets configuration on the next reinstall; imported models, voices and artwork remain intact. A configuration backup is kept.</p>
+                    <fieldset class="setting-group"><legend>Virtual Camera</legend>
+                        <button id="virtual-camera-settings-toggle" type="button" aria-pressed="false">Virtual Camera: Off</button>
+                        <p id="virtual-camera-status" role="status">Virtual camera off.</p>
+                        <p class="modal-hint">Send your character to Discord, Zoom, or other video apps. Requires the OBS Studio virtual camera driver. Stop Virtual Camera in OBS while Sakura uses it, then select OBS Virtual Camera in your video app. Outputs the character on a dark background, without controls. Works in Companion and VTuber modes; off on launch.</p>
+                    </fieldset>
                     <fieldset class="setting-group"><legend>Spout2 · OBS output</legend>
                         <label><input id="spout-enabled" type="checkbox"> Enable Spout2 output</label>
                         <label for="spout-name">Spout sender name</label><input id="spout-name" value="Sakura" maxlength="64">
@@ -668,6 +675,34 @@
             <!-- ── TAB: Audio ── -->
             <div class="tab-content" id="tab-audio">
                 <div class="setting-group vtuber-camera-settings">
+                    <label for="face-tracking-source">Face tracking source</label>
+                    <select id="face-tracking-source">
+                        <option value="webcam">Webcam · MediaPipe face tracking</option>
+                        <option value="nvidia_broadcast">NVIDIA Broadcast · enhanced camera + NVIDIA GPU tracking</option>
+                        <option value="nvidia_ar">NVIDIA AR SDK · Sakura native RTX tracker</option>
+                        <option value="nvidia_expressionapp">NVIDIA Broadcast Tracker · 2 GB ExpressionApp</option>
+                        <option value="nvidia_vts">NVIDIA RTX face tracker · VTube Studio → VBridger</option>
+                        <option value="vbridger">VBridger · VMC blendshape input</option>
+                    </select>
+                    <p id="face-tracking-source-help" class="modal-hint">NVIDIA Broadcast provides the camera feed; Sakura runs GPU-accelerated MediaPipe on it. Sakura’s native RTX option uses NVIDIA AR SDK directly and does not need VTube Studio.</p>
+                    <div class="save-actions"><button id="settings-nvidia-rtx-toggle" type="button" aria-pressed="false">Enable Sakura native RTX tracker</button><button id="settings-expressionapp-toggle" type="button" aria-pressed="false">Enable 2 GB NVIDIA tracker</button></div>
+                    <p class="modal-hint">Sakura native mode runs the NVIDIA AR SDK on the selected camera feed. The 2 GB NVIDIA Broadcast Tracker option runs the ExpressionApp engine from its Steam DLC directly; VTube Studio itself does not need to be running. Install the DLC through Steam and set its MXTracker/v2 folder below.</p>
+                    <details id="nvidia-expressionapp-setup"><summary>Set up VTube Studio’s 2 GB NVIDIA tracker for Sakura</summary>
+                        <p class="modal-hint">The free Steam DLC is about 2 GB and officially requires VTube Studio as its base app. Sakura can launch its ExpressionApp engine directly after installation, without starting VTube Studio. Sakura does not redistribute the DLC files.</p>
+                        <div class="save-actions"><button id="nvidia-expressionapp-download" type="button">Download tracker in Steam</button></div>
+                        <label>Installed MXTracker/v2 folder<input id="nvidia-expressionapp-folder" type="text" placeholder=".../VTube Studio_Data/StreamingAssets/MXTracker/v2"></label>
+                        <div class="camera-phone-row"><button id="nvidia-expressionapp-browse" type="button">Browse tracker folder</button><label>Camera index<input id="nvidia-expressionapp-camera" type="number" min="0" max="5" value="0"></label><button id="nvidia-expressionapp-save" type="button">Save and check</button></div>
+                        <p id="nvidia-expressionapp-status" class="modal-hint" role="status">Choose the installed MXTracker/v2 folder. The tracker opens its own camera capture.</p>
+                    </details>
+                    <p id="vbridger-status" class="modal-hint" role="status">VBridger accepts VMC output on 127.0.0.1:39539. Keep webcam face tracking enabled for head position; VBridger adds detailed facial expressions.</p>
+                    <p class="modal-hint"><a href="https://store.steampowered.com/app/2178540/VTube_Studio__NVIDIA_Broadcast_Tracker/" target="_blank" rel="noopener noreferrer">VTube Studio NVIDIA tracker</a> · <a href="https://store.steampowered.com/app/1898830/VBridger/" target="_blank" rel="noopener noreferrer">VBridger</a></p>
+                    <label for="tracking-backend">Hand and arm tracking backend</label>
+                    <select id="tracking-backend">
+                        <option value="mediapipe">MediaPipe · webcam camera</option>
+                        <option value="leap_motion">Leap Motion · hardware controller</option>
+                        <option value="nvidia_gpu">NVIDIA GPU · GPU-accelerated MediaPipe</option>
+                    </select>
+                    <p id="tracking-backend-help" class="modal-hint">MediaPipe runs locally from your webcam. Leap Motion uses the local Ultraleap service for finger tracking and the webcam for face and arm pose. NVIDIA GPU mode runs the same landmarks on the browser GPU delegate; it requires hardware acceleration and an NVIDIA GPU selected by Windows.</p>
                     <label for="settings-tracking-camera">VTuber camera:</label>
                     <div class="camera-phone-row">
                         <select id="settings-tracking-camera"><option value="">Default camera</option></select>
@@ -678,9 +713,16 @@
                     <div class="save-actions"><button id="tracking-broadcast-camera" type="button">Use NVIDIA Broadcast camera</button><button id="tracking-broadcast-open" type="button">Open NVIDIA Broadcast</button></div>
                     <p class="modal-hint">Optional Windows camera input; requires a supported RTX GPU (RTX 2060 or newer). Broadcast improves the video feed, not facial-expression detection directly. Keep Eye Contact off for your real gaze. Cheek puff requires a compatible tracking source and an expression authored in the model.</p>
                     <a href="https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-app/" target="_blank" rel="noopener noreferrer">NVIDIA Broadcast download and requirements</a>
-                    <details id="nvidia-sdk-setup"><summary>Optional NVIDIA RTX facial expressions setup</summary>
-                        <p class="modal-hint">Not bundled or downloaded automatically. Live SDK tracking is not connected yet. Install SDK Core and nvARFaceExpressions, nvARLandmarkDetection, and nvARFaceBoxDetection through your own NGC account. Never paste your NGC key into chat.</p>
-                        <a href="https://catalog.ngc.nvidia.com/orgs/nvidia/teams/maxine/collections/maxine_ar_sdk" target="_blank" rel="noopener noreferrer">Choose to download NVIDIA AR SDK</a>
+                    <details id="nvidia-sdk-setup"><summary>Optional NVIDIA AR SDK facial expressions setup</summary>
+                        <p class="modal-hint">Optional SDK files for Windows x64 RTX PCs. Sakura uses this installed SDK directly for local facial-expression inference. SDK files are not bundled with Sakura; use your own NVIDIA account to download them.</p>
+                        <div class="save-actions"><button id="nvidia-sdk-download" type="button">Download optional NVIDIA SDK</button><button id="nvidia-sdk-import" type="button">Import downloaded SDK ZIP</button></div>
+                        <input id="nvidia-sdk-archive" type="file" accept=".zip" hidden>
+                        <p class="modal-hint">After SDK Core is installed, Sakura can install NVIDIA’s Face Expressions, Face Landmark Detection and Face Box Detection packages for your GPU. This is Sakura’s native RTX tracker, not the separate VTube Studio Steam DLC. NVIDIA NGC access and your own API key are required.</p>
+                        <a href="https://catalog.ngc.nvidia.com/orgs/nvidia/maxine/collections/maxine_ar_sdk/-" target="_blank" rel="noopener noreferrer">Create an NVIDIA NGC API key / review access</a> · <a href="https://docs.nvidia.com/maxine/ar/latest/WindowsARSDK/InstalltheARSDK.html" target="_blank" rel="noopener noreferrer">NVIDIA install guide</a>
+                        <label for="nvidia-sdk-ngc-key">Temporary NGC API key (used only for this install)</label>
+                        <input id="nvidia-sdk-ngc-key" type="password" autocomplete="off" placeholder="Paste your NVIDIA NGC API key">
+                        <button id="nvidia-sdk-install-features" type="button">Install face-tracking packages</button>
+                        <p class="modal-hint">The key is sent only to this local Sakura process and passed to NVIDIA’s installer as a temporary environment variable. Sakura does not save it.</p>
                         <label>Installed SDK folder<input id="nvidia-sdk-folder" type="text" placeholder="Your NVIDIA AR SDK folder"></label>
                         <button id="nvidia-sdk-browse" type="button">Browse SDK folder</button><button id="nvidia-sdk-check" type="button">Save folder and check SDK</button>
                         <p id="nvidia-sdk-status" class="modal-hint" role="status">Optional. Nothing downloads until you choose NVIDIA’s download link.</p>
@@ -701,8 +743,8 @@
                     <p class="modal-hint">With glasses on, enable this and calibrate while looking forward with both eyes open. This reduces false blinks from lens reflections. Avoid bright glare across your lenses.</p>
                     <label for="tracking-gaze-strength">Gaze strength</label>
                     <input id="tracking-gaze-strength" type="range" min="0" max="200" value="100">
-                    <label for="tracking-fps">Tracking frame rate</label>
-                    <select id="tracking-fps"><option value="15">15 FPS · lower CPU usage</option><option value="24">24 FPS</option><option value="30">30 FPS</option></select>
+                    <p class="modal-hint">60 FPS is a target. Camera output, lighting and tracking inference can limit the actual rate. The tracking status shows measured FPS; lower the rate if GPU usage is too high.</p><label for="tracking-fps">Tracking frame rate</label>
+                    <select id="tracking-fps"><option value="15">15 FPS · lower CPU usage</option><option value="24">24 FPS</option><option value="30">30 FPS</option><option value="60">60 FPS · requires fast camera / GPU</option></select>
                     <button id="tracking-reset-options" type="button">Reset tracking settings</button>
                 </div>
                 <fieldset class="setting-group"><legend>Camera preview · Tracking overlay</legend>
@@ -718,6 +760,18 @@
                         <option value="objects">Recognize objects · Google Lens style</option>
                         <option value="tracking">Face tracking · animate my avatar</option>
                     </select>
+                    <div id="companion-face-tracking-options" hidden>
+                        <label for="companion-face-tracking-source">Face tracking source</label>
+                        <select id="companion-face-tracking-source">
+                            <option value="webcam">Webcam · MediaPipe</option>
+                            <option value="nvidia_broadcast">NVIDIA Broadcast camera + GPU tracker</option>
+                            <option value="nvidia_ar">NVIDIA AR SDK · Sakura native RTX tracker</option>
+                            <option value="nvidia_expressionapp">NVIDIA Broadcast Tracker · 2 GB ExpressionApp</option>
+                            <option value="nvidia_vts">NVIDIA RTX tracker · VTube Studio + VBridger</option>
+                            <option value="vbridger">VBridger VMC expressions</option>
+                        </select>
+                        <p class="modal-hint">Sakura’s native RTX option uses the installed NVIDIA AR SDK directly. VTube Studio is optional.</p>
+                    </div>
                     <label><input id="companion-camera-enabled" type="checkbox"> Enable camera access</label>
                     <label><input id="companion-camera-comments" type="checkbox" checked> Occasional camera comments while idle</label>
                     <p id="companion-camera-status" role="status">Camera access off</p>
@@ -799,7 +853,7 @@
                         <span class="modal-hint">Choose the models folder containing blobs and manifests, usually C:\Users\your-name\.ollama\models. Model files are used in place.</span>
                     </div>
                     <div class="setting-group">
-                        <label for="ollama-model">Local model name:</label>
+                        <label for="ollama-model">Universal local model (outside Game Mode):</label>
                         <input id="ollama-model" type="text" list="ollama-model-options" value="qwen3-vl:2b-instruct" placeholder="Choose an installed model">
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
                             <button type="button" id="qwen-2b-btn">Qwen 2B · Laptop</button>
@@ -808,6 +862,34 @@
                         <datalist id="ollama-model-options"></datalist>
                         <span id="ollama-scan-status" class="modal-hint" role="status"></span>
                     </div>
+                    <div class="setting-group">
+                        <label for="game-ollama-model">Game Mode local model:</label>
+                        <input id="game-ollama-model" type="text" list="ollama-model-options" placeholder="Use universal model">
+                        <span class="modal-hint">Choose an installed vision model for game screen understanding. Blank uses the universal model. Sakura restores the universal model when the game ends.</span>
+                        <label><input id="game-cloud-auto" type="checkbox" checked> Automatically switch to my saved cloud API under high VRAM usage</label>
+                        <span class="modal-hint">Switches at 90% VRAM usage or under 1 GB free. Returns to local below 82% with at least 1.5 GB free. Requires a saved cloud key; game screen requests then go to that provider.</span>
+                    </div>
+                    <fieldset id="local-model-manager" class="setting-group"><legend>Download and uninstall local models</legend>
+                        <label for="local-model-search">Search vision models</label>
+                        <div class="device-actions"><input id="local-model-search" type="search" placeholder="Search Qwen, Gemma, LLaVA…" autocomplete="off"><button id="local-model-search-btn" type="button">Search</button></div>
+                        <label for="local-model-family">Matching vision model families</label><select id="local-model-family"></select>
+                        <label for="local-download-choice">Weights / quantization / download size</label><select id="local-download-choice"></select>
+                        <p id="local-download-specs" class="modal-hint"></p>
+                        <label for="local-download-name">Ollama model name (or enter another model)</label>
+                        <div class="device-actions"><input id="local-download-name" placeholder="gemma3:4b" maxlength="150"><button id="local-download-start" type="button">Download model</button></div>
+                        <details><summary>Import your own GGUF model</summary>
+                        <p class="modal-hint">Ollama-compatible architectures only. Select weights and any required vision projector / split shards. Vision support is checked after import; a text-only GGUF does not become a vision model.</p>
+                        <button id="local-gguf-browse" type="button">Choose GGUF files…</button>
+                        <textarea id="local-gguf-paths" placeholder="Full GGUF file paths, one per line"></textarea>
+                        <input id="local-gguf-name" placeholder="my-vision-model:latest" maxlength="150">
+                        <button id="local-gguf-import" type="button">Import model</button></details>
+                        <p id="local-download-status" role="status">Existing models are kept when you download another.</p>
+                        <label for="local-uninstall-choice">Installed models</label><select id="local-uninstall-choice"></select>
+                        <button id="local-model-refresh" type="button">Refresh installed models</button>
+                        <button id="local-model-use" type="button">Select model for AI settings</button>
+                        <button id="local-model-uninstall" type="button">Uninstall selected model…</button>
+                        <p class="modal-hint">Uses the model folder above. After selecting a model, save AI settings to switch. Switch away from the current model before uninstalling it. Other Ollama models can be downloaded by name; vision support is checked after download. Downloads require an installed Ollama runtime.</p>
+                    </fieldset>
                     <div class="setting-group">
                         <label for="ollama-context">Local context size:</label>
                         <input id="ollama-context" type="number" min="1024" max="8192" step="1024" value="4096">
@@ -836,6 +918,14 @@
                         <input id="gemini-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste your provider API key">
                         <span id="gemini-key-status" class="modal-hint"></span>
                         <button id="remove-gemini-key" type="button">Remove saved key</button>
+                    </div>
+                    <div class="setting-group">
+                        <label><input id="web-search-enabled" type="checkbox"> Look answers up online when she cannot verify them</label>
+                        <label for="brave-api-key">Brave Search API key (optional):</label>
+                        <input id="brave-api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste your Brave Search API key">
+                        <span id="brave-key-status" class="modal-hint"></span>
+                        <button id="remove-brave-key" type="button">Remove saved Brave key</button>
+                        <p class="modal-hint">Without a key she falls back to free public sources such as Wikipedia; with one she searches the open web. Personal, private, medical and legal questions are never sent. Search results are untrusted text: they answer your question, they do not instruct her.</p>
                     </div>
                     <div class="modal-hint">Cloud mode sends messages and conversation context to your selected provider or custom endpoint. Camera images, screen frames and audio transcripts are included only when the corresponding access is enabled. Review the selected endpoint before saving.</div>
                     <div class="modal-hint">Your saved key uses Windows encryption or macOS Keychain. Leave the key field blank to keep it.</div>
@@ -930,6 +1020,20 @@
         </div>
     </div>
 
+    <dialog id="vtuber-collab-dialog" aria-labelledby="vtuber-collab-title">
+        <form method="dialog" class="collab-dialog-card">
+            <h2 id="vtuber-collab-title">Sakura VTuber Collab</h2>
+            <p>Join a shared VTuber room. Sakura transfers your selected model to the other participants and synchronizes its bones and expressions so each avatar is rendered locally.</p>
+            <label>Collab relay address (WSS)<input id="collab-relay-url" type="url" placeholder="wss://your-collab-host.example" autocomplete="url"></label>
+            <div class="collab-room-row"><label>Room code<input id="collab-room-code" maxlength="32" autocomplete="off" placeholder="Ask the host for a code"></label><button id="collab-generate-room" type="button">Create code</button><button id="collab-copy-room" type="button">Copy</button></div>
+            <details><summary>Advanced · TURN server (optional)</summary><div class="collab-turn-fields"><label>TURN URL<input id="collab-turn-url" type="text" placeholder="turn:turn.example.com:3478"></label><label>TURN username<input id="collab-turn-user" type="text" autocomplete="off"></label><label>TURN credential<input id="collab-turn-password" type="password" autocomplete="off"></label></div></details>
+            <p class="modal-hint">Up to six Sakura users can join. Models are transferred directly between participants and saved only in a temporary folder for the session. Share only models you have permission to distribute. The relay handles connection setup only. A TURN service may be needed on restrictive networks.</p>
+            <p id="vtuber-collab-status" role="status">Disconnected</p>
+            <div class="save-actions"><button id="collab-connect" type="button">Connect</button><button id="collab-disconnect" type="button" disabled>Disconnect</button><button id="collab-close" type="button">Close</button></div>
+        </form>
+    </dialog>
+    <div id="vtuber-collab-stage" aria-label="VTuber Collab participants" hidden></div>
+
     <!-- Morph / Lip Sync Debug & Tuning Overlay -->
     <div id="morph-overlay" class="collapsed">
         <button id="morph-toggle-btn">👄 Lip Sync</button>
@@ -945,7 +1049,7 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=agent-chat107"></script>
+    <script type="module" src="/static/js/app.js?v=model-clean136"></script>
 </body>
 </html>
 

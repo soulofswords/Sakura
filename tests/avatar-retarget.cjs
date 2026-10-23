@@ -2,8 +2,19 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 async function main(){
  const THREE=await import('../static/vendor/three/build/three.module.js');
- const source=fs.readFileSync('static/js/avatar-retarget.js','utf8').replace(/import \* as THREE from 'three';/,'').replace('export function faceBlinkWeight','function faceBlinkWeight').replace('export function jointCurl','function jointCurl').replace('export function fingerJointCurl','function fingerJointCurl').replace('export default class AvatarRetarget','class AvatarRetarget');
- const {AvatarRetarget,jointCurl,fingerJointCurl,faceBlinkWeight}=new Function('THREE',source+'; return {AvatarRetarget,jointCurl,fingerJointCurl,faceBlinkWeight};')(THREE);
+ const source=fs.readFileSync('static/js/avatar-retarget.js','utf8').replace(/import \* as THREE from 'three';/,'').replace('export function faceBlinkWeight','function faceBlinkWeight').replace('export function jointCurl','function jointCurl').replace('export function fingerJointCurl','function fingerJointCurl').replace(/export function /g,'function ').replace('export default class AvatarRetarget','class AvatarRetarget');
+ const {AvatarRetarget,jointCurl,fingerJointCurl,faceBlinkWeight,fingerSpread,filterFingerValue}=new Function('THREE',source+'; return {AvatarRetarget,jointCurl,fingerJointCurl,faceBlinkWeight,fingerSpread,filterFingerValue};')(THREE);
+ const palm=Array.from({length:21},()=>({x:0,y:0,z:0}));
+ palm[5]={x:1,y:1,z:0};palm[6]={x:1,y:2,z:0};palm[9]={x:0,y:1,z:0};palm[10]={x:0,y:2,z:0};palm[17]={x:-1,y:1,z:0};
+ const spread=fingerSpread(palm,1,true);
+ palm[10]={x:2,y:1,z:2};
+ assert.equal(fingerSpread(palm,1,true),spread,'bending middle finger must not spread the index finger');
+ assert.equal(fingerSpread([],1,true),null);
+ assert.equal(filterFingerValue(.5,.504,1/60),.5,'sub-degree tremor is rejected');
+ let fast=0,slow=0;for(let i=0;i<60;i++)fast=filterFingerValue(fast,1,1/60);for(let i=0;i<30;i++)slow=filterFingerValue(slow,1,1/30);
+ assert(Math.abs(fast-slow)<.02 && fast>.98,'finger response must settle similarly at 30 and 60 FPS');
+ assert(Number.isFinite(filterFingerValue(.4,NaN,1/60)));
+ console.log('PASS: independent finger spread, adaptive tremor rejection and frame-rate-stable finger response');
  assert.equal(faceBlinkWeight(0),0);assert(faceBlinkWeight(.3)>.3);assert.equal(faceBlinkWeight(.6),1);
  assert.equal(jointCurl([{x:0,y:0,z:0},{x:1,y:0,z:0},{x:2,y:0,z:0}],0,1,2),0);
  assert(jointCurl([{x:0,y:0,z:0},{x:1,y:0,z:0},{x:1,y:1,z:0}],0,1,2)>1.5);
@@ -21,6 +32,33 @@ async function main(){
  const root=new THREE.Group(), head=new THREE.Bone(),finger=new THREE.Bone();
  finger.name='左人指１'; root.add(head,finger);
  const values={}; const viewer={model:root,animationBones:{head:{bone:head,rest:head.rotation.clone()}},morphMap:{},setMorph:(name,value)=>values[name]=value};
+ for(const isVrm of [false,true]){
+  const compareHead=new THREE.Bone(),compareRoot=new THREE.Group();compareRoot.add(compareHead);
+  const compareViewer={model:compareRoot,animationBones:{head:{bone:compareHead,rest:compareHead.rotation.clone()}},morphMap:{},setMorph(){},trackingOptions:{smoothing:.25},...(isVrm?{vrm:{}}:{})};
+  const compareRig=new AvatarRetarget(compareViewer);
+  const compareSample={receivedAt:performance.now(),face:{matrix:new THREE.Matrix4().identity().toArray(),landmarks:[{}],blendshapes:[]},hands:[]};
+  compareRig.calibrate(compareSample);
+  let expected=0;
+  for(let i=0;i<60;i++){
+   compareHead.rotation.set(0,-.6,0); // Simulate physics writing back to the rendered rig.
+   compareSample.face.matrix=new THREE.Matrix4().makeRotationY(.3).toArray();
+   compareSample.receivedAt=performance.now();compareRig.apply(compareSample,1/60);
+   expected+=(.3-expected)*(1-Math.exp(-(1/60)/.07));
+   assert(Math.abs(compareHead.rotation.y-expected)<1e-6,'PMX/VRM must match Live2D exponential response despite physics writeback');
+  }
+ }
+ console.log('PASS: PMX and VRM head response matches Live2D at every render frame and rejects physics feedback');
+ const browValues={},browRoot=new THREE.Group();
+ const browViewer={model:browRoot,animationBones:{},morphMap:{},vrm:{expressionManager:{getExpression:name=>['sad','Surprised'].includes(name)?{}:null}},setMorph:(name,value)=>browValues[name]=value};
+ const browRig=new AvatarRetarget(browViewer);
+ const browSample={receivedAt:performance.now(),face:{landmarks:[{}],blendshapes:[{categoryName:'browInnerUp',score:.8}]},hands:[]};
+ for(let i=0;i<30;i++)browRig.apply(browSample,.016);
+ assert(browValues.Surprised>.7,'VRM eyebrow raise must drive the upward surprise fallback');
+ assert(!browValues.sad,'VRM eyebrow raise must never drive sorrow');
+ browSample.face.blendshapes=[];
+ for(let i=0;i<60;i++)browRig.apply(browSample,.016);
+ assert(browValues.Surprised<.001,'relaxing brows releases the raised expression');
+ console.log('PASS: VRM upward eyebrow mapping avoids sorrow and releases at neutral');
  const rig=new AvatarRetarget(viewer); assert(rig.fingers.some(f=>f.bone===finger));
  const matrix=new THREE.Matrix4().makeRotationY(.3).toArray();
  const sample={face:{matrix,landmarks:[{},{x:.5,y:.4}],blendshapes:[{categoryName:'jawOpen',score:.7},{categoryName:'eyeBlinkLeft',score:1}]},hands:[],receivedAt:performance.now()};
@@ -116,6 +154,57 @@ async function main(){
  console.log('PASS: arm solver stays stable for stationary hands and extreme movement without accumulated twists');
  console.log('PASS: body-only and one-frame detections do not move arms; hand loss, cropped/weak/stale detections return arms to rest');
  assert(Object.values(armViewer.animationBones).every(entry=>Number.isFinite(entry.bone.quaternion.x)),'pose IK must remain numerically stable');
+ const torso=new THREE.Bone();armRoot.add(torso);armViewer.animationBones.torso={bone:torso,rest:torso.rotation.clone()};
+ const leanRig=new AvatarRetarget(armViewer),body=Array.from({length:33},()=>({x:0,y:0,z:0,visibility:1}));
+ body[11]={x:-.2,y:.3,z:0,visibility:1};body[12]={x:.2,y:.3,z:0,visibility:1};
+ body[23]={x:-.15,y:.8,z:0,visibility:1};body[24]={x:.15,y:.8,z:0,visibility:1};
+ const leanSample=()=>({receivedAt:performance.now(),face:{landmarks:Array.from({length:478},()=>({x:.5,y:.5,z:0})),matrix:new THREE.Matrix4().identity().toArray(),blendshapes:[]},hands:[],pose:{landmarks:body,world:body}});
+ leanRig.apply(leanSample(),.016);assert(torso.quaternion.angleTo(new THREE.Quaternion())<1e-6);
+ body[11].x+=.2;body[12].x+=.2;body[11].z=-.15;body[12].z=-.15;
+ for(let i=0;i<30;i++)leanRig.apply(leanSample(),.016);
+ assert(torso.quaternion.angleTo(new THREE.Quaternion())>.1,'body lean must move the torso anchor used by physics');
+ const held=torso.quaternion.angleTo(new THREE.Quaternion());
+ for(let i=0;i<60;i++)leanRig.apply({receivedAt:0,hands:[],face:{}},.016);
+ assert(torso.quaternion.angleTo(new THREE.Quaternion())<held,'lost pose returns torso toward neutral');
+ const croppedRig=new AvatarRetarget(armViewer);
+ torso.quaternion.identity();
+ body[11]={x:-.2,y:.3,z:0,visibility:1};body[12]={x:.2,y:.3,z:0,visibility:1};
+ body[23].visibility=body[24].visibility=0;
+ croppedRig.apply(leanSample(),.016);
+ body[11].y=.4;body[12].y=.2;
+ for(let i=0;i<30;i++)croppedRig.apply(leanSample(),.016);
+ assert(torso.quaternion.angleTo(new THREE.Quaternion())>.15,'upper-body views must lean even when hips are outside the camera');
+ assert(Math.abs(torso.rotation.x)<1e-6,'hidden hips must not invent forward lean');
+ croppedRig.calibrate(leanSample());
+ for(let i=0;i<60;i++)croppedRig.apply(leanSample(),.016);
+ assert(torso.quaternion.angleTo(new THREE.Quaternion())<.001,'calibration resets shoulder lean baseline');
+ body[11].x=NaN;body[12].z=NaN;
+ croppedRig.apply(leanSample(),.016);
+ assert(torso.quaternion.toArray().every(Number.isFinite),'invalid shoulders must not corrupt torso rotation');
+ console.log('PASS: cropped torso sideways lean, no fabricated forward lean, recalibration and invalid landmarks');
+ torso.quaternion.identity();
+ const absentRig=new AvatarRetarget(armViewer);
+ const restY=torso.position.y;
+ body[11]={x:-.2,y:.1,z:-.2,visibility:1};body[12]={x:.2,y:.6,z:-.2,visibility:1};
+ for(let i=0;i<120;i++)absentRig.apply({...leanSample(),face:{matrix:null,landmarks:[],blendshapes:[]},hands:[]},.016);
+ assert(torso.quaternion.angleTo(new THREE.Quaternion())<1e-6,'fresh phantom pose without face/hands cannot drive body');
+ assert.equal(torso.position.y,restY,'empty camera cannot create vertical tracking movement');
+ console.log('PASS: fresh pose guesses with no confirmed face or hands cannot animate torso');
+ const nodRig=new AvatarRetarget(armViewer);torso.quaternion.identity();
+ const originalPosition=torso.position.clone(),originalScale=torso.scale.clone();
+ body[11]={x:-.2,y:.3,z:0,visibility:1};body[12]={x:.2,y:.3,z:0,visibility:1};
+ nodRig.calibrate(leanSample());
+ for(let i=0;i<120;i++){
+  body[11].y=body[12].y=.3+Math.sin(i*.1)*.15;
+  const sample=leanSample();sample.face.matrix=new THREE.Matrix4().makeRotationX(.4).toArray();sample.pose=null;
+  nodRig.apply(sample,.016);
+  assert(torso.position.distanceTo(originalPosition)<1e-8,'up/down cannot translate spine or stretch torso');
+  assert(torso.scale.distanceTo(originalScale)<1e-8,'up/down cannot scale torso');
+ }
+ assert(Math.abs(torso.rotation.x)>.01,'face up/down drives upper body without needing shoulders or hips');
+ nodRig.reset();assert(torso.position.distanceTo(originalPosition)<1e-8);
+ console.log('PASS: Live2D-style face up/down drives rotation only; body position and scale stay intact');
+ console.log('PASS: calibrated torso lean follows shoulder/hip motion and returns safely on pose loss');
  console.log('PASS: finger curls, PMX finger mapping, head tracking, mouth/blink, calibration, clean reset, shoulder-aware arm IK, camera shoulder/elbow pose retargeting');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

@@ -113,16 +113,36 @@ def _memory_gb(page):
     return int(next(iter(values))) if len(values) == 1 else None
 
 
+def _mentioned_models(question):
+    """RTX-prefixed models plus bare numbers, so "vram of the 5090" is verified too."""
+    models = {(number, (suffix or '').upper())
+              for number, suffix in re.findall(r'\bRTX\s*(\d{4})\s*(Ti|SUPER)?\b', question, re.I)}
+    # A bare number only counts when this file already has a verified page for it; that
+    # keeps 1080p, a year, and another vendor's model name out of the lookup.
+    found = []
+    for key in _GPU_PAGES:
+        pattern = (r'(?<![A-Za-z0-9])' + re.escape(key[:4])
+                   + (r'\s*' + re.escape(key[4:]) if len(key) > 4 else '')
+                   + r'\b(?!\s*(?:p|gb|mb|tb|hz|fps|inches?|pixels?|[@x]))')
+        for hit in re.finditer(pattern, question, re.I):
+            found.append((hit.start(), hit.end(), key[:4], key[4:].upper()))
+    for start, end, number, suffix in found:
+        # "5060 Ti" also contains "5060"; the longer reading is the model actually named.
+        if any(other[0] <= start and end <= other[1] and other[1] - other[0] > end - start for other in found):
+            continue
+        models.add((number, suffix))
+    return models
+
+
 def gpu_memory_lookup(question,allow_discovery=False):
     """Return None for unrelated chat; unavailable facts never fall back to guessing."""
-    names = re.findall(r'\bRTX\s*(\d{4})(?:\s*(Ti|SUPER))?\b', question, re.I)
-    if not names or not re.search(r'\b(?:VRAM|memory|GB|gigabytes?|specs|specifications)\b|\d+\s*GB\b|वीरैम|मेमोरी', question, re.I):
+    models = _mentioned_models(question)
+    if not models or not re.search(r'\b(?:VRAM|memory|GB|gigabytes?|specs|specifications)\b|\d+\s*GB\b|वीरैम|मेमोरी', question, re.I):
         return None
     if re.search(r'\b(?:like my|my pc|my specs|my computer|my gpu|opinion|good for|enough for)\b', question, re.I):
         return None
     if re.search(r'\b(?:imagine|fiction|pretend|hypothetical|modified|modded|laptop|mobile)\b', question, re.I):
         return None
-    models = {(number, suffix.upper()) for number, suffix in names}
     if len(models) != 1:
         return 'Please ask about one desktop GPU at a time so I can verify its memory specification.'
     number, suffix = next(iter(models))

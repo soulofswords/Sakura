@@ -186,4 +186,51 @@ class EvidenceEndpointTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.status_code,400)
 
 
+class WebLookupTests(unittest.TestCase):
+    """Companion lookup: never leak private questions, cite what it finds, warn when it cannot."""
+
+    def test_private_personal_creative_and_sensitive_questions_never_reach_the_network(self):
+        with patch('agent_web.lookup') as lookup:
+            for text in ('what is my clipboard content', 'tell me about my password', 'what files are in my folder',
+                         'what is the dosage for paracetamol', 'translate hello into french',
+                         'what is the legal advice for a tenant', 'write a story about a dragon'):
+                self.assertEqual(policy.web_context(text, ('', '', 'synthetic-brave')), '', text)
+            lookup.assert_not_called()
+
+    def test_social_chatter_is_not_searched(self):
+        with patch('agent_web.lookup') as lookup:
+            for text in ('hello', 'how are you', 'thanks'):
+                self.assertEqual(policy.web_context(text), '', text)
+            lookup.assert_not_called()
+
+    def test_a_found_page_becomes_cited_context_not_a_model_invention(self):
+        found = {'title': 'RTX 5090', 'url': 'https://www.nvidia.com/en-us/rtx-5090/',
+                 'snippet': '32 GB GDDR7', 'text': 'Standard Memory Configuration: 32 GB GDDR7.',
+                 'provider': 'Brave Search'}
+        with patch('agent_web.lookup', return_value=found) as lookup:
+            note = policy.web_context('how much vram does the 5090 have?', ('', '', 'synthetic-brave'), 'Sakura')
+        self.assertIn('https://www.nvidia.com/en-us/rtx-5090/', note)
+        self.assertIn('32 GB GDDR7', note)
+        self.assertIn('Do not add any', note)
+        self.assertEqual(lookup.call_args.args[0], 'how much vram does the 5090 have')
+
+    def test_a_failed_lookup_warns_instead_of_refusing_or_guessing(self):
+        with patch('agent_web.lookup', return_value=None):
+            note = policy.web_context('who won the world series in 2026?')
+        self.assertIn('could not verify', note)
+        self.assertIn('Never invent', note)
+
+    def test_chat_injects_lookup_context_only_when_the_setting_allows_it(self):
+        for enabled, expected in ((True, 'WEBNOTE'), (False, None)):
+            with tempfile.TemporaryDirectory() as folder:
+                llm = LLM(Path(folder) / 'memory.json')
+                llm.web_search_enabled = enabled
+                with patch('response_evidence.retrieve', return_value=None), \
+                        patch('response_evidence.web_context', return_value='WEBNOTE'), \
+                        patch.object(llm, '_request', return_value='It has 32 GB, per NVIDIA.') as request:
+                    llm.chat('how much vram does the 5090 have?')
+                messages = request.call_args.args[0]
+                self.assertEqual(next((m['content'] for m in messages if m['content'] == 'WEBNOTE'), None), expected)
+
+
 if __name__=='__main__':unittest.main()

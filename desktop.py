@@ -160,13 +160,29 @@ class DesktopApi:
         selected=win.create_file_dialog(webview.FileDialog.FOLDER)
         return selected[0] if selected else None
 
+    def choose_local_gguf_files(self):
+        import webview
+        win=webview.windows[0] if webview.windows else None
+        if not win:return []
+        selected=win.create_file_dialog(webview.FileDialog.OPEN,allow_multiple=True,file_types=('GGUF models (*.gguf)',))
+        return list(selected or [])
+
+    def choose_nvidia_expressionapp_folder(self):
+        """Choose MXTracker/v2 (or v1) from the user's Steam DLC install."""
+        win=self.holder.get('window')
+        if not win:return None
+        selected=win.create_file_dialog(webview.FileDialog.FOLDER)
+        return selected[0] if selected else None
+
     def minimize(self):
         """Minimize the companion."""
         if EDITION!='vtuber' and not getattr(app.state,'tracking_only',False):
             return self.set_library_mode(False)
         win = self.holder.get("window")
         if win:
-            win.minimize()
+            bridge=self.holder.get('resize_bridge')
+            if bridge:bridge.minimize_request.emit()
+            else:win.minimize()
 
     def toggle_maximize(self):
         if not self.holder.get('library_mode'):
@@ -388,6 +404,14 @@ class DesktopApi:
         from game_detection import game_session
         result = game_session(getattr(self, '_tracked_game', None))
         self._tracked_game = result if result['detected'] else None
+        # Game Mode uses the same live adapter counters as PC status to avoid
+        # switching providers based on utilization guesses or stale readings.
+        if sys.platform == 'win32':
+            try:
+                from hardware_metrics import sample_windows
+                result['gpus'] = sample_windows().get('gpus', [])
+            except (OSError, RuntimeError, AttributeError):
+                result['gpus'] = []
         return result
 
     def screen_snapshot(self):
@@ -567,6 +591,7 @@ def main():
         class ResizeBridge(QObject):
             request = Signal(str)
             focus_request = Signal()
+            minimize_request = Signal()
             hide_request = Signal()
             input_request = Signal(bool)
             surface_request = Signal(bool)
@@ -576,6 +601,7 @@ def main():
             def __init__(self):
                 super().__init__()
                 self.focus_request.connect(self.focus_window)
+                self.minimize_request.connect(native.showMinimized)
                 self.hide_request.connect(self.hide_window)
                 self.request.connect(self.resize_window)
                 self.input_request.connect(self.set_input_transparency)
@@ -605,9 +631,11 @@ def main():
             @Slot()
             def focus_window(self):
                 holder['wake_hidden']=False
-                native.show()
-                native.webview.page().runJavaScript("window.dispatchEvent(new CustomEvent('sakura-native-visibility',{detail:{hidden:false}}))")
                 if native.isMinimized():native.showNormal()
+                else:native.show()
+                native.webview.show()
+                native.webview.update()
+                native.webview.page().runJavaScript("window.dispatchEvent(new CustomEvent('sakura-native-visibility',{detail:{hidden:false}}))")
                 native.raise_()
                 native.activateWindow()
                 if sys.platform=='win32':
