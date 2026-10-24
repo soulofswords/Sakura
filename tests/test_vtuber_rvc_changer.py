@@ -62,7 +62,7 @@ class VtuberRvcChangerTests(unittest.TestCase):
                     return str(output)
 
             class Recognizer:
-                def transcribe(self, samples):
+                def transcribe(self, samples, language=None):
                     self.sample_count = len(samples)
                     return 'Hello Sakura'
 

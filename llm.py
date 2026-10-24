@@ -18,6 +18,9 @@ class ModelUnavailable(ValueError):
     """The selected model cannot answer; its text is already written for the user."""
 
 
+HISTORY_TURNS = 100
+
+
 class LLM:
     def __init__(self, memory_path=None, *, persist_memory=None):
         self.model = OLLAMA_MODEL
@@ -94,14 +97,13 @@ class LLM:
         try:
             data = json.loads(self.memory_path.read_text(encoding="utf-8"))
             history = data.get("history", [])
-            if not isinstance(history, list) or any(
-                not isinstance(item, dict) or item.get("role") not in ("user", "assistant")
-                or not isinstance(item.get("content"), str) for item in history
-            ):
+            if not isinstance(history, list):
                 raise ValueError("Invalid conversation history")
             from response_evidence import confirmed_user_fact
-            self.history=[];self.summary='';self.summarized_count=0
-            records=data.get('trusted_memory',[]) if data.get('version')==2 else []
+            # Version 3 is the first file allowed to hold raw dialogue; older transcripts predate the grounding rules.
+            self.history=self._dialogue_tail(history) if data.get('version')==3 else []
+            self.summary='';self.summarized_count=0
+            records=data.get('trusted_memory',[]) if data.get('version') in (2,3) else []
             if isinstance(records,list):
                 for record in records[-100:]:
                     if not isinstance(record,dict) or not isinstance(record.get('text'),str):continue
@@ -140,9 +142,21 @@ class LLM:
             self._save_memory()
             return len(self.history)
 
+    def _dialogue_tail(self, history=None):
+        """The last complete exchanges, as raw dialogue. Old assistant replies are context, never evidence."""
+        items = self.history if history is None else history
+        tail = [{'role': item['role'], 'content': item['content']} for item in items
+                if isinstance(item, dict) and item.get('role') in ('user', 'assistant')
+                and isinstance(item.get('content'), str)][-HISTORY_TURNS:]
+        while tail and tail[0]['role'] != 'user':
+            tail.pop(0)
+        while tail and tail[-1]['role'] != 'assistant':
+            tail.pop()
+        return tail
+
     def _save_memory(self):
         if not self.persist_memory:return
-        data = {"version": 2, "summary": "", "summarized_count": 0, "history": [],
+        data = {"version": 3, "summary": "", "summarized_count": 0, "history": self._dialogue_tail(),
                 "trusted_memory": self.trusted_memory}
         self.memory_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.memory_path.with_suffix(".tmp")
@@ -966,19 +980,20 @@ class LLM:
     def chat(self, user_message: str, screen_image=None, avatar_image=None, audio_context="", screen_frames=None, camera_image=None, cohost=False, attachments=None) -> str:
         self.last_reply_mood = None
         self._last_direct_reply_at = time.monotonic()
-        from response_evidence import retrieve, threshold, Evidence, UNKNOWN, generated_reply_allowed, strict_answer, LOCAL_SOURCES
+        from response_evidence import retrieve, threshold, Evidence, UNKNOWN, generated_reply_allowed, strict_answer
         minimum=threshold({'evidence_confidence_threshold':self.evidence_confidence_threshold})
         try:evidence=None if attachments else retrieve(user_message,{'assistant_name':self.assistant_name,'vtuber_name':self.vtuber_name,'_cohost':cohost,'reply_language':getattr(self,'reply_language','English')},self.trusted_memory)
         except Exception:evidence=None
         if isinstance(evidence,Evidence) and evidence.memory_eligible(minimum):
-            stored=self.remember_evidence(evidence)
-            if evidence.classification=='User-provided' and stored is True:
-                evidence=Evidence('Saved your statement as user-provided, not independently verified.','Verified',1,
-                                  [{'title':'Memory write receipt','url':LOCAL_SOURCES['memory receipt'],'kind':'tool'}],'memory receipt')
+            self.remember_evidence(evidence)
         from response_evidence import response_answer
         answer=response_answer(evidence,minimum,user_message,{'response_restriction_level':self.response_restriction_level,'_cohost':cohost},self)
         if answer is not None:
             self.last_evidence=answer
+            # A retrieved answer is a real turn. An authored social line, or a quotation of the
+            # ledger itself, is already either generated tone or a copy of a saved fact.
+            if answer.classification=='Verified' and answer.method not in ('built-in conversation','nonfactual conversation','confirmed user memory'):
+                self.remember_exchange(user_message,answer.text)
             return answer.text
         # Looked up before the lock so a slow source never blocks memory writes.
         web_note = ''

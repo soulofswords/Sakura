@@ -24,7 +24,10 @@ class MediumResponseTests(unittest.TestCase):
             self.assertFalse(model.remember_evidence(model.last_evidence))
             self.assertEqual(model.trusted_memory,[])
             model._save_memory()
-            self.assertEqual(json.loads(model.memory_path.read_text())['history'],[])
+            disk=json.loads(model.memory_path.read_text())
+            self.assertEqual(disk['trusted_memory'],[])
+            self.assertEqual([item['content'] for item in disk['history']],
+                             ['i am also great','Glad to hear that! How was your day?'])
 
     def test_medium_does_not_generate_unverified_facts(self):
         model=Mock()

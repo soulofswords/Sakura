@@ -30,7 +30,7 @@ class ChooserTests(unittest.TestCase):
             dialog.choose('local');download.assert_not_called()
         self.assertEqual(dialog.mode,'local');dialog.close()
     def test_gemini_key_is_masked_and_selects_gemini(self):
-        dialog=startup.Chooser();dialog.key.setText('fixture-not-a-credential')
+        dialog=startup.Chooser();dialog.key.setText('sk-proj-fixture-not-a-credential')
         self.assertEqual(dialog.key.echoMode(),QLineEdit.Password)
         dialog.choose('gemini');self.assertEqual(dialog.mode,'gemini');dialog.close()
 

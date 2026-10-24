@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -120,6 +121,84 @@ class ModelManagerOriginTests(unittest.TestCase):
         response = self.posted(manager)
         self.assertEqual(response.status_code, 200)
         manager.remove.assert_called_once()
+
+
+class StateChangingRouteOriginTests(unittest.TestCase):
+    """Uploading weights, rewriting settings and pairing a phone all mutate this PC."""
+
+    cross_site = {'origin': 'http://evil.example', 'sec-fetch-site': 'cross-site'}
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.root = Path(self.folder.name)
+        self.voices = self.root / 'voices'
+        self.saved = Mock(side_effect=lambda data: dict(data))
+        self.client = TestClient(app.app)
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def call(self, method, path, **call):
+        with patch.object(app, 'VOICES_DIR', self.voices), patch.object(app, 'BASE_DIR', self.root), \
+                patch.object(app, 'save_settings', self.saved), patch.object(app, 'tts', None), \
+                patch.object(app, 'llm', None):
+            return getattr(self.client, method)(path, **call)
+
+    def test_a_visited_page_cannot_upload_a_voice_model(self):
+        response = self.call('post', '/api/voices/upload',
+                             data={'character_name': 'mia'},
+                             files={'pth_file': ('evil.pth', b'weights', 'application/octet-stream')},
+                             headers=self.cross_site)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(list(self.root.rglob('*')), [], 'the refused upload still wrote to disk')
+        self.saved.assert_not_called()
+
+    def test_a_visited_page_cannot_rewrite_settings(self):
+        response = self.call('post', '/api/settings', json={'assistant_name': 'Not Sakura'}, headers=self.cross_site)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.saved.assert_not_called()
+
+    def test_a_visited_page_cannot_pair_a_phone_or_read_the_link(self):
+        link = Mock()
+        link.info.return_value = {'enabled': True, 'addresses': ['192.168.1.9']}
+        with patch('mobile_link.link', link):
+            refused = self.call('post', '/api/mobile/link', json={'new': True}, headers=self.cross_site)
+            leaked = self.call('get', '/api/mobile/link', headers=self.cross_site)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertEqual(leaked.status_code, 403, leaked.text)
+        link.new_pairing_code.assert_not_called()
+
+    def test_a_visited_page_cannot_launch_the_steam_installer(self):
+        opener = Mock(return_value=True)
+        with patch('webbrowser.open', opener):
+            response = self.call('post', '/api/tracking/nvidia-expressionapp/install',
+                                 headers=self.cross_site)
+        self.assertEqual(response.status_code, 403, response.text)
+        opener.assert_not_called()
+
+    def test_the_local_panel_still_reaches_every_one_of_them(self):
+        # Pinned provider settings so the route cannot be failed by whatever AI the user has saved.
+        settings = {**app.get_settings(), 'llm_provider': 'ollama', 'gemini_fallback_enabled': False}
+        with patch.object(app, 'get_settings', lambda: settings):
+            response = self.call('post', '/api/settings', json={'assistant_name': 'Sakura'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.saved.assert_called_once_with({'assistant_name': 'Sakura'})
+        response = self.call('post', '/api/voices/upload', data={'character_name': 'mia'},
+                             files={'pth_file': ('mia.pth', b'weights', 'application/octet-stream')})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue((self.voices / 'mia' / 'mia.pth').is_file())
+        link = Mock()
+        link.info.return_value = {'enabled': False}
+        with patch('mobile_link.link', link):
+            self.assertEqual(self.call('post', '/api/mobile/link', json={'enabled': False}).status_code, 200)
+            self.assertEqual(self.call('get', '/api/mobile/link').status_code, 200)
+        link.stop.assert_called_once()
+        with patch('nvidia_expressionapp_tracker.detect_installed_folder', lambda: 'C:/Steam/DLC'):
+            response = self.call('post', '/api/tracking/nvidia-expressionapp/install')
+        if sys.platform == 'win32':
+            self.assertEqual(response.status_code, 200, response.text)
+        else:
+            self.assertEqual(response.status_code, 400, response.text)
 
 
 class SettingsWriteTests(unittest.TestCase):

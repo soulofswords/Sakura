@@ -43,7 +43,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
             settings=Path(folder)/'settings.json'
             model=LLM(Path(folder)/'memory.json')
             with patch.object(server,'SETTINGS_FILE',settings),patch.object(server,'llm',model),patch.object(server,'tts',None),patch.object(server,'public_settings',side_effect=lambda s:s):
-                response=await server.update_app_settings({'vtuber_name':'  Luna Star  '})
+                response=await server.update_app_settings(Mock(headers={}),{'vtuber_name':'  Luna Star  '})
                 self.assertTrue(response['ok']);self.assertEqual(model.vtuber_name,'Luna Star')
                 self.assertEqual(server.get_settings()['vtuber_name'],'Luna Star')
                 self.assertEqual(json.loads(settings.read_text())['vtuber_name'],'Luna Star')
@@ -51,7 +51,7 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
                 reopened=LLM(Path(folder)/'other-memory.json');reopened.set_vtuber_name(server.get_settings()['vtuber_name'])
                 self.assertEqual(reopened.vtuber_name,'Luna Star')
                 for invalid in ['',None,42,'x'*81]:
-                    result=await server.update_app_settings({'vtuber_name':invalid})
+                    result=await server.update_app_settings(Mock(headers={}),{'vtuber_name':invalid})
                     self.assertEqual(result.status_code,400)
     async def test_greeting_uses_safe_dialogue_without_llm(self):
         model = Mock()

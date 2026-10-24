@@ -8,6 +8,10 @@ from fastapi.testclient import TestClient
 import app
 from llm import LLM
 
+# The evidence layer answers greetings locally, so these tests must ask
+# something that actually reaches the patched provider call.
+QUESTION = 'Describe the difference between a retry and a rollback.'
+
 class ResponseTests(unittest.TestCase):
     def test_status_reports_provider_without_blocking_event_loop(self):
         with patch.object(app, 'llm') as llm:
@@ -28,7 +32,7 @@ class ResponseTests(unittest.TestCase):
                 release.wait(3)
                 return 'Hello'
             with patch.object(llm, '_request', side_effect=request):
-                reply = threading.Thread(target=llm.chat, args=('hello',))
+                reply = threading.Thread(target=llm.chat, args=(QUESTION,))
                 reply.start()
                 self.assertTrue(entered.wait(1))
                 switched = threading.Event()
@@ -57,16 +61,27 @@ class ResponseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             llm=LLM(Path(folder)/'memory.json')
             llm.history=[{'role':'user' if i%2==0 else 'assistant','content':str(i)} for i in range(40)]
+            llm.trusted_memory=[{'text':'Prefers short answers.','classification':'User-provided',
+                                 'sources':[],'confidence':1.0,'observed_at':'','method':'stated'}]
             entered=threading.Event();release=threading.Event()
-            def request(*args,**kwargs):
-                entered.set();release.wait(2);return 'Old facts'
-            with patch.object(llm,'_request',side_effect=request):
+            real_save=llm._save_memory
+            pending={'slow':True}
+            def slow_save():
+                # Hold the lock mid-write, so a clear arriving during the
+                # background save has to queue instead of being overwritten.
+                if pending['slow']:
+                    pending['slow']=False
+                    entered.set();release.wait(2)
+                real_save()
+            with patch.object(llm,'_save_memory',side_effect=slow_save):
                 thread=threading.Thread(target=llm._refresh_summary);thread.start()
-                self.assertTrue(entered.wait(1))
-                llm.clear_history();release.set();thread.join(2)
-                self.assertFalse(thread.is_alive())
-                self.assertEqual(llm.summary,'')
-                self.assertEqual(LLM(llm.memory_path).history,[])
+                self.assertTrue(entered.wait(1),'The background summary never started.')
+                cleared=threading.Thread(target=llm.clear_history);cleared.start()
+                release.set()
+                thread.join(4);cleared.join(4)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(llm.summary,'')
+            self.assertEqual(LLM(llm.memory_path).trusted_memory,[])
 
     def test_summary_work_runs_outside_reply_thread(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -75,7 +90,7 @@ class ResponseTests(unittest.TestCase):
             entered=threading.Event();release=threading.Event()
             def refresh(): entered.set();release.wait(2)
             with patch.object(llm,'_request',return_value='Immediate reply'),patch.object(llm,'_refresh_summary',side_effect=refresh):
-                self.assertEqual(llm.chat('hello'),'Immediate reply')
+                self.assertEqual(llm.chat(QUESTION),'Immediate reply')
                 self.assertTrue(entered.wait(1))
                 release.set()
 

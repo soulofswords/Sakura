@@ -554,7 +554,8 @@ async def nvidia_expressionapp_status():
     return result
 
 @app.post('/api/tracking/nvidia-expressionapp/install')
-async def install_nvidia_expressionapp():
+async def install_nvidia_expressionapp(request: Request):
+    if not _started_locally(request):return JSONResponse({'error':'The Steam DLC installer can only be started from this computer.'},403)
     if sys.platform!='win32':return JSONResponse({'error':'The Steam NVIDIA Broadcast Tracker DLC runs on Windows only.'},400)
     from nvidia_expressionapp_tracker import detect_installed_folder
     detected=detect_installed_folder()
@@ -897,13 +898,15 @@ async def mobile_tracking_control(payload:dict):
     except ValueError as error:return JSONResponse({'error':str(error)},409)
 
 @app.get('/api/mobile/link')
-async def mobile_link_info():
+async def mobile_link_info(request: Request):
+    if not _started_locally(request):return JSONResponse({'error':'The phone link details can only be read from this computer.'},403)
     from mobile_link import link
     return link.info()
 
 @app.post('/api/mobile/link')
-async def mobile_link_toggle(payload:dict):
+async def mobile_link_toggle(request: Request, payload:dict):
     from mobile_link import link
+    if not _started_locally(request):return JSONResponse({'error':'Phone pairing can only be changed from this computer.'},403)
     if payload.get('forget'):return link.forget_device(str(payload['forget']))
     if payload.get('new'):return link.new_pairing_code()
     save_settings({'phone_link_enabled':bool(payload.get('enabled'))})
@@ -1483,11 +1486,14 @@ async def _drain_upload(upload, target, limit):
 
 @app.post("/api/voices/upload")
 async def upload_voice_model(
+    request: Request,
     character_name: str = Form(...),
     pth_file: UploadFile = File(...),
     index_file: UploadFile = File(None),
 ):
     """Upload custom RVC .pth and .index character voice files."""
+    if not _started_locally(request):
+        return JSONResponse({'error': 'Voice models can only be uploaded from this computer.'}, 403)
     name_clean = character_name.strip().lower().replace(" ", "_")
     if not VOICE_FOLDER_NAME.match(name_clean):
         return JSONResponse({'error': 'Use up to 48 letters, numbers, underscores or spaces for the character name.'}, 400)
@@ -1565,8 +1571,10 @@ async def get_app_settings():
 
 
 @app.post("/api/settings")
-async def update_app_settings(payload: dict):
+async def update_app_settings(request: Request, payload: dict):
     import re
+    if not _started_locally(request):
+        return JSONResponse({'error': 'Settings can only be changed from this computer.'}, 403)
     if 'response_restriction_level' in payload and payload['response_restriction_level'] not in ('off','medium','strict'):
         return JSONResponse({'error':'Choose off, medium or strict response restrictions.'},400)
     if 'evidence_confidence_threshold' in payload:
@@ -2223,7 +2231,7 @@ async def remove_chat_attachment(token:str):
 
 @app.post("/api/chat")
 async def chat(payload: dict):
-    from response_evidence import Evidence, UNKNOWN, retrieve, threshold, response_answer, LOCAL_SOURCES
+    from response_evidence import Evidence, UNKNOWN, retrieve, threshold, response_answer
     text=payload.get('text')
     if not isinstance(text,str) or not text.strip():
         return JSONResponse({'error':'empty message'},400)
@@ -2260,11 +2268,14 @@ async def chat(payload: dict):
         app.state.pending_weather_date=getattr(raw,'pending_weather',None)
     if isinstance(raw,Evidence) and raw.memory_eligible(minimum) and llm:
         recorder=getattr(llm,'remember_evidence',None)
-        if callable(recorder):
-            stored=recorder(raw)
-            if raw.classification=='User-provided' and stored is True:
-                raw=Evidence('Saved your statement as user-provided, not independently verified.','Verified',1,
-                             [{'title':'Memory write receipt','url':LOCAL_SOURCES['memory receipt'],'kind':'tool'}],'memory receipt')
+        stored=await run_in_threadpool(recorder,raw) if callable(recorder) else False
+        if stored is True and raw.classification=='User-provided' and cfg.get('response_restriction_level','medium')!='strict':
+            # Saved as the user's own words. Nothing was verified, so the reply acknowledges it
+            # instead of relabelling the statement as a fact or refusing to answer at all.
+            acknowledgement="I've noted what you told me."
+            await run_in_threadpool(llm.remember_exchange,text,acknowledgement)
+            return await _strict_reply(Evidence(acknowledgement,'Inference',0,
+                                                [{'title':'Your statement','kind':'user'}],'nonfactual conversation'),payload)
     evidence=await run_in_threadpool(response_answer,raw,minimum,text,cfg,llm)
     # No call to _chat_core's action/generation path, llm.chat or _request here.
     return await _strict_reply(evidence,payload)

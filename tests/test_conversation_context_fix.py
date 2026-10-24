@@ -136,10 +136,12 @@ class ConversationContextFix(GenerationQualityIsolation,unittest.TestCase):
             {'role':'user','content':'Just do what you have. I want to see that.'}]
         fitted=LLM._fit_local_messages(history,2048,128)
         self.assertEqual(fitted[1:],history[1:])
-    def test_unverified_action_dialogue_is_not_persisted(self):
+    def test_unverified_action_dialogue_is_not_persisted_as_a_fact(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'memory.json';llm=LLM(path);llm.remember_exchange('make u dance','Here comes a little dance.')
-            self.assertEqual(LLM(path).history,[])
+            restored=LLM(path)
+            self.assertEqual(restored.trusted_memory,[])
+            self.assertEqual([item['role'] for item in restored.history],['user','assistant'])
     def test_two_views_are_one_bounded_image(self):
         def encode(color):
             data=BytesIO();Image.new('RGB',(1920,1080),color).save(data,format='JPEG');return base64.b64encode(data.getvalue()).decode()
