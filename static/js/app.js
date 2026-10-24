@@ -17,16 +17,16 @@ installButtonFeedback();
 import {finishStartupPresentation} from './startup-presentation.js?v=startup106';
 import {installScreenAudio} from './screen-audio.js?v=media90';
 import {installSpoutControls} from './spout-output.js?v=miu-expression-manager6';
-import {installVirtualCamera} from './virtual-camera.js?v=1';
-import {installMobileLink} from './mobile-link.js?v=phone-resume134';
+import {installVirtualCamera} from './virtual-camera.js?v=sakura3';
+import {installMobileLink} from './mobile-link.js?v=phone60-17';
 import {installCameraPreview} from './camera-preview.js?v=1';
-import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes107';
+import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes108';
 import {installReminders} from './assistant-reminders.js?v=1';
 import {installExpressionEditor} from './expression-editor.js?v=irida101';
-import {installModelSettings} from './model-settings.js?v=irida103';
+import {installModelSettings} from './model-settings.js?v=part-edit11';
 import {installVtuberCollab} from './vtuber-collab.js?v=collab3';
-import ModelViewer from './model-viewer.js?v=vrm-brows131';
-import AvatarTracking from './avatar-tracking.js?v=presence128';
+import ModelViewer from './model-viewer.js?v=wrist141';
+import AvatarTracking from './avatar-tracking.js?v=phone60-15';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
 import LipSync from './lip-sync.js?v=fbx89';
@@ -734,7 +734,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
         viewer  = new ModelViewer('viewer');
         installVtuberCollab({viewer, ModelViewer});
-        viewer.areAiExpressionsAutomatic = () => reactionsEnabled && !trackingOnly && !viewer.vtuberTrackingMode;
+        // An explicitly chosen expression (PC editor or phone) is a manual
+        // override: it pauses reactions so the pick stays visible and the
+        // phone can switch away from whatever the PC had selected.
+        viewer.areAiExpressionsAutomatic = () => reactionsEnabled && !trackingOnly && (!viewer.vtuberTrackingMode || !!viewer.companionTracking) && !viewer.manualExpressions?.size;
         installSpoutControls(()=>viewer);
         installVirtualCamera(()=>viewer);
         window.sakuraExpressionEditor = installExpressionEditor(()=>viewer, ()=>selectedPmxPath || lastGoodModelUrl || 'none');
@@ -799,7 +802,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             await companionCameraModes.start(mode,document.getElementById('settings-tracking-camera').value,
                 document.getElementById('tracking-backend').value,document.getElementById('face-tracking-source').value);
             cameraToggle.checked=true;
-            status.textContent=mode==='tracking'?'Face tracking on · processed locally · avatar follows your head and hands':'Object recognition on · camera images are shared with your selected AI provider';
+            status.textContent=mode==='tracking'?'Face tracking on · processed locally · avatar follows you while Sakura keeps reacting':'Object recognition on · camera images are shared with your selected AI provider';
         }catch(error){companionCameraModes.stop();cameraToggle.checked=false;status.textContent=`Camera unavailable: ${error.message}. Select another camera above, close apps using it, or connect your Camo phone, then retry.`;}
     };
     cameraToggle.addEventListener('change',()=>void setCompanionCameraMode(cameraToggle.checked));
@@ -902,11 +905,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 // ─────────────────────────── Tab System ───────────────────────────
 function setupTabs() {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    document.querySelectorAll('#settings-modal .tab-btn[data-tab]').forEach(btn => {
         btn.addEventListener('click', () => {
             const tab = btn.dataset.tab;
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('#settings-modal .tab-btn[data-tab]').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('#settings-modal .tab-content').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');
             document.getElementById(`tab-${tab}`).classList.add('active');
 
@@ -2688,8 +2691,8 @@ async function handleSendMessage() {
             if (indicator) indicator.textContent = 'Preparing voice…';
             try {
                 if(['laugh','laugh_bend'].includes(data.avatar_motion)){
-                    const played=await playGameLaughter(data.avatar_motion,viewer,lipSync,()=>generation===chatReplyGeneration&&!trackingOnly&&!viewer?.vtuberTrackingMode);
-                    if(!played&&generation===chatReplyGeneration)addMessage('The laugh needs an active rigged 3D model with face tracking off.','sakura');
+                    const played=await playGameLaughter(data.avatar_motion,viewer,lipSync,()=>generation===chatReplyGeneration&&!trackingOnly&&(!viewer?.vtuberTrackingMode||!!viewer?.companionTracking));
+                    if(!played&&generation===chatReplyGeneration)addMessage('The laugh needs an active rigged 3D model.','sakura');
                     return;
                 }
                 if(data.performance_audio){await lipSync.playWithLipSync(data.performance_audio);return;}
@@ -2948,7 +2951,7 @@ async function reactToScreen(initialCheck = false) {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Screen viewing is unavailable.');
         if(['laugh','laugh_bend'].includes(data.game_result)&&(!viewer?.dance?.supported()||viewer.live2d))return;
-        if(gameWatch&&generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!trackingOnly&&!viewer?.vtuberTrackingMode&&['victory','defeat','laugh','laugh_bend'].includes(data.game_result)){
+        if(gameWatch&&generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!trackingOnly&&(!viewer?.vtuberTrackingMode||!!viewer?.companionTracking)&&['victory','defeat','laugh','laugh_bend'].includes(data.game_result)){
             if(!['laugh','laugh_bend'].includes(data.game_result))viewer?.dance?.start(data.game_result);
             viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':'concerned');
         }
@@ -2958,7 +2961,7 @@ async function reactToScreen(initialCheck = false) {
         const normalizedReaction = data.reply.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
         if (!initialCheck && normalizedReaction === lastReactionText) return;
         lastReactionText = normalizedReaction;
-        if(!gameWatch&&!initialCheck&&!trackingOnly&&!viewer?.vtuberTrackingMode&&
+        if(!gameWatch&&!initialCheck&&!trackingOnly&&(!viewer?.vtuberTrackingMode||!!viewer?.companionTracking)&&
             (reactionsEnabled||vtuberScreens)&&['victory','defeat','laugh','laugh_bend'].includes(data.game_result)){
             if(!['laugh','laugh_bend'].includes(data.game_result))viewer?.dance?.start(data.game_result);
             viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':'concerned');
@@ -2968,7 +2971,7 @@ async function reactToScreen(initialCheck = false) {
         resumeMic = continuousMic.enabled;
         if (resumeMic) continuousMic.stop();
         if(['laugh','laugh_bend'].includes(data.game_result)){
-            try{await playGameLaughter(data.game_result,viewer,lipSync,()=>generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!chatBusy&&!trackingOnly&&!viewer?.vtuberTrackingMode);}
+            try{await playGameLaughter(data.game_result,viewer,lipSync,()=>generation===chatReplyGeneration&&screenShare.enabled&&(reactionsEnabled||vtuberScreens)&&!chatBusy&&!trackingOnly&&(!viewer?.vtuberTrackingMode||!!viewer?.companionTracking));}
             catch(error){viewer?.dance?.stop();console.warn('Recorded laughter unavailable:',error);}
         }
         await ensureKokoroReady();
@@ -2980,7 +2983,7 @@ async function reactToScreen(initialCheck = false) {
         }, async audio => {
             showSpeechBubble(data.reply);
             viewer?.setEmotionFromText(data.reply);
-            if(!expressionStarted&&reactionsEnabled&&!trackingOnly&&!viewer?.vtuberTrackingMode){
+            if(!expressionStarted&&reactionsEnabled&&!trackingOnly&&(!viewer?.vtuberTrackingMode||!!viewer?.companionTracking)){
                 viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':data.game_result==='defeat'?'concerned':null);expressionStarted=true;
             }
             if (audio) await lipSync.playWithLipSync(audio);
@@ -3680,6 +3683,7 @@ function setupAvatarTracking() {
         if(!enabled)window.dispatchEvent(new Event('sakura-vtuber-mode-off'));
         updateAppBrand(enabled);
         if(enabled)companionCamera.stop();
+        if(enabled)viewer?.setCompanionTracking(false);
         document.body.classList.toggle('tracking-only', enabled);
         if (!enabled && rvcVoiceChanger?.active) void stopVtuberVoiceChanger();
         document.querySelector('.brand .badge').textContent = enabled ? 'VTuber' : 'Companion';
@@ -3702,12 +3706,14 @@ function setupAvatarTracking() {
         localStorage.setItem('sakura_tracking_camera','sakura-mobile');
             companionCamera.stop();
             avatarTracking.stop();
+            viewer.setCompanionTracking(true);
             viewer.setVtuberTrackingMode(true);
             viewer.setUserTracking(true);
             document.getElementById('companion-camera-status').textContent='Phone face tracking on · measurements stay on the phone · Companion AI remains available';
         }else{
             viewer.setUserTracking(false);
             viewer.setVtuberTrackingMode(false);
+            viewer.setCompanionTracking(false);
             document.getElementById('companion-camera-status').textContent='Phone face tracking off';
         }
     });
