@@ -1,0 +1,22 @@
+:root[data-ui-theme="light"]{--mobile-bg:#edf2f8;--mobile-card:#fff;--mobile-input:#f0f4fa;--mobile-text:#27364b;--mobile-muted:#526279;--mobile-border:#d8e3ee;--mobile-button:#e9f4fb;--mobile-accent:#147caf;--mobile-active:#d4eaff}
+:root[data-ui-theme="dark"]{--mobile-bg:#171b21;--mobile-card:#20242b;--mobile-input:#292f38;--mobile-text:#edf1f7;--mobile-muted:#b5c1d0;--mobile-border:#414b59;--mobile-button:#303c4b;--mobile-accent:#91ceff;--mobile-active:#254d70}
+html[data-ui-theme],html[data-ui-theme] body{background:var(--mobile-bg);color:var(--mobile-text)}
+html[data-ui-theme] :is(section,.local-setup-dialog){background:var(--mobile-card);color:var(--mobile-text);border-color:var(--mobile-border)}
+html[data-ui-theme] :is(input,select,textarea){background:var(--mobile-input);color:var(--mobile-text);border-color:var(--mobile-border)}
+html[data-ui-theme] button{background:var(--mobile-button);color:var(--mobile-accent);border-color:var(--mobile-border)}
+html[data-ui-theme] button.active,html[data-ui-theme] button[aria-pressed="true"]{background:var(--mobile-active);color:var(--mobile-text);border-color:var(--mobile-accent)}
+html[data-ui-theme] :is(label,small){color:var(--mobile-muted)}
+html[data-ui-theme] :is(h1,h2,h3,#status,#local-status){color:var(--mobile-accent)}
+html[data-ui-theme] :is(input,textarea)::placeholder{color:var(--mobile-muted);opacity:1}
+html[data-ui-theme] button:disabled{opacity:.65}
+.mobile-appearance{padding:14px 16px;border-radius:16px}
+.mobile-appearance label{font-weight:600;display:block}
+.mobile-appearance select{display:block;margin:8px 0}
+.mobile-appearance small{display:block;font-size:12px;line-height:1.5;font-weight:400}
+html[data-ui-theme] .local-model-fullscreen #local-mode{background:var(--mobile-bg)}
+html[data-ui-theme] .local-model-fullscreen #local-stage-panel{background:var(--mobile-bg);border-color:var(--mobile-border)}
+html[data-ui-theme] #local-stage-bar button{background:var(--mobile-card);color:var(--mobile-accent);border-color:var(--mobile-border)}
+html[data-ui-theme] .local-model-fullscreen #local-status,html[data-ui-theme] #local-mic-label{background:var(--mobile-card);color:var(--mobile-text)}
+html[data-ui-theme] #local-mic{background:#c92135;color:#fff;border-color:#ffb3b8}
+html[data-ui-theme] #local-mic.listening{background:#ed243c;color:#fff}
+html[data-ui-theme] #notice{color:var(--mobile-muted)}

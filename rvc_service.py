@@ -6,8 +6,10 @@ import tempfile
 import threading
 import sys
 
-os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '1'
+os.environ.pop('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD',None)
 import torch
+from rvc_safe_load import install as install_restricted_checkpoints
+install_restricted_checkpoints(torch,Path(__file__).resolve().parent)
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 from rvc_python.infer import RVCInference
@@ -103,7 +105,7 @@ def load_voice_model(model_name: str):
         raise HTTPException(400, 'Select an installed, uniquely named voice model.')
     path = matches[0]
     if loaded_path != str(path):
-        checkpoint = torch.load(str(path), map_location='cpu', weights_only=False)
+        checkpoint = torch.load(str(path), map_location='cpu', weights_only=True)
         version = checkpoint.get('version', 'v1')
         del checkpoint
         indexes = list(path.parent.glob('*.index'))

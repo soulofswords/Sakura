@@ -1,3 +1,5 @@
+import {installCompactCompanionControls} from './compact-companion-controls.js?v=154';
+import {installStageItems} from './stage-items.js?v=151';
 import { appendEvidence } from './response-evidence.js?v=medium103';
 import {installChatAttachments} from './chat-attachments.js?v=files105';
 import {installSystemTools} from './system-tools.js?v=metrics93';
@@ -16,22 +18,22 @@ import {installButtonFeedback} from './button-feedback.js?v=phone-touch73';
 installButtonFeedback();
 import {finishStartupPresentation} from './startup-presentation.js?v=startup106';
 import {installScreenAudio} from './screen-audio.js?v=media90';
-import {installSpoutControls} from './spout-output.js?v=miu-expression-manager6';
+import {installSpoutControls} from './spout-output.js?v=instances152';
 import {installVirtualCamera} from './virtual-camera.js?v=sakura3';
-import {installMobileLink} from './mobile-link.js?v=phone60-17';
+import {installMobileLink} from './mobile-link.js?v=nvidia-fixes142';
 import {installCameraPreview} from './camera-preview.js?v=1';
 import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes108';
 import {installReminders} from './assistant-reminders.js?v=1';
 import {installExpressionEditor} from './expression-editor.js?v=irida101';
-import {installModelSettings} from './model-settings.js?v=part-edit11';
+import {installModelSettings} from './model-settings.js?v=mouth-tab147';
 import {installVtuberCollab} from './vtuber-collab.js?v=collab3';
-import ModelViewer from './model-viewer.js?v=wrist141';
-import AvatarTracking from './avatar-tracking.js?v=phone60-15';
+import ModelViewer from './model-viewer.js?v=cursor-gpu6';
+import AvatarTracking from './avatar-tracking.js?v=nvidia-fixes142';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
 import LipSync from './lip-sync.js?v=fbx89';
 import RvcVoiceChanger from './rvc-voice-changer.js?v=audio-route5';
-import EyeTracking from './eye-tracking.js?v=vtuber-eyes1';
+import EyeTracking from './eye-tracking.js?v=cursor-gpu6';
 import ScreenShare from './screen-share.js?v=timeline63';
 import ScreenMemory from './screen-memory.js?v=timeline63';
 import {utilityRequest} from './utility-request.js?v=1';
@@ -738,6 +740,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         // override: it pauses reactions so the pick stays visible and the
         // phone can switch away from whatever the PC had selected.
         viewer.areAiExpressionsAutomatic = () => reactionsEnabled && !trackingOnly && (!viewer.vtuberTrackingMode || !!viewer.companionTracking) && !viewer.manualExpressions?.size;
+        installStageItems(viewer);
         installSpoutControls(()=>viewer);
         installVirtualCamera(()=>viewer);
         window.sakuraExpressionEditor = installExpressionEditor(()=>viewer, ()=>selectedPmxPath || lastGoodModelUrl || 'none');
@@ -1012,6 +1015,7 @@ function setupEvents() {
         else if (continuousMic.enabled) continuousMic.stop();
         else if(!wasTemporary)startDesktopListening(true);
     });
+    installCompactCompanionControls(()=>continuousMic.enabled||nativeWake.enabled());
     setupTabs();
 
     // Custom dropdown triggers
@@ -1298,15 +1302,23 @@ function setupEvents() {
         document.getElementById('overlay-ui-btn').setAttribute('aria-pressed', String(hide));
         document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.add('hidden'));
     };
-    window.toggleCompanionView = () => {
+    let companionViewChanging=false;
+    window.toggleCompanionView = async () => {
         if (trackingOnly) { window.toggleStreamingControls(); return; }
         if (document.body.classList.contains('native-library')) return;
-        const hide = !document.body.classList.contains('overlay-ui-hidden');
-        setTransparency(hide);
-        document.body.classList.toggle('overlay-ui-hidden', hide);
-        document.body.classList.toggle('native-character-only', hide && !!window.pywebview);
-        window.pywebview?.api.set_character_only(hide).catch(console.error);
-        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.add('hidden'));
+        if(companionViewChanging)return;companionViewChanging=true;
+        try{
+            const transparent=!document.body.classList.contains('transparent-mode');
+            const characterOnly=window.pywebview?.api?.set_character_only
+                ? await window.pywebview.api.set_character_only(transparent) : false;
+            setTransparency(transparent);
+            // Keep the title bar/recovery controls usable if the native hotkey
+            // is unavailable and click-through was refused.
+            document.body.classList.toggle('overlay-ui-hidden',transparent&&(!window.pywebview||characterOnly===true));
+            document.body.classList.toggle('native-character-only',transparent&&characterOnly===true);
+            document.querySelectorAll('.dropdown-menu').forEach(m=>m.classList.add('hidden'));
+        }catch(error){console.error('Companion transparency:',error);}
+        finally{companionViewChanging=false;}
     };
     bgToggleBtn.addEventListener('click', window.toggleCompanionView);
     document.getElementById('restore-companion-controls').addEventListener('click', window.toggleCompanionView);
@@ -3866,3 +3878,5 @@ async function save_setting_silent(data) {
 
 
 
+
+window.addEventListener('sakura-tracking-error',event=>{const el=document.getElementById('tracking-status');if(el)el.textContent='Tracking paused: '+event.detail+'. Stop and restart tracking to retry.';});

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {applyFaceMappings} from './live2d-face-mapping.js?v=2';
 import {chatReaderLean} from './chat-reader-motion.js?v=1';
 import {renderPixelRatio} from './render-budget.js?v=startup68';
-import {installLive2DControls} from './live2d-controls.js?v=phone-touch73';
+import {installLive2DControls} from './live2d-controls.js?v=drag-cursor150';
 let runtime;
 function script(src){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(Error('Live2D runtime could not load: '+src));document.head.append(s);});}
 async function ensureRuntime(){
@@ -10,6 +10,15 @@ async function ensureRuntime(){
     return runtime;
 }
 export default class Live2DViewer {
+    static async createStageItem(url){
+        await ensureRuntime();
+        const avatar=await PIXI.live2d.Live2DModel.from(url,{autoUpdate:false,autoInteract:false});
+        const model=avatar.internalModel,size=768;
+        const app=new PIXI.Application({width:size,height:size,backgroundAlpha:0,antialias:true,preserveDrawingBuffer:true,autoStart:false,sharedTicker:false});
+        avatar.anchor.set(.5);avatar.scale.set(Math.min(size/model.originalWidth,size/model.originalHeight)*.98);avatar.position.set(size/2,size/2);
+        app.stage.addChild(avatar);avatar.update(0);app.renderer.render(app.stage);
+        return {app,avatar};
+    }
     static async create(url,owner){
         await ensureRuntime();const v=new Live2DViewer(owner);
         try{
@@ -73,6 +82,29 @@ export default class Live2DViewer {
         this.app.view.addEventListener('wheel',e=>{e.preventDefault();owner.setDisplaySize(owner.camera.zoom*100+(e.deltaY<0?5:-5));},{passive:false});
         this.app.view.addEventListener('dblclick',()=>{this.pan={x:0,y:0};this.fit();});
     }
+    hitTestPoint(x,y){
+        if(!this.avatar || this.avatar.visible===false)return false;
+        const rect=this.app.view.getBoundingClientRect();
+        if(!rect.width||!rect.height)return false;
+        const point=new PIXI.Point((x-rect.left)*this.app.screen.width/rect.width,(y-rect.top)*this.app.screen.height/rect.height);
+        const internal=this.avatar.internalModel,core=internal.coreModel;
+        const world=this.avatar.worldTransform.applyInverse(point);
+        const local=internal.localTransform.clone().invert().apply(world);
+        const count=core._model?.drawables?.count??core._model?.drawables?.ids?.length??0;
+        for(let i=0;i<count;i++){
+            if(core.getDrawableOpacity(i)<=.02)continue;
+            const vertices=internal.getDrawableVertices(i),indices=core.getDrawableVertexIndices(i);
+            for(let j=0;j<indices.length;j+=3){
+                const a=indices[j]*2,b=indices[j+1]*2,c=indices[j+2]*2;
+                const area=(vertices[b]-vertices[a])*(vertices[c+1]-vertices[a+1])-(vertices[b+1]-vertices[a+1])*(vertices[c]-vertices[a]);
+                if(Math.abs(area)<1e-8)continue;
+                const side=(u,v)=>(local.x-vertices[u])*(vertices[v+1]-vertices[u+1])-(local.y-vertices[u+1])*(vertices[v]-vertices[u]);
+                const d1=side(a,b),d2=side(b,c),d3=side(c,a);
+                if(!((d1<0||d2<0||d3<0)&&(d1>0||d2>0||d3>0)))return true;
+            }
+        }
+        return false;
+    }
     fit(){
         if(!this.avatar)return;
         const w=Math.max(1,this.owner.container.clientWidth||innerWidth),h=Math.max(1,this.owner.container.clientHeight||innerHeight);const resolution=renderPixelRatio(w,h,Math.min(devicePixelRatio*({low:.75,balanced:1.25,high:2}[this.owner.quality]||1),2));
@@ -86,6 +118,14 @@ export default class Live2DViewer {
         this.avatar.scale.set(scale);this.avatar.anchor.set(.5,full?.5:.3);this.avatar.position.set(w/2+this.pan.x,h/2+this.pan.y);
     }
     calibrate(){const face=this.owner.userTrackingSample?.face,matrix=face?.matrix;if(matrix)this.neutral=new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().fromArray(matrix),'XYZ');
+        const points=face?.landmarks;
+        if(points?.length){
+            const jaw=(face.blendshapes||[]).find(b=>b.categoryName==='jawOpen')?.score||0;
+            const gap=[61,291,13,14].every(i=>points[i])?Math.hypot(points[13].x-points[14].x,points[13].y-points[14].y)/Math.max(.001,Math.hypot(points[61].x-points[291].x,points[61].y-points[291].y)):null;
+            this.mouthNeutral={jaw:Math.max(0,Math.min(.95,jaw)),gap:Number.isFinite(gap)?Math.max(0,Math.min(.6,gap)):0.02};
+            this.filtered.ParamMouthOpenY=0;
+            const core=this.avatar?.internalModel?.coreModel;if(core?.getParameterIndex('ParamMouthOpenY')>=0)core.setParameterValueById('ParamMouthOpenY',0);
+        }
         this.eyeNeutral={};for(const [side,ids]of [['L',[33,133,159,145]],['R',[362,263,386,374]]]){
             const p=face?.landmarks;if(!ids.every(i=>p?.[i]))continue;
             const ratio=Math.hypot(p[ids[2]].x-p[ids[3]].x,p[ids[2]].y-p[ids[3]].y)/Math.max(.001,Math.hypot(p[ids[0]].x-p[ids[1]].x,p[ids[0]].y-p[ids[1]].y));
@@ -178,6 +218,7 @@ export default class Live2DViewer {
             const sample=o.userTrackingSample,fresh=sample&&performance.now()-sample.receivedAt<600;
             const face=fresh&&sample.face?.landmarks?.length?sample.face:null;
             const scores=Object.fromEntries((face?.blendshapes||[]).map(b=>[b.categoryName,b.score]));
+            scores.jawOpen=Math.max(0,Math.min(1,((scores.jawOpen||0)-(this.mouthNeutral?.jaw||0))/Math.max(.05,1-(this.mouthNeutral?.jaw||0))));
             const hasPose=face?.matrix?.length===16&&Array.from(face.matrix).every(Number.isFinite);
             let rotation=new THREE.Euler();if(hasPose){rotation.setFromRotationMatrix(new THREE.Matrix4().extractRotation(new THREE.Matrix4().fromArray(face.matrix)),'XYZ');this.neutral ||= rotation.clone();}
             const headReady=hasPose&&this.neutral;
@@ -199,7 +240,7 @@ export default class Live2DViewer {
             }
             if(o.trackingMouthEnabled!==false&&!o.audioPlaybackActive){
                 const mouth=aperture(61,291,13,14);
-                smooth('ParamMouthOpenY',Math.max(clamp((scores.jawOpen||0)*1.5),mouth===null?0:clamp((mouth-.035)*5)));
+                smooth('ParamMouthOpenY',Math.max(clamp((scores.jawOpen||0)*1.5),mouth===null?0:clamp((mouth-(this.mouthNeutral?.gap??.02)-.015)*5)));
                 smooth('ParamMouthForm',Math.max(scores.mouthSmileLeft||0,scores.mouthSmileRight||0));
             }else{
                 const mouth=Math.max(...['A','I','U','E','O'].map(k=>this.values[k]||0),0);
@@ -227,6 +268,10 @@ export default class Live2DViewer {
                 smooth('ParamAngleX',Math.sin(this.motion.time*1.7)*1.8*speech+Math.sin(now*.5)*.25);
                 smooth('ParamBreath',.5+Math.sin(now*1.6)*.08);
             }
+        }
+        if(!o.userTracking && (!o.activity || o.activity==='idle')) {
+            this.idleBreathTime=(this.idleBreathTime||0)+dt;
+            smooth('ParamBreath',.5+Math.sin(this.idleBreathTime*Math.PI*2/4.8)*.12);
         }
         // Direct parameter remaps allow models with custom Cubism mouth IDs.
         this.chatReaderPose=null;

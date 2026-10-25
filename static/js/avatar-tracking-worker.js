@@ -1,6 +1,6 @@
 // Classic worker: MediaPipe's WASM loader uses importScripts internally.
 let face, detailFace, FaceLandmarker, hands, pose, HandLandmarker, PoseLandmarker, fileset, surface, context, handsEnabled = true, poseEnabled = true;
-let handGeneration = 0,poseFrame=0,cachedPose=null,preferGPU=false;
+let handGeneration = 0,poseFrame=0,cachedPose=null,cachedHands=null,cachedHandsAt=0,preferGPU=false;
 async function createDetector(Task,options){
     if(preferGPU&&trackingBackend!=='nvidia_gpu'){
         try{return await Task.createFromOptions(fileset,{...options,baseOptions:{...options.baseOptions,delegate:'GPU'}});}
@@ -19,6 +19,7 @@ function detailImage(image,roi){
 async function configureBodyTracking(enabled) {
     handsEnabled = Boolean(enabled);
     cachedPose=null;poseFrame=0;
+    cachedHands=null;cachedHandsAt=0;
     const generation = ++handGeneration;
     if (!handsEnabled) {
         hands?.close(); hands = null;
@@ -105,7 +106,7 @@ self.onmessage = async ({data}) => {
                 faceConfirmations=fullFace?Math.min(3,faceConfirmations+1):0;
                 const confirmedFace=faceConfirmations>=3;
                 let f=full,faceZoomed=false,poseSource='full';
-                if(confirmedFace&&roi&&roi.width<.32&&frameCount%3===0){
+                if(!data.lowLatency&&confirmedFace&&roi&&roi.width<.32&&frameCount%3===0){
                     detailFace ||= await createDetector(FaceLandmarker,{
                     baseOptions:{modelAssetPath:'/static/vendor/tracking/face_landmarker.task',delegate:trackingBackend === 'nvidia_gpu' ? 'GPU' : 'CPU'},
                         runningMode:'VIDEO',numFaces:1,outputFaceBlendshapes:true,outputFacialTransformationMatrixes:true,
@@ -125,13 +126,17 @@ self.onmessage = async ({data}) => {
                 // or perpetuate presence after the full-frame face disappears.
                 const next=confirmedFace?TrackingDistance.faceRegion(full.faceLandmarks[0],p?.landmarks[0],aspect):null;
                 if(next){faceRegion=next;faceRegionTime=data.timestamp;}else{faceRegion=null;faceRegionTime=0;}
+                const handStride=Math.max(1,Math.min(3,data.handStride||1));
+                const updateHands=!cachedHands||frameCount%handStride===0||data.timestamp-cachedHandsAt>100;
+                if(!handsEnabled||!bodyEnabled){cachedHands=null;cachedHandsAt=0;}
                 let h=trackingBackend === 'leap_motion' && handsEnabled && bodyEnabled
                     ? {landmarks:[],worldLandmarks:[],handedness:[]}
-                    : bodyEnabled&&handsEnabled&&hands?hands.detectForVideo(surface,data.timestamp*2):{landmarks:[],worldLandmarks:[],handedness:[]};
+                    : bodyEnabled&&handsEnabled&&hands?(updateHands?hands.detectForVideo(surface,data.timestamp*2):cachedHands):{landmarks:[],worldLandmarks:[],handedness:[]};
+                if(bodyEnabled&&handsEnabled&&updateHands){cachedHands=h;cachedHandsAt=data.timestamp;}
                 const freshLeapFrame = data.timestamp - leapFrameAt < 500 ? leapFrame : null;
                 let leapHands = trackingBackend === 'leap_motion' && bodyEnabled && handsEnabled ? mapLeapFrame(freshLeapFrame, p) : [];
                 let handsZoomed=false;
-                if(trackingBackend !== 'leap_motion' && bodyEnabled&&handsEnabled&&hands&&!h.landmarks.length&&frameCount%3===0){
+                if(!data.lowLatency&&trackingBackend !== 'leap_motion' && bodyEnabled&&handsEnabled&&hands&&!h.landmarks.length&&frameCount%3===0){
                     const handRoi=TrackingDistance.handRegion(p?.landmarks[0],aspect);
                     if(handRoi){h=hands.detectForVideo(detailImage(data.image,handRoi),data.timestamp*2+1);
                         h.landmarks=h.landmarks.map(points=>TrackingDistance.remap(points,handRoi));handsZoomed=!!h.landmarks.length;}

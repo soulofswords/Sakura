@@ -29,7 +29,10 @@ export function installSpoutControls(getViewer) {
         }catch(error){toggle.checked=false;status.textContent=error.message;}
         finally{toggle.disabled=false;name.disabled=toggle.checked;}
     };
-    name.value=localStorage.getItem('sakura_spout_name')||'Sakura';
+    const instance=Number(new URLSearchParams(location.search).get('instance')||1);
+    name.value=localStorage.getItem('sakura_spout_name')||(instance>1?'Sakura VTuber '+instance:'Sakura');
+    size.value=localStorage.getItem('sakura_spout_resolution')||'0';
+    size.addEventListener('change',()=>localStorage.setItem('sakura_spout_resolution',size.value));
     fetch('/api/spout/status').then(r=>r.json()).then(data=>{
         if(!data.supported){toggle.disabled=true;status.textContent='Spout2 requires Windows. Use OBS window capture on macOS.';}
     }).catch(()=>{status.textContent='Spout service unavailable.';toggle.disabled=true;});

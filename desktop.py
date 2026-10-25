@@ -10,7 +10,17 @@ import os
 import faulthandler
 from pathlib import Path
 from product import DISPLAY_NAME, LAUNCHER_NAME, EDITION
-APP_DISPLAY_NAME = DISPLAY_NAME
+INSTANCE_INDEX=1
+if EDITION=='vtuber' or os.environ.get('SAKURA_VTUBER_INSTANCE')=='1':
+    from vtuber_instances import claim_instance
+    try:INSTANCE_INDEX=claim_instance(Path(__file__).parent)
+    except RuntimeError as error:
+        if sys.platform=='win32':
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0,str(error),'Sakura VTuber',0x40)
+        raise SystemExit(0)
+PROFILE_DIR=Path(__file__).parent/('desktop-profile' if INSTANCE_INDEX==1 else f'desktop-profile-{INSTANCE_INDEX}')
+APP_DISPLAY_NAME = DISPLAY_NAME + (f' · {INSTANCE_INDEX}' if INSTANCE_INDEX>1 else '')
 APP_USER_MODEL_ID = 'Sakura.VTuber' if EDITION=='vtuber' else 'Sakura.DesktopCompanion'
 from app_branding import icon_path
 APP_ICON_PATH = icon_path(Path(__file__).parent, EDITION)
@@ -68,6 +78,35 @@ _desktop_server = None
 
 # ── Desktop Window API ──────────────────────────────────────────
 class DesktopApi:
+    def new_vtuber_instance(self):
+        try:
+            from vtuber_instances import spawn_instance, claim_instance
+            if 'SAKURA_INSTANCE_INDEX' not in os.environ:claim_instance(Path(__file__).parent)
+            process=spawn_instance(Path(__file__).parent)
+            return {'ok':True,'pid':process.pid}
+        except Exception as error:return {'error':str(error)}
+
+    def install_virtual_camera_driver(self):
+        try:
+            from sakura_camera_native import install_driver
+            return install_driver()
+        except Exception as error:
+            return {'error': str(error)}
+
+    def uninstall_virtual_camera_driver(self):
+        try:
+            from sakura_camera_native import uninstall_driver
+            return uninstall_driver()
+        except Exception as error:
+            return {'error': str(error)}
+
+    def virtual_camera_driver_status(self):
+        try:
+            from sakura_camera_native import CAMERA_NAME, driver_installed
+            return {'installed': bool(driver_installed()), 'device': CAMERA_NAME}
+        except Exception as error:
+            return {'error': str(error)}
+
     def __init__(self, window_holder):
         self.holder = window_holder
 
@@ -294,10 +333,15 @@ class DesktopApi:
         if kind not in ('pmx', 'vrm', 'live2d'):
             return {'error': 'Choose PMX, VRM or Live2D.'}
         win = self.holder.get('window')
-        if not win or not self.holder.get('library_mode'):
-            return {'error': 'Open the model library to upload models.'}
+        if not win:
+            return {'error': 'The desktop window is not ready.'}
         start = MODELS_DIR / kind
         start.mkdir(parents=True, exist_ok=True)
+        # The studio panel offers import in the small companion window as well,
+        # which can sit behind other apps and never get the dialog's focus.
+        if not self.holder.get('library_mode'):
+            win.show()
+            win.restore()
         try:
             selection = win.create_file_dialog(
                 webview.FileDialog.OPEN if kind == 'vrm' else webview.FileDialog.FOLDER,
@@ -384,21 +428,8 @@ class DesktopApi:
         return self.screen_access
 
     def cursor_position(self):
-        if sys.platform == 'darwin':
-            from macos_support import cursor_position
-            return cursor_position()
-        if sys.platform != 'win32':
-            return None
-        import ctypes
-        from ctypes import wintypes
-        user32 = ctypes.WinDLL('user32')
-        user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-        point = wintypes.POINT()
-        if not user32.GetCursorPos(ctypes.byref(point)):
-            return None
-        left, top = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
-        width, height = max(1, user32.GetSystemMetrics(78)), max(1, user32.GetSystemMetrics(79))
-        return {'x': (point.x - left) / width * 2 - 1, 'y': (point.y - top) / height * 2 - 1}
+        from screen_cursor import position
+        return position()
 
     def game_status(self):
         from game_detection import game_session
@@ -511,7 +542,7 @@ def main():
     holder['wake']=DesktopWake(Path(__file__).parent,wake_command)
 
     from window_placement import read_placement
-    placement_file=Path(__file__).parent/'desktop-profile'/'companion-placement.json'
+    placement_file=PROFILE_DIR/'companion-placement.json'
     saved_placement=read_placement(placement_file)
     if saved_placement:holder['companion_bounds']=saved_placement
     api = DesktopApi(holder)
@@ -532,6 +563,7 @@ def main():
     page_mode = 'library=1&upload=1' if library_mode and not agent_mode else 'desktop=1&companion=1'
     page_url = f'http://{gui_server.HOST}:{gui_server.port}/?{page_mode}&ui={ui_revision}' + ('&agent=1' if agent_mode else '')
     if getattr(app.state,'tracking_only',False):page_url+='&tracking=1'
+    page_url+=f'&instance={INSTANCE_INDEX}'
     webview.settings['DRAG_REGION_DIRECT_TARGET_ONLY'] = True
     window = webview.create_window(
         title=APP_DISPLAY_NAME,
@@ -583,7 +615,7 @@ def main():
         native.setWindowTitle(APP_DISPLAY_NAME)
         native.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         profile = native.webview.page().profile()
-        profile.setCachePath(str(Path(__file__).parent / 'desktop-profile' / 'http-cache'))
+        profile.setCachePath(str(PROFILE_DIR / 'http-cache'))
         if sys.platform == 'win32':
             from window_identity import set_taskbar_identity
             set_taskbar_identity(int(native.winId()), APP_USER_MODEL_ID,
@@ -986,7 +1018,7 @@ def main():
         # Qt installs this icon while constructing the native window, before
         # showing it. Late synchronous Win32 icon messages can stall input.
         webview.start(gui='qt', debug=False, icon=str(APP_ICON_PATH),
-                      private_mode=False, storage_path=str(Path(__file__).parent / 'desktop-profile'))
+                      private_mode=False, storage_path=str(PROFILE_DIR))
     finally:
         # Finish the owned backend before Python shuts down its executors.
         # Otherwise a closing window can leave a half-alive HTTP server that

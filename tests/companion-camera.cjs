@@ -14,11 +14,11 @@ vm.runInNewContext(fs.readFileSync('static/js/companion-camera.js','utf8').repla
  camera.remoteFrame('/9j/phone');assert.equal(camera.snapshot(),'/9j/phone');
  camera.stop();camera.remoteFrame('/9j/stale');assert.equal(camera.snapshot(),null);
  const calls=[], objectCamera={start:async id=>calls.push(['objects',id]),stop:()=>calls.push(['object-stop'])};
- const avatarTracking={start:async id=>calls.push(['tracking',id]),stop:()=>calls.push(['tracking-stop'])};
- const viewer={setVtuberTrackingMode:value=>calls.push(['viewer-mode',value])};
+ const avatarTracking={start:async id=>calls.push(['tracking',id]),stop:()=>calls.push(['tracking-stop']),setFaceSource:source=>calls.push(['face-source',source])};
+ const viewer={setVtuberTrackingMode:value=>calls.push(['viewer-mode',value]),setCompanionTracking:value=>calls.push(['companion-mode',value])};
  const modes=new ctx.CameraModes({objectCamera,avatarTracking,viewer});
  await modes.start('objects','cam1');assert.equal(modes.mode,'objects');assert(calls.some(c=>c[0]==='objects'&&c[1]==='cam1'));assert(!calls.some(c=>c[0]==='tracking'&&c[1]==='cam1'));
- calls.length=0;await modes.start('tracking','cam2');assert.equal(modes.mode,'tracking');assert(calls.some(c=>c[0]==='tracking'&&c[1]==='cam2'));assert(calls.some(c=>c[0]==='viewer-mode'&&c[1]===true));assert(!calls.some(c=>c[0]==='objects'&&c[1]==='cam2'));
- modes.stop();assert.equal(modes.mode,'');assert(calls.some(c=>c[0]==='tracking-stop'));assert(calls.some(c=>c[0]==='viewer-mode'&&c[1]===false));
+ calls.length=0;await modes.start('tracking','cam2');assert.equal(modes.mode,'tracking');assert(calls.some(c=>c[0]==='tracking'&&c[1]==='cam2'));assert(calls.some(c=>c[0]==='viewer-mode'&&c[1]===true));assert(calls.some(c=>c[0]==='companion-mode'&&c[1]===true),'Companion tracking keeps the AI layers on');assert(!calls.some(c=>c[0]==='objects'&&c[1]==='cam2'));
+ modes.stop();assert.equal(modes.mode,'');assert(calls.some(c=>c[0]==='tracking-stop'));assert(calls.some(c=>c[0]==='viewer-mode'&&c[1]===false));assert(calls.some(c=>c[0]==='companion-mode'&&c[1]===false));
  console.log('PASS: explicit camera enable, JPEG capture, no mic, selected device, shutdown and permission race');
 })().catch(e=>{console.error(e);process.exitCode=1;});

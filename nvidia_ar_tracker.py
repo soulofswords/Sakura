@@ -191,7 +191,9 @@ class _NvidiaExpressionSession:
         self._check(self._image_init(C.byref(self.cpu_image), width, height, int(frame_bgr.strides[0]),
                                      C.c_void_p(frame_bgr.ctypes.data), 5, 1, 0, 0), 'Set webcam frame')
         self._check(self._image_transfer(C.byref(self.cpu_image), C.byref(self.gpu_image), 1.0, None, None), 'Transfer camera frame to RTX')
+        if hasattr(self,'_boxes'):self._boxes.num_boxes=0
         self._check(self._run(self.handle), 'Run NVIDIA face-expression inference')
+        self.face_detected=bool(getattr(getattr(self,'_boxes',None),'num_boxes',0))
         return {name: max(0.0, min(1.0, float(self.expressions[index])))
                 for index, name in enumerate(AR_EXPRESSION_NAMES)}
 
@@ -215,6 +217,7 @@ class NvidiaARFaceTracker:
         self._thread = None
         self._frame = None
         self._result = {}
+        self._face_detected = False
         self._updated_at = 0.0
         self._error = ''
         self._root = None
@@ -234,6 +237,7 @@ class NvidiaARFaceTracker:
         self._error = ''
         self._frame = None
         self._result = {}
+        self._face_detected = False
         self._updated_at = 0.0
         self._fps = 0
         self._ready.clear()
@@ -262,9 +266,10 @@ class NvidiaARFaceTracker:
             return {
                 'running': bool(self._thread and self._thread.is_alive() and not self._error),
                 'connected': age is not None and age < 1.5,
+                'face_detected': self._face_detected and age is not None and age < .3,
                 'age_ms': round(age * 1000) if age is not None else None,
                 'fps': self._fps,
-                'blendshapes': expression_aliases(self._result) if age is not None and age < 1.5 else {},
+                'blendshapes': expression_aliases(self._result) if self._face_detected and age is not None and age < .3 else {},
                 'error': self._error,
                 'sdk': str(self._root) if self._root else '',
             }
@@ -278,6 +283,7 @@ class NvidiaARFaceTracker:
         self._thread = None
         self._frame = None
         self._result = {}
+        self._face_detected = False
         self._updated_at = 0.0
 
     def _run(self):
@@ -308,7 +314,8 @@ class NvidiaARFaceTracker:
                 count += 1
                 now = time.monotonic()
                 with self._lock:
-                    self._result = result
+                    self._face_detected = session.face_detected
+                    self._result = result if self._face_detected else {}
                     self._updated_at = now
                     if now - started >= 1.0:
                         self._fps = round(count / (now - started))

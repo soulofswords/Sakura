@@ -1,0 +1,64 @@
+:root[data-ui-theme="light"]{--ui-card:#fff;--ui-wash:#edf2f8;--ui-input:#f0f4fa;--ui-ink:#27364b;--ui-muted:#526279;--ui-line:#d8e3ee;--ui-button:#e9f4fb;--ui-accent:#147caf;--ui-stage:#e6ebf1}
+:root[data-ui-theme="dark"]{--ui-card:#20242b;--ui-wash:#171b21;--ui-input:#292f38;--ui-ink:#edf1f7;--ui-muted:#b5c1d0;--ui-line:#414b59;--ui-button:#303c4b;--ui-accent:#91ceff;--ui-stage:#11151a}
+:root[data-ui-theme]{--sakura-pink:var(--ui-accent)!important;--text-primary:var(--ui-ink)!important;--text-muted:var(--ui-muted)!important;--panel-bg:var(--ui-card)!important;--panel-border:var(--ui-line)!important;--bg-grad-1:var(--ui-stage)!important;--bg-grad-2:var(--ui-stage)!important;--user-bubble:var(--ui-button)!important;--sakura-bubble:var(--ui-input)!important}
+html[data-ui-theme] body.studio-ui-active{--studio-ink:var(--ui-ink);--studio-muted:var(--ui-muted);--studio-card:var(--ui-card);--studio-line:var(--ui-line);--studio-wash:var(--ui-wash);--text-primary:var(--ui-ink);--text-muted:var(--ui-muted)}
+html[data-ui-theme] :is(#top-bar,.modal-card,.modal-header,.modal-tabs,.settings-tabs,#theme-popover,#studio-panel,.studio-panel-header,.studio-card,#studio-lock-label,#vtuber-collab-dialog,#chat-panel){background:var(--ui-card)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] :is(.studio-panel-body,.studio-docked .modal-body,.studio-docked .tracking-options,.studio-docked .tab-content,.studio-docked .model-settings-zoom){background:var(--ui-wash)!important;color:var(--ui-ink)!important}
+html[data-ui-theme] :is(.studio-card,.studio-docked,#vtuber-studio,#theme-popover,.modal-card) :is(label,legend,h2,h3,h4,.expression-card-name){color:var(--ui-ink)!important}
+html[data-ui-theme] :is(.modal-card,#vtuber-studio,#theme-popover) :is(p,small,.modal-hint,.studio-help,.hint){color:var(--ui-muted)!important}
+html[data-ui-theme] :is(.modal-card,#vtuber-studio,#theme-popover) :is(.setting-group,.expression-card,.voice-card){background:var(--ui-card)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] :is(.modal-card,#vtuber-studio,#theme-popover) :is(select,textarea,input:not([type="range"]):not([type="checkbox"]):not([type="color"])){background:var(--ui-input)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] :is(.modal-card,#vtuber-studio,#theme-popover) button:not(.studio-dock-button):not(.studio-background-swatch){background:var(--ui-button)!important;color:var(--ui-accent)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #vtuber-studio :is(.dropdown-trigger,.dropdown-menu,.dropdown-item){background:var(--ui-input)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #top-bar :is(.title,#brand-title,.win-btn){color:var(--ui-ink)!important}
+html[data-ui-theme] #studio-statusbar :is(button,.studio-status-text){background:var(--ui-card)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #vtuber-studio fieldset.setting-group :is(label,legend){color:var(--ui-ink)!important}
+.appearance-controls select{display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px}
+.appearance-controls p{margin-top:12px;line-height:1.5}
+#legacy-lighting-controls{display:none!important}
+html[data-ui-theme] body.studio-ui-active .studio-docked .tracking-options>p:first-of-type{background:var(--ui-input)!important;color:var(--ui-muted)!important}
+html[data-ui-theme] #vtuber-collab-dialog button{background:var(--ui-button)!important;color:var(--ui-accent)!important;border:1px solid var(--ui-line)!important;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer}
+html[data-ui-theme] #vtuber-collab-dialog button:hover{filter:brightness(.94)}
+html[data-ui-theme] #vtuber-collab-dialog button:disabled{color:var(--ui-muted)!important;background:var(--ui-input)!important;opacity:1;cursor:not-allowed}
+html[data-ui-theme] #vtuber-collab-dialog :is(label,summary,h2,h3){color:var(--ui-ink)!important}
+html[data-ui-theme] #vtuber-collab-dialog :is(p,small){color:var(--ui-muted)!important}
+html[data-ui-theme] #vtuber-collab-dialog #vtuber-collab-status{color:var(--ui-accent)!important}
+html[data-ui-theme] #vtuber-collab-dialog input{background:var(--ui-input)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #vtuber-collab-dialog input::placeholder{color:var(--ui-muted);opacity:1}
+html[data-ui-theme] .modal-card label.file-pick-btn{background:var(--ui-button)!important;color:var(--ui-accent)!important;border:1px solid var(--ui-line)!important;border-radius:8px;padding:8px 12px;cursor:pointer}
+html[data-ui-theme] .modal-card :is(.rvc-models-list,.rvc-model-item){background:var(--ui-input)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] .modal-card .rvc-model-item:is(:hover,.active){background:var(--ui-button)!important}
+html[data-ui-theme] .modal-card .rmi-badge{background:var(--ui-button)!important;color:var(--ui-accent)!important}
+html[data-ui-theme] .modal-card :is(.file-label-text,.rvc-empty){color:var(--ui-muted)!important}
+.studio-shortcut-settings{display:none}
+body.tracking-only .studio-shortcut-settings{display:flex}
+body.tracking-only .companion-shortcut-settings{display:none!important}
+#tab-general .general-preferences-card{display:flex;flex-direction:column;align-items:stretch;gap:12px;min-width:0;margin-bottom:16px;padding:18px;border:1px solid var(--ui-line,var(--panel-border));border-radius:12px;background:var(--ui-card,var(--panel-bg))}
+#tab-general .general-preferences-card.studio-shortcut-settings{display:none}
+body.tracking-only #tab-general .general-preferences-card.studio-shortcut-settings{display:flex}
+#tab-general .general-preferences-card h3{font-size:15px;margin:0;font-weight:650}
+#tab-general .general-preferences-card .general-preference-toggle{display:flex;align-items:flex-start;gap:10px;margin:0;line-height:1.5}
+#tab-general .general-preference-toggle input{flex:0 0 auto;margin-top:3px}
+#tab-general .general-preferences-card p{margin:0;line-height:1.6;overflow-wrap:anywhere}
+#tab-general .general-shortcut-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;font-size:13px;line-height:1.5}
+#tab-general .general-shortcut-row kbd{font:12px 'Segoe UI',sans-serif;padding:5px 8px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-input);white-space:nowrap}
+#tab-general .general-preferences-save{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+#tab-general .general-preferences-save button{width:100%}
+/* Close controls must not inherit the padding used by ordinary action buttons. */
+html[data-ui-theme] :is(#settings-modal,#expression-modal,#tracking-modal,#studio-panel) :is(.close-btn,#studio-panel-close){display:grid!important;place-items:center!important;width:30px!important;height:30px!important;min-width:30px!important;flex:0 0 30px!important;padding:0!important;line-height:1!important;font-size:18px!important;border-radius:50%!important;text-align:center!important}
+/* Agent mode keeps its own dark shell in style.css; themes take over the frame. */
+html[data-ui-theme] body.agent-mode{background:var(--ui-wash)!important}
+html[data-ui-theme] body.agent-mode #top-bar{background:var(--ui-card)!important;border-bottom-color:var(--ui-line)!important}
+html[data-ui-theme] #agent-workspace{background:var(--ui-wash)!important;border-left-color:var(--ui-line)!important}
+html[data-ui-theme] body.agent-mode #viewer{background:var(--ui-stage)!important}
+/* The chat panel is the one surface still using style.css's dark plum controls. */
+html[data-ui-theme] #chat-panel button{background:var(--ui-button)!important;color:var(--ui-accent)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #chat-panel button:hover{background:var(--ui-input)!important;border-color:var(--ui-accent)!important;box-shadow:none}
+html[data-ui-theme] #chat-panel #mic-btn.recording{background:var(--ui-input)!important;border-color:#f87171!important;color:#f87171!important}
+html[data-ui-theme] #chat-panel .input-area input{background:var(--ui-input)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #chat-panel .input-area input::placeholder{color:var(--ui-muted)!important;opacity:1}
+html[data-ui-theme] #chat-panel :is(.panel-title,#panel-title-text){color:var(--ui-accent)!important}
+html[data-ui-theme] #chat-panel :is(.panel-header,.input-area){border-color:var(--ui-line)!important}
+html[data-ui-theme] #chat-panel :is(#screen-view-status,#chat-attachment-tray small){color:var(--ui-muted)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme] #chat-panel .message.sakura{border-color:var(--ui-line)!important}
+html[data-ui-theme] #chat-bubble-btn{background:var(--ui-button)!important;color:var(--ui-accent)!important;border-color:var(--ui-line)!important}

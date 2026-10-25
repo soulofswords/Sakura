@@ -19,7 +19,7 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/js/startup-present
     assert.equal(revealed,3,'minimized windows reveal controls without animation frames');
     const html=fs.readFileSync('static/index.html','utf8'),app=fs.readFileSync('static/js/app.js','utf8');
     assert.ok(html.indexOf("classList.add('sakura-starting')")<html.indexOf('rel="stylesheet"'));
-    assert.ok(html.includes('html.sakura-starting #viewer { visibility: hidden; }'));
+    assert.ok(html.includes('html.sakura-starting body > :not(#startup-render-status) { visibility: hidden !important; }'));
     assert.ok(app.indexOf('await finishStartupPresentation(viewer);')>app.indexOf('await loadAppSettings();'));
     assert.ok(app.indexOf('await finishStartupPresentation(viewer);')<app.indexOf('if (isDesktop && !isAgentMode) await startDesktopListening();'));
     console.log('PASS: first frame rendered before reveal, compositor settling, error recovery and startup order');

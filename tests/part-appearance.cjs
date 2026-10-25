@@ -1,0 +1,20 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const THREE=require('../static/vendor/three/build/three.cjs');
+const context={THREE};vm.createContext(context);
+vm.runInContext(fs.readFileSync('static/js/part-appearance.js','utf8').replace(/export /g,'')+';this.tint=tintEdit;this.opacity=opacityEdit;',context);
+vm.runInContext(fs.readFileSync('static/js/model-materials.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+';this.Materials=ModelMaterials;',context);
+const material=new THREE.MeshBasicMaterial({color:'#738ba2',opacity:.8,transparent:true});
+const sourceColor=material.color.clone(),texture=new THREE.Texture();material.map=texture;
+const viewer={model:{traverse(fn){fn({material});}}},editor=new context.Materials(viewer);editor.attach('test');
+editor.setColor('mat:0',context.opacity(undefined,.4));
+assert.equal(material.color.getHexString(),sourceColor.getHexString(),'Transparency preserves authored color');
+assert.equal(material.map,texture,'Transparency retains original texture');
+assert.ok(Math.abs(material.opacity-.32)<1e-9);
+assert.equal(editor.colors['mat:0'].strength,0,'Default picker color is never applied');
+// A deliberate color edit preserves opacity; a later opacity edit preserves that saved tint.
+const tint=context.tint(editor.colors['mat:0'],'#ff0000',.7);
+assert.equal(tint.opacity,.4);const opacity=context.opacity(tint,.2);
+assert.equal(opacity.color,'#ff0000');assert.equal(opacity.strength,.7);
+const resetColor=context.tint(opacity,'#ffffff',0);assert.equal(resetColor.opacity,.2);
+const resetOpacity=context.opacity(resetColor,1);assert.equal(resetOpacity.strength,0);
+console.log('PASS: original texture/color preserved by transparency-only edits; tint and opacity apply/reset independently.');

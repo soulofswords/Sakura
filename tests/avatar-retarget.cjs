@@ -97,6 +97,13 @@ async function main(){
  assert(facialValues.A>.95,'landmark mouth opening drives the avatar even when jaw scores are absent');
  for(let i=0;i<8;i++)facialRig.apply(openFace,1/60);
  assert(facialValues.A<.05,'closed lips return the avatar mouth to neutral');
+ const biasedMouth=landmarkFace(.075,.075,.03);biasedMouth.face.blendshapes=[{categoryName:'jawOpen',score:.35}];
+ facialRig.calibrate(biasedMouth);assert.equal(facialValues.A,0,'Calibration immediately clears the previous mouth weight');
+ for(let i=0;i<30;i++)facialRig.apply(biasedMouth,1/60);
+ assert(facialValues.A<.001,'Neutral landmark gap and jaw bias cannot reopen the mouth');
+ const speakingMouth={...biasedMouth,face:{...biasedMouth.face,blendshapes:[{categoryName:'jawOpen',score:.8}]}};
+ for(let i=0;i<12;i++)facialRig.apply({...speakingMouth,receivedAt:performance.now()},1/60);
+ assert(facialValues.A>.9,'Speech above the calibrated baseline still opens the mouth');
  console.log('PASS: landmark eyelid closure, independent winks, reopening and mouth movement with absent expression scores');
  const armRoot=new THREE.Group(), shoulder=new THREE.Bone(), upper=new THREE.Bone(), elbow=new THREE.Bone(), wrist=new THREE.Bone();
  shoulder.position.set(0,1,0); upper.position.set(.2,0,0); elbow.position.set(.5,0,0); wrist.position.set(.5,0,0);
@@ -129,6 +136,9 @@ async function main(){
  assert(reachTargets.at(-1).z>0,'hands nearer the webcam must reach in front of the avatar, not behind its body');
  assert(reachTargets.at(-1).x<shoulder.getWorldPosition(new THREE.Vector3()).x,'mirror mode follows image horizontal movement without reversing its direction');
  assert(Object.values(armViewer.animationBones).some(entry=>entry.bone.quaternion.angleTo(new THREE.Quaternion().setFromEuler(entry.rest))>.001),'a visible confirmed hand and matching pose should drive arm IK');
+ const worldHand={...visibleHand,world:handPoints.map(p=>({...p}))};
+ assert.doesNotThrow(()=>poseRig.apply({...handSample,timestamp:1100,receivedAt:performance.now(),hands:[worldHand]},.016),'Confirmed hand with world landmarks must not stop rendering');
+ assert(Object.values(armViewer.animationBones).every(entry=>entry.bone.quaternion.toArray().every(Number.isFinite)),'Wrist orientation must remain finite');
  const trackedShoulder=shoulder.quaternion.clone(), shoulderRest=new THREE.Quaternion().setFromEuler(armViewer.animationBones.leftShoulder.rest);
  poseRig.apply({receivedAt:performance.now(),handTrackingEnabled:false,face:{landmarks:[],blendshapes:[]},hands:[],pose:{landmarks:pose,world}},.016);
  assert(shoulder.quaternion.angleTo(shoulderRest)<=trackedShoulder.angleTo(shoulderRest)+1e-6,'disabling body tracking must release the shoulder toward its authored pose');
@@ -137,6 +147,22 @@ async function main(){
  const beforeLoss=shoulder.quaternion.angleTo(shoulderRest);
  for(let i=0;i<50;i++)poseRig.apply({...handSample,timestamp:1264+i*66,receivedAt:performance.now(),hands:[]},.016);
  assert(shoulder.quaternion.angleTo(shoulderRest)<Math.max(beforeLoss*.01,1e-5),'missing hand must release shoulder even while the body pose remains visible');
+ // A frame exception makes the viewer dispose the model, so the avatar visibly
+ // vanishes. The wrist-palm branch runs only for confirmed hands carrying world
+ // landmarks, which real hand tracking supplies from its first confident frame.
+ const palmRoot=new THREE.Group(), palmShoulder=new THREE.Bone(), palmUpper=new THREE.Bone(), palmElbow=new THREE.Bone(), palmWrist=new THREE.Bone();
+ palmRoot.add(palmShoulder); palmShoulder.add(palmUpper); palmUpper.add(palmElbow); palmElbow.add(palmWrist);
+ const palmViewer={model:palmRoot,morphMap:{},setMorph(){},animationBones:{leftShoulder:{bone:palmShoulder},leftArm:{bone:palmUpper},leftElbow:{bone:palmElbow},leftWrist:{bone:palmWrist}}};
+ const palmRig=new AvatarRetarget(palmViewer);
+ for(const entry of Object.values(palmViewer.animationBones)) entry.rest=entry.bone.rotation.clone();
+ const flatPalm={...visibleHand,world:handPoints.map(p=>({...p,z:0}))};
+ const tiltedPalm={...visibleHand,world:handPoints.map((p,i)=>({...p,z:i===0?-.22:i===9?.22:p.z||0}))};
+ const palmSample={receivedAt:performance.now(),face:{landmarks:[],blendshapes:[]},hands:[],pose:{landmarks:pose,world:pose.map(p=>({...p,z:0}))}};
+ for(const [stamp,hand] of [[3000,flatPalm],[3050,flatPalm],[3100,tiltedPalm],[3150,tiltedPalm],[3200,tiltedPalm]])
+  assert.doesNotThrow(()=>palmRig.apply({...palmSample,timestamp:stamp,receivedAt:performance.now(),hands:[hand]},.016),`confirmed hand with world landmarks must not stop rendering (frame ${stamp})`);
+ assert(palmRig.palms.left,'the first confident hand frame must record the palm orientation');
+ assert(palmWrist.quaternion.angleTo(new THREE.Quaternion().setFromEuler(palmViewer.animationBones.leftWrist.rest))>.01,'a palm rotated since it appeared must turn the wrist');
+ assert(Object.values(palmViewer.animationBones).every(entry=>entry.bone.quaternion.toArray().every(Number.isFinite)),'palm orientation must keep every arm quaternion finite');
  assert.equal(poseRig._visibleHand({...visibleHand,confidence:.5}),false);
  assert.equal(poseRig._visibleHand({...visibleHand,landmarks:handPoints.map((p,i)=>i===8?{...p,x:1.2}:p)}),false,'cropped hands must not drive arms');
  assert.equal(poseRig._visibleHand({...visibleHand,landmarks:handPoints.map((p,i)=>i===8?{...p,z:NaN}:p)}),false);
@@ -154,12 +180,38 @@ async function main(){
  console.log('PASS: arm solver stays stable for stationary hands and extreme movement without accumulated twists');
  console.log('PASS: body-only and one-frame detections do not move arms; hand loss, cropped/weak/stale detections return arms to rest');
  assert(Object.values(armViewer.animationBones).every(entry=>Number.isFinite(entry.bone.quaternion.x)),'pose IK must remain numerically stable');
+ const quietRig=new AvatarRetarget(armViewer);
+ for(let i=0;i<60;i++)assert.equal(quietRig._stableBodyTarget('roll',Math.sin(i)*.012,i,true),0,'Stationary shoulder noise cannot drive torso');
+ for(let i=60;i<95;i++)assert.equal(quietRig._stableBodyTarget('roll',Math.sin(i)*.024,i,true),0,'Small residual shoulder jitter stays locked');
+ assert.equal(quietRig._stableBodyTarget('pitch',.04,96,true),0,'One-frame moderate pitch movement is rejected too');
+ assert.equal(quietRig._stableBodyTarget('pitch',0,97,true),0);
+ assert.equal(quietRig._stableBodyTarget('roll',.25,100,true),0,'One-frame shoulder jump is rejected');
+ assert.equal(quietRig._stableBodyTarget('roll',.25,100,true),0,'Repeated render of one packet cannot confirm a jump');
+ assert.equal(quietRig._stableBodyTarget('roll',0,101,true),0,'Return after a spike stays neutral');
+ assert.equal(quietRig._stableBodyTarget('roll',.22,102,true),0);
+ assert.equal(quietRig._stableBodyTarget('roll',.23,103,true),.23,'Real sustained leaning still follows');
+ assert.equal(quietRig._stableBodyTarget('roll',0,104,false),.23,'Brief shoulder dropout does not snap the torso');
+ for(let i=1;i<=12;i++){
+  const target=.23+i*.006;
+  assert.equal(quietRig._stableBodyTarget('roll',target,104+i,true),target,'Confirmed motion follows small increments without rest-threshold steps');
+ }
+ const heldTorso=quietRig.bodyTargets.roll.value;
+ quietRig.bodyTargets.roll.movingUntil=0;
+ assert.equal(quietRig._stableBodyTarget('roll',heldTorso+.012,120,true),heldTorso,'Stationary hold resumes after motion settles');
+ assert.equal(quietRig._stableBodyTarget('roll',heldTorso+.2,121,true),heldTorso,'Isolated large jumps remain rejected after motion');
+
+ console.log('PASS: stationary torso jitter, isolated spikes and duplicate frames rejected; sustained leaning preserved');
  const torso=new THREE.Bone();armRoot.add(torso);armViewer.animationBones.torso={bone:torso,rest:torso.rotation.clone()};
  const leanRig=new AvatarRetarget(armViewer),body=Array.from({length:33},()=>({x:0,y:0,z:0,visibility:1}));
  body[11]={x:-.2,y:.3,z:0,visibility:1};body[12]={x:.2,y:.3,z:0,visibility:1};
  body[23]={x:-.15,y:.8,z:0,visibility:1};body[24]={x:.15,y:.8,z:0,visibility:1};
  const leanSample=()=>({receivedAt:performance.now(),face:{landmarks:Array.from({length:478},()=>({x:.5,y:.5,z:0})),matrix:new THREE.Matrix4().identity().toArray(),blendshapes:[]},hands:[],pose:{landmarks:body,world:body}});
  leanRig.apply(leanSample(),.016);assert(torso.quaternion.angleTo(new THREE.Quaternion())<1e-6);
+ for(let i=0;i<90;i++){
+  const noise=leanSample();noise.face.matrix=new THREE.Matrix4().makeRotationX(Math.sin(i)*.06).toArray();noise.timestamp=20000+i*16;
+  leanRig.apply(noise,1/60);
+ }
+ assert(torso.quaternion.angleTo(new THREE.Quaternion())<1e-6,'Small head pitch noise cannot bypass the stationary torso hold');
  body[11].x+=.2;body[12].x+=.2;body[11].z=-.15;body[12].z=-.15;
  for(let i=0;i<30;i++)leanRig.apply(leanSample(),.016);
  assert(torso.quaternion.angleTo(new THREE.Quaternion())>.1,'body lean must move the torso anchor used by physics');

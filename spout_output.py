@@ -45,7 +45,7 @@ class SpoutOutput:
     def submit(self,token,pixels,width,height):
         with self.lock:
             if not self.enabled or not secrets.compare_digest(token,self.token):raise ValueError('Spout session is inactive. Enable output again.')
-            if not 1<=width<=1280 or not 1<=height<=1280 or len(pixels)!=width*height*4:raise ValueError('Invalid RGBA frame dimensions.')
+            if not 1<=width<=2560 or not 1<=height<=2560 or len(pixels)!=width*height*4:raise ValueError('Invalid RGBA frame dimensions.')
             self.last_frame=time.monotonic()
             try:self.frames.get_nowait()
             except queue.Empty:pass

@@ -98,7 +98,7 @@ static class Launcher {
    return;
   }
   bool created; using(var mutex=new Mutex(true,"Local\\SakuraLauncher_"+title.Replace(" ","_"),out created)) {
-   if(!created){
+   if(!created && title!="Sakura VTuber"){
     if(!FocusExisting(title))MessageBox.Show(title+" is starting. Please wait a moment, then open it again to bring it forward.",title);
     return;
    }
@@ -123,7 +123,7 @@ static class Launcher {
     start.EnvironmentVariables["SAKURA_START_MODE"]=mode;
     if(key.Length>0) start.EnvironmentVariables["SAKURA_START_GEMINI_KEY"]=key;
     string logs=Path.Combine(project,"logs");Directory.CreateDirectory(logs);
-    using(var log=new StreamWriter(Path.Combine(logs,title.Replace(" ","-").ToLower()+"-launch.log"),true,Encoding.UTF8)) {
+    using(var log=new StreamWriter(Path.Combine(logs,title.Replace(" ","-").ToLower()+(title=="Sakura VTuber"?"-"+Process.GetCurrentProcess().Id:"")+"-launch.log"),true,Encoding.UTF8)) {
      log.AutoFlush=true;object sync=new object();
      using(var process=new Process()) {
       process.StartInfo=start;

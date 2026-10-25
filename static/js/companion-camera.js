@@ -45,6 +45,9 @@ export class CompanionCameraModes {
         try {
             if(mode==='objects') await this.objectCamera.start(deviceId);
             else {
+                // The tracking add-on keeps the companion's AI layers running:
+                // setVtuberTrackingMode only prepares the rig for tracked drive.
+                this.viewer?.setCompanionTracking(true);
                 this.viewer?.setVtuberTrackingMode(true);
                 this.avatarTracking.setFaceSource(faceSource);
                 await this.avatarTracking.start(deviceId, backend);
@@ -60,6 +63,7 @@ export class CompanionCameraModes {
         if(wasTracking){
             this.avatarTracking.stop();
             this.viewer?.setVtuberTrackingMode(false);
+            this.viewer?.setCompanionTracking(false);
         }
         this.mode='';
     }

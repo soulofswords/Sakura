@@ -70,8 +70,8 @@ class VoiceUploadTests(unittest.TestCase):
 
 class InstallerOriginTests(unittest.TestCase):
     def test_local_and_native_callers_are_allowed_others_are_not(self):
-        def guard(origin=None, site=None):
-            headers = {}
+        def guard(origin=None, site=None, host='127.0.0.1:8766'):
+            headers = {'host': host}
             if origin:
                 headers['origin'] = origin
             if site:
@@ -86,6 +86,9 @@ class InstallerOriginTests(unittest.TestCase):
         self.assertFalse(guard('https://accounts.google.com'))
         self.assertFalse(guard('null'))
         self.assertFalse(guard(site='cross-site'))
+        # DNS rebinding: the page keeps its own name in Host after the name resolves here.
+        self.assertFalse(guard(site='same-origin', host='evil.example:8766'))
+        self.assertFalse(guard(origin='http://evil.example', host='evil.example:8766'))
 
     def test_a_cross_origin_page_cannot_start_the_installer(self):
         installer = Mock()
@@ -96,6 +99,34 @@ class InstallerOriginTests(unittest.TestCase):
                                                          'sec-fetch-site': 'cross-site'})
         self.assertEqual(response.status_code, 403)
         installer.start.assert_not_called()
+
+    def test_a_cross_origin_page_cannot_supply_the_sdk_dlls(self):
+        cross_site = {'origin': 'http://evil.example', 'sec-fetch-site': 'cross-site'}
+        with patch('nvidia_ar_setup.import_sdk_archive') as importer:
+            response = TestClient(app.app).post('/api/tracking/nvidia-sdk/import',
+                                                files={'file': ('sdk.zip', b'PK\x03\x04', 'application/zip')},
+                                                headers=cross_site)
+        self.assertEqual(response.status_code, 403, response.text)
+        importer.assert_not_called()
+
+    def test_a_cross_origin_page_cannot_start_ar_tracking_or_import_models(self):
+        cross_site = {'origin': 'http://evil.example', 'sec-fetch-site': 'cross-site'}
+        with patch('nvidia_ar_tracker.tracker') as tracker:
+            response = TestClient(app.app).post('/api/tracking/nvidia-ar/start', headers=cross_site)
+        self.assertEqual(response.status_code, 403, response.text)
+        tracker.start.assert_not_called()
+        with patch('model_import.import_package') as importer:
+            response = TestClient(app.app).post('/api/models/import',
+                                                files=[('files', ('a.pmx', b'pmx', 'application/octet-stream'))],
+                                                headers=cross_site)
+        self.assertEqual(response.status_code, 403, response.text)
+        importer.assert_not_called()
+
+    def test_a_cross_origin_page_cannot_chat_with_the_local_ai(self):
+        response = TestClient(app.app).post('/api/chat', json={'text': 'hello'},
+                                            headers={'origin': 'http://evil.example',
+                                                     'sec-fetch-site': 'cross-site'})
+        self.assertEqual(response.status_code, 403, response.text)
 
 
 class ModelManagerOriginTests(unittest.TestCase):

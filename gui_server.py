@@ -16,9 +16,14 @@ def url():
 def select_port():
     global port
     opener = build_opener(ProxyHandler({}))
-    for candidate in range(8766, 8777):
+    from product import EDITION
+    from vtuber_instances import instance_index
+    separate=(EDITION=='vtuber' or os.environ.get('SAKURA_VTUBER_INSTANCE')=='1') and 'SAKURA_INSTANCE_INDEX' in os.environ
+    first=(8780 if EDITION=='vtuber' else 8830)+(instance_index()-1)*10 if separate else 8766
+    for candidate in range(first,first+8 if separate else 8777):
         address = f"http://{HOST}:{candidate}"
         try:
+            if separate:raise ValueError("Separate instance requires its own backend")
             with opener.open(address + "/api/identity", timeout=0.5) as response:
                 from product import EDITION, INSTALLATION_ID
                 identity=json.load(response)

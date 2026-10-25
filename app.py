@@ -45,6 +45,15 @@ from tts import speech_notice
 # Directories
 STATIC_DIR = BASE_DIR / "static"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+if EDITION=='vtuber' or os.environ.get('SAKURA_VTUBER_INSTANCE')=='1':
+    from vtuber_instances import instance_index
+    if instance_index()>1:
+        import shutil
+        instance_settings=BASE_DIR/f'desktop-profile-{instance_index()}'/'settings.json'
+        instance_settings.parent.mkdir(parents=True,exist_ok=True)
+        if not instance_settings.exists() and SETTINGS_FILE.exists():shutil.copy2(SETTINGS_FILE,instance_settings)
+        SETTINGS_FILE=instance_settings
+
 MODELS_DIR.mkdir(exist_ok=True)
 VOICES_DIR.mkdir(exist_ok=True)
 
@@ -108,6 +117,7 @@ def get_settings():
         "env_color": "#ff6ea7",
         "env_intensity": 1.0,
         "env_rgb_breathing": False,
+        "ui_theme": None,
         "preserve_configuration_on_reinstall": True,
     }
     if SETTINGS_FILE.exists():
@@ -356,6 +366,10 @@ async def dismiss_reminder(payload:dict):
 
 @app.middleware('http')
 async def tracking_only_guard(request, call_next):
+    # A visited website must not hold a conversation with the local AI and read the
+    # reply (CORS used to hand it every response) or start screen capture.
+    if request.url.path in ('/api/chat', '/api/screen-audio', '/api/assistant-tools/device') and not _started_locally(request):
+        return JSONResponse({'error': 'This feature can only be used from this computer.'}, 403)
     # Loading the local speech engine is shared by Chat Reader and voice
     # changer; it does not enable AI replies in the tracking-only product.
     if request.url.path=='/api/tts/kokoro':return await call_next(request)
@@ -455,8 +469,10 @@ async def download_nvidia_sdk():
     return {'ok':bool(opened),'url':CORE_DOWNLOAD_URL,'message':'Download opened in your browser. Sign in to your own NVIDIA account if requested. After it finishes, choose Import downloaded SDK ZIP. Download progress is shown in your browser.'}
 
 @app.post('/api/tracking/nvidia-sdk/import')
-async def import_nvidia_sdk(file: UploadFile = File(...)):
+async def import_nvidia_sdk(request: Request, file: UploadFile = File(...)):
     from nvidia_ar_setup import import_sdk_archive
+    if not _started_locally(request):
+        return JSONResponse({'error':'The NVIDIA SDK package can only be imported from this computer.'},403)
     try:
         result=await run_in_threadpool(import_sdk_archive,file.file,BASE_DIR/'optional'/'nvidia-ar')
         save_settings({'nvidia_ar_sdk_folder':result['folder']})
@@ -466,6 +482,23 @@ async def import_nvidia_sdk(file: UploadFile = File(...)):
     finally:
         await file.close()
 
+LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1')
+
+
+def _served_locally(request: Request):
+    """The GUI server listens on loopback only, so Host must name this machine.
+
+    A page reached through DNS rebinding keeps its own domain in Host even after the
+    name starts resolving to 127.0.0.1, and browsers omit Origin on same-origin GETs.
+    """
+    from urllib.parse import urlsplit
+    try:
+        host = (urlsplit('//' + str(request.headers.get('host') or '')).hostname or '').strip('[]')
+    except ValueError:
+        return False
+    return host in LOOPBACK_HOSTS
+
+
 def _started_locally(request: Request):
     """Allow same-origin and native-webview calls; refuse POSTs driven by another website.
 
@@ -473,16 +506,21 @@ def _started_locally(request: Request):
     executes, so the endpoints that launch installers have to check who is asking.
     """
     origin = str(request.headers.get('origin') or '').strip()
-    if not origin:
-        # No Origin means a non-browser caller (the desktop window or a local script),
-        # unless the browser itself reports the request as cross-site.
-        return str(request.headers.get('sec-fetch-site') or '').lower() != 'cross-site'
-    from urllib.parse import urlsplit
-    try:
-        host = (urlsplit(origin).hostname or '').strip('[]')
-    except ValueError:
+    if origin:
+        from urllib.parse import urlsplit
+        try:
+            host = (urlsplit(origin).hostname or '').strip('[]')
+        except ValueError:
+            return False
+        return host in LOOPBACK_HOSTS
+    site = str(request.headers.get('sec-fetch-site') or '').lower()
+    if site == 'cross-site':
         return False
-    return host in ('localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1')
+    # Browsers always send Sec-Fetch-Site; scripts and the phone relay do not. On a
+    # browser request, insist the Host header still points at this computer.
+    if site:
+        return _served_locally(request)
+    return True
 
 
 @app.post('/api/tracking/nvidia-sdk/install-features')
@@ -518,9 +556,11 @@ async def nvidia_ar_tracking_status():
     return tracker.snapshot()
 
 @app.post('/api/tracking/nvidia-ar/start')
-async def start_nvidia_ar_tracking():
+async def start_nvidia_ar_tracking(request: Request):
     from nvidia_ar_setup import sdk_status
     from nvidia_ar_tracker import tracker
+    if not _started_locally(request):
+        return JSONResponse({'error':'NVIDIA AR tracking can only be started from this computer.'},403)
     detected=await run_in_threadpool(sdk_status,get_settings().get('nvidia_ar_sdk_folder',''))
     if not detected.get('tracking_ready'):
         return JSONResponse({'error':detected.get('message','NVIDIA AR SDK is not ready.'),'sdk':detected},409)
@@ -621,7 +661,7 @@ async def configure_spout(payload: dict):
 @app.post('/api/spout/frame')
 async def spout_frame(request: Request, width: int, height: int):
     from spout_output import output
-    if not 1<=width<=1280 or not 1<=height<=1280:return JSONResponse({'error':'Invalid frame dimensions'},400)
+    if not 1<=width<=2560 or not 1<=height<=2560:return JSONResponse({'error':'Invalid frame dimensions'},400)
     expected=width*height*4;pixels=bytearray()
     async for chunk in request.stream():
         if len(pixels)+len(chunk)>expected:return JSONResponse({'error':'Frame exceeds expected size'},400)
@@ -750,7 +790,9 @@ async def speak_chat_reader(payload: dict):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # The window and local dev pages are loopback origins. A wildcard would let any
+    # visited website read settings, chats and the phone pairing code from this API.
+    allow_origin_regex=r'^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$',
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -892,7 +934,9 @@ async def assistant_device_action(payload:dict):
     except (OSError,ValueError,RuntimeError) as error:return JSONResponse({'error':str(error)},503)
 
 @app.post('/api/mobile/tracking-control')
-async def mobile_tracking_control(payload:dict):
+async def mobile_tracking_control(request: Request, payload:dict):
+    if not _started_locally(request):
+        return JSONResponse({'error':'Phone tracking can only be controlled from this computer.'},403)
     from mobile_link import link
     try:return link.control_tracking(payload)
     except ValueError as error:return JSONResponse({'error':str(error)},409)
@@ -914,24 +958,32 @@ async def mobile_link_toggle(request: Request, payload:dict):
     link.stop();return link.info()
 
 @app.post('/api/mobile/model')
-async def mobile_model_transfer(payload:dict):
+async def mobile_model_transfer(request: Request, payload:dict):
     from mobile_link import link
+    if not _started_locally(request):
+        return JSONResponse({'error':'Models can only be sent to the phone from this computer.'},403)
     try:return {'ok':True,'model':await run_in_threadpool(link.stage_model,payload.get('model',''))}
     except (ValueError,OSError) as error:return JSONResponse({'error':str(error)},400)
 
 @app.post('/api/mobile/poll')
-async def mobile_link_poll(payload:dict):
+async def mobile_link_poll(request: Request, payload:dict):
     from mobile_link import link
+    if not _started_locally(request):
+        return JSONResponse({'error':'The phone link can only be read from this computer.'},403)
     return link.poll(payload)
 
 @app.post('/api/mobile/transfer-status')
-async def mobile_transfer_status(payload:dict):
+async def mobile_transfer_status(request: Request, payload:dict):
     from mobile_link import link
+    if not _started_locally(request):
+        return JSONResponse({'error':'The phone transfer can only be updated from this computer.'},403)
     try:return link.transfer_result(str(payload.get('request_id','')),str(payload.get('status','')),str(payload.get('error','')))
     except ValueError as error:return JSONResponse({'error':str(error)},400)
 
 @app.get('/api/mobile/transfer-status')
-async def mobile_transfer_request_info():
+async def mobile_transfer_request_info(request: Request):
+    if not _started_locally(request):
+        return JSONResponse({'error':'The phone transfer can only be read from this computer.'},403)
     from mobile_link import link
     return {'enabled':link.enabled,'request':link.transfer_request}
 
@@ -1152,7 +1204,8 @@ async def collab_remove_import(token: str):
 # ── routes ─────────────────────────────────────────────────────
 @app.get("/")
 async def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    # A visited page must not frame the desktop UI and click its controls.
+    return FileResponse(str(STATIC_DIR / "index.html"), headers={'X-Frame-Options': 'SAMEORIGIN'})
 
 
 @app.get("/api/identity")
@@ -1168,6 +1221,16 @@ async def status():
         "provider": llm.provider if llm else "ollama",
         "stt": stt is not None,
     }
+
+
+from cursor_stream import install_cursor_stream
+install_cursor_stream(app)
+
+
+@app.get('/api/cursor')
+async def screen_cursor_position():
+    from screen_cursor import position
+    return position() or {}
 
 
 @app.post('/api/renderer/ready')
@@ -1414,8 +1477,10 @@ async def list_live2d_expressions(model: str):
 
 
 @app.post('/api/models/import')
-async def import_models(files: list[UploadFile] = File(...), model_format: str = Form('auto')):
+async def import_models(request: Request, files: list[UploadFile] = File(...), model_format: str = Form('auto')):
     from model_import import import_package, MAX_BYTES
+    if not _started_locally(request):
+        return JSONResponse({'error':'Model packages can only be imported from this computer.'}, 403)
     contents = []
     total = 0
     try:
@@ -1566,7 +1631,9 @@ async def test_tts_voice(payload: dict):
 
 
 @app.get("/api/settings")
-async def get_app_settings():
+async def get_app_settings(request: Request):
+    if not _started_locally(request):
+        return JSONResponse({'error': 'Settings can only be read from this computer.'}, 403)
     return public_settings(get_settings())
 
 
@@ -1590,6 +1657,8 @@ async def update_app_settings(request: Request, payload: dict):
         return JSONResponse({'error':'Choose Sir, Ma’am or No title.'},400)
     if 'avatar_presentation' in payload and payload['avatar_presentation'] not in ('auto','feminine','masculine','neutral'):
         return JSONResponse({'error':'Choose a valid avatar presentation.'},400)
+    if 'ui_theme' in payload and payload['ui_theme'] not in ('light','dark','system'):
+        return JSONResponse({'error':'Choose light, dark or system appearance.'},400)
     for field, limit in (('assistant_name', 80), ('vtuber_name',80), ('wake_word', 120)):
         if field in payload:
             if not isinstance(payload[field], str) or not payload[field].strip() or len(payload[field]) > limit:
@@ -2075,7 +2144,7 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
     from assistant_commands import run_command
     command_reply = resolved_reply
     if command_reply is None and not skip_retrieval:
-        command_reply = await run_in_threadpool(run_command, text, cfg.get('computer_control_enabled', False), cfg.get('assistant_name', 'Sakura')) if not payload.get('screen_reaction') else None
+        command_reply = await run_in_threadpool(run_command, text, phone_command_allowed(cfg, payload), cfg.get('assistant_name', 'Sakura')) if not payload.get('screen_reaction') else None
     if not command_reply and not skip_retrieval and not payload.get('screen_reaction'):
         from factual_grounding import gpu_memory_lookup
         command_reply = await run_in_threadpool(gpu_memory_lookup, text)
@@ -2228,6 +2297,11 @@ async def remove_chat_attachment(token:str):
     attachments.remove(token)
     return {'ok':True}
 
+
+def phone_command_allowed(cfg, payload):
+    """A remote phone may drive the PC only when that is separately enabled."""
+    return bool(cfg.get('computer_control_enabled', False) and
+        (not payload.get('phone') or cfg.get('phone_system_access_enabled', False)))
 
 @app.post("/api/chat")
 async def chat(payload: dict):
@@ -2449,7 +2523,8 @@ async def speech_to_text(audio: UploadFile = File(...)):
     # Save uploaded audio to temp file
     suffix = ".webm" if "webm" in (audio.content_type or "") else ".wav"
     tmp = AUDIO_DIR / f"stt_input_{uuid.uuid4().hex}{suffix}"
-    content = await audio.read()
+    content = await audio.read(20*1024*1024+1)
+    if len(content)>20*1024*1024:return JSONResponse({'error':'Audio upload must be under 20 MB.'},413)
     tmp.write_bytes(content)
 
     # Convert webm → wav if needed (using ffmpeg or soundfile)

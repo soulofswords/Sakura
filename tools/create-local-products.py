@@ -1,4 +1,5 @@
 """Refresh the owner's two local apps without installers or copying model libraries."""
+import filecmp
 import importlib.util
 import json
 import os
@@ -25,6 +26,9 @@ def main(edition=None):
             for path,name in builder.app_files():
                 relative=Path(name).relative_to('Sakura');target=destination/relative
                 if relative.parts[0]=='kokoro-assets':continue
+                # A refresh must not fail on a binary the running app or the
+                # camera driver still has mapped when it is already identical.
+                if target.is_file() and filecmp.cmp(path,target,shallow=False):continue
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target)
             shutil.copy2(stage/'index.html',destination/'static/index.html')
             shutil.copy2(stage/'product.json',destination/'product.json')
@@ -38,7 +42,7 @@ def main(edition=None):
                 (destination/'static/js/app.js').write_text(source,encoding='utf-8')
             # Only seed user settings once. Refreshes must preserve edits made
             # in either separate app since its first launch.
-            for name in ['settings.json','.gemini-key.bin']:
+            for name in ['settings.json']:
                 if edition=='vtuber' and name!='settings.json':continue
                 original=BASE/name;target=destination/name
                 if original.is_file() and not target.exists():shutil.copy2(original,target)

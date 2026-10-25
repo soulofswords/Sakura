@@ -1,4 +1,4 @@
-"""Avatar output through an installed OBS virtual camera driver."""
+"""Avatar output through Sakura's dedicated virtual-camera device."""
 import queue
 import time
 
@@ -17,15 +17,14 @@ def camera_frame(pixels, width, height):
 
 class VirtualCamera(SpoutOutput):
     def status(self):
-        return {**super().status(), 'device': getattr(self, 'device', 'OBS Virtual Camera')}
+        return {**super().status(), 'device': 'Sakura Virtual Camera'}
 
     def _run(self):
         camera = None
         try:
             import numpy as np
-            import pyvirtualcam
-            camera = pyvirtualcam.Camera(width=1280, height=720, fps=30,
-                                         fmt=pyvirtualcam.PixelFormat.RGB, backend='obs')
+            from sakura_camera_native import NativeCamera
+            camera = NativeCamera(width=1280, height=720, fps=30)
             self.device = camera.device
             self.enabled = True
             self.ready.set()
@@ -40,10 +39,9 @@ class VirtualCamera(SpoutOutput):
                         break
                 camera.send(latest)
                 self.sent += 1
-                camera.sleep_until_next_frame()
+                self.stop_event.wait(1/30)
         except Exception as error:
-            self.error = ('Virtual camera could not start. Install OBS Studio with its virtual camera driver, '
-                          'and stop Virtual Camera in OBS before enabling it in Sakura. ' + str(error))
+            self.error = 'Sakura Virtual Camera could not start. ' + str(error)
         finally:
             if camera:
                 camera.close()

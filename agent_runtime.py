@@ -105,7 +105,7 @@ IMAGE_CREATION_CAPABILITY=re.compile(r'(?:image.{0,24}(?:generat|creat|synthes)|
 # can gather context in one pass. Anything that changes a file, account or process
 # still stops for review, and MCP tools never auto-run because a third-party
 # server's read/write split is not knowable from its tool name.
-AUTO_RUN_TOOLS={'files.list','files.read','web.search','web.fetch','calendar.events.list','linkedin.profile'}
+AUTO_RUN_TOOLS={'files.list','files.read','calendar.events.list','linkedin.profile'}
 
 MAX_STORE_BYTES=2_000_000
 MAX_STORE_TEXT=16_000

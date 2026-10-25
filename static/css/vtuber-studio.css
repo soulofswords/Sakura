@@ -1,0 +1,137 @@
+/* VTube Studio-inspired workspace. Applied only while Sakura is tracking-only. */
+body.studio-ui-active {
+ --studio-blue:#168fd5;--studio-ink:#27364b;--studio-muted:#66768d;
+ --studio-line:#dfe6ef;--studio-card:#fff;--studio-wash:#f1f5fa;
+ --text-primary:#27364b;--text-muted:#66768d;--panel-border:#dfe6ef;
+ --sakura-pink:#168fd5;--sakura-glow:rgba(22,143,213,.16);
+}
+#vtuber-studio[hidden],#studio-panel[hidden],#studio-panel [data-studio-content][hidden]{display:none!important}
+#vtuber-studio {font:14px/1.5 'Segoe UI',system-ui,sans-serif;color:var(--studio-ink)}
+body.studio-ui-active #top-bar {height:42px!important;min-height:42px!important;display:flex!important;justify-content:space-between;padding:0 0 0 16px!important;gap:8px!important;background:#fff!important;border-bottom:1px solid #dce5ef!important;backdrop-filter:none!important;box-shadow:0 1px 6px #1118270b;z-index:1250}
+body.studio-ui-active #top-bar .brand {gap:9px;color:#33465e}
+body.studio-ui-active #brand-title {font-size:14px;color:#33465e}
+body.studio-ui-active #top-bar .badge {background:#e9f5fc;color:#0877b6;border:0;font-size:10px;letter-spacing:.08em;padding:3px 8px}
+body.studio-ui-active #app-brand-logo{width:23px!important;height:23px!important}
+body.studio-ui-active #companion-toolbar,body.studio-ui-active #companion-toolbar-toggle,body.studio-ui-active #agent-mode-toggle {display:none!important}
+body.studio-ui-active #top-bar .win-controls{align-self:stretch;gap:0}
+body.studio-ui-active #top-bar .win-btn {height:41px;width:44px;border:0;border-radius:0;background:transparent;color:#4b596d}
+body.studio-ui-active #top-bar .win-btn:hover{background:#eaf0f6}
+body.studio-ui-active #top-bar .win-btn.close:hover{background:#d94f64;color:white}
+#studio-dock {position:fixed;left:18px;top:78px;bottom:86px;display:flex;flex-direction:column;gap:14px;z-index:1210;overflow:visible;pointer-events:none}
+#studio-dock .studio-dock-button {pointer-events:auto;position:relative;width:52px;height:52px;flex:0 0 52px;padding:13px;border-radius:50%;border:1px solid #ffffff78;background:var(--dock-tint,#e4f4fd);color:var(--dock-ink,#3184bb);box-shadow:0 3px 12px #07132220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .13s,box-shadow .13s}
+#studio-dock .studio-dock-button:hover{transform:translateX(3px);box-shadow:0 5px 15px #07132230}
+#studio-dock .studio-dock-button[aria-pressed="true"]{background:#fff;color:#168fd5;outline:3px solid #168fd56b;outline-offset:2px}
+#studio-dock .studio-dock-button::after{content:attr(data-label);position:absolute;left:64px;top:50%;transform:translateY(-50%);background:#fff;color:#27364b;padding:7px 12px;border-radius:8px;box-shadow:0 3px 14px #07132224;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;font-size:13px;font-weight:600}
+#studio-dock .studio-dock-button:hover::after,#studio-dock .studio-dock-button:focus-visible::after{opacity:1;visibility:visible}
+#vtuber-studio svg {width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+#studio-dock .studio-lock{margin-top:4px;--dock-tint:#fff0b8;--dock-ink:#9c7a16}
+#studio-dock .studio-hide{margin-top:auto;--dock-tint:#e8edf7;--dock-ink:#61718c}
+#studio-lock-label{position:fixed;left:86px;top:84px;z-index:1209;background:#ffffffed;color:#64738a;padding:7px 13px;border:1px solid #e3e9f2;border-radius:9px;font-size:12px;pointer-events:none}
+#studio-panel{position:fixed;right:20px;top:62px;bottom:60px;width:min(410px,calc(100vw - 112px));z-index:1220;display:flex;flex-direction:column;background:#edf2f8;border:1px solid #dfe7f0;border-radius:16px;box-shadow:0 10px 35px #07132230;overflow:hidden;color:#27364b}
+.studio-panel-header {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 19px 14px;border-bottom:1px solid #dfe6ef;background:white;flex:none}
+.studio-panel-header small {font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#168fd5;font-weight:700}
+.studio-panel-header h2 {font-size:21px;font-weight:650;color:#27364b;margin:3px 0 0;line-height:1.25}
+#studio-panel-close{width:30px;height:30px;padding:0;border:0;background:#eef3f8;border-radius:50%;font-size:21px;color:#64748b;cursor:pointer}
+.studio-panel-body {overflow:auto;padding:14px;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#b9d2e4 transparent}
+.studio-card {padding:16px;margin-bottom:12px;background:#fff;border:1px solid #e0e7f0;border-radius:12px}
+.studio-card h3{font-size:15px;color:#344760;margin:0 0 12px;font-weight:650}
+.studio-card p,.studio-help {font-size:12px;color:#6d7b90;line-height:1.55;margin:10px 0}
+.studio-actions{display:flex;gap:8px;flex-wrap:wrap}
+.studio-card label {font-size:12px;color:#526279;display:block;margin:9px 0 5px}
+.studio-card .custom-dropdown{width:100%;margin:0 0 10px}
+#vtuber-studio button:not(.studio-dock-button):not(#studio-panel-close),body.studio-ui-active .studio-docked button {background:#e9f4fb;color:#147caf;border:1px solid #d3e5f1;border-radius:8px;padding:8px 12px;font:600 12px/1.35 'Segoe UI',sans-serif;cursor:pointer;box-shadow:none}
+#vtuber-studio button:hover:not(.studio-dock-button),body.studio-ui-active .studio-docked button:hover {background:#d7ecf9}
+#vtuber-studio .studio-primary,body.studio-ui-active .studio-docked .accent-btn,body.studio-ui-active .studio-docked #tracking-start,body.studio-ui-active .studio-docked #settings-start-tracking {background:#168fd5!important;color:#fff!important;border-color:#168fd5!important}
+#vtuber-studio button:disabled,body.studio-ui-active .studio-docked button:disabled {opacity:.5;cursor:not-allowed}
+body.studio-ui-active input,body.studio-ui-active select,body.studio-ui-active textarea{accent-color:#168fd5}
+#vtuber-studio input:not([type="checkbox"]):not([type="range"]):not([type="color"]),#vtuber-studio select {border:1px solid #d8e3ee;background:#f0f4fa;color:#35475e;border-radius:8px;padding:9px 10px;max-width:100%;font:13px 'Segoe UI',sans-serif}
+#vtuber-studio input[type="search"]{width:100%;margin:0 0 12px}
+#vtuber-studio .dropdown-trigger{background:#f0f4fa!important;color:#35475e!important;border-color:#d8e3ee!important;width:100%;padding:10px 12px!important;justify-content:space-between}
+#vtuber-studio .dropdown-menu{background:#fff!important;color:#27364b!important;border-color:#dfe7f0!important;box-shadow:0 8px 22px #12243e24;z-index:1400}
+#vtuber-studio .dropdown-item{color:#344760!important;background:#fff!important;border:0!important;text-align:left}
+#vtuber-studio .dropdown-item:hover{background:#e9f4fb!important}
+#vtuber-studio .dropdown-group-heading{color:#7e8c9f;background:#f3f6fa}
+#vtuber-studio .model-size-control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#64748b;margin:12px 0}
+#vtuber-studio .model-size-control input{min-width:100px;flex:1}
+#studio-statusbar{position:fixed;left:90px;right:20px;bottom:14px;z-index:1210;display:flex;align-items:center;gap:9px;pointer-events:none}
+#studio-statusbar .studio-status-text{color:#53647b;background:#fffffff0;border:1px solid #e0e7f0;border-radius:20px;padding:7px 13px;font-size:12px;max-width:min(570px,52vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#studio-statusbar button{pointer-events:auto;background:#fffffff0!important;color:#1681ba!important;border-radius:20px!important;padding:7px 12px!important}
+#studio-show-ui {display:none;position:fixed;left:16px;top:58px;z-index:1240}
+body.studio-ui-active.overlay-ui-hidden #studio-dock,body.studio-ui-active.overlay-ui-hidden #studio-panel,body.studio-ui-active.overlay-ui-hidden #studio-lock-label,body.studio-ui-active.overlay-ui-hidden #studio-statusbar,body.studio-ui-active.overlay-ui-hidden .studio-docked{display:none!important}
+body.studio-ui-active.overlay-ui-hidden #studio-show-ui{display:block}
+body.studio-ui-active #morph-overlay{display:none!important}
+body.studio-ui-active .studio-docked {position:fixed!important;inset:62px 20px 60px auto!important;width:min(410px,calc(100vw - 112px))!important;padding:0!important;background:transparent!important;align-items:stretch!important;justify-content:flex-start!important;pointer-events:none;z-index:1220!important;backdrop-filter:none!important}
+body.studio-ui-active .studio-docked .modal-card {width:100%!important;max-width:none!important;max-height:none!important;height:100%!important;margin:0!important;border-radius:16px!important;border:1px solid #dfe7f0!important;background:#fff!important;color:#27364b!important;pointer-events:auto;box-shadow:0 10px 35px #07132230!important;display:flex;flex-direction:column;overflow:hidden}
+body.studio-ui-active .studio-docked .modal-header{background:#fff;padding:18px;border-bottom:1px solid #e2e8f0;flex:none}
+body.studio-ui-active .studio-docked .modal-header h3{color:#31455e;font-size:19px;line-height:1.3}
+body.studio-ui-active .studio-docked .close-btn{border:0;background:#eef3f8;color:#74839a;border-radius:50%;width:29px;height:29px;padding:0}
+body.studio-ui-active .studio-docked .modal-body,body.studio-ui-active .studio-docked .tracking-options{padding:16px;background:#f0f4f9;overflow:auto;min-height:0;flex:1;gap:12px;scrollbar-width:thin;scrollbar-color:#b9d2e4 transparent}
+body.studio-ui-active .studio-docked .modal-tabs {background:#fff;border-bottom:1px solid #dfe7f0;display:flex;flex-wrap:nowrap;overflow-x:auto;flex:none;padding:5px 8px;gap:3px}
+body.studio-ui-active .studio-docked .tab-btn {background:transparent!important;color:#73839a!important;border:0!important;border-bottom:2px solid transparent!important;border-radius:0!important;min-width:57px;flex:1;font-size:11px;padding:9px 6px!important}
+body.studio-ui-active .studio-docked .tab-btn.active{color:#168fd5!important;border-bottom-color:#168fd5!important;background:#eff8fe!important}
+body.studio-ui-active .studio-docked .setting-group,body.studio-ui-active .studio-docked .expression-card {background:#fff;border:1px solid #e0e7f0;padding:13px;border-radius:10px;color:#344760;margin-bottom:10px;min-width:0}
+body.studio-ui-active .studio-docked .setting-group label,body.studio-ui-active .studio-docked .expression-card-name,body.studio-ui-active .studio-docked label,body.studio-ui-active .studio-docked legend{color:#53647b;font-size:12px}
+body.studio-ui-active .studio-docked p,body.studio-ui-active .studio-docked .modal-hint,body.studio-ui-active .studio-docked small {color:#6b7b91;font-size:12px;line-height:1.55}
+body.studio-ui-active .studio-docked input:not([type="checkbox"]):not([type="range"]):not([type="color"]),body.studio-ui-active .studio-docked select,body.studio-ui-active .studio-docked textarea{background:#edf2f9!important;color:#344760!important;border:1px solid #d5e0ed!important;border-radius:8px;padding:8px 10px;font-size:13px;min-width:0;max-width:100%}
+body.studio-ui-active .studio-docked input[type="range"]{width:100%}
+body.studio-ui-active .studio-docked a{color:#137bb4!important;text-decoration:underline;text-underline-offset:3px}
+body.studio-ui-active .studio-docked .save-actions{display:flex;flex-wrap:wrap;gap:7px}
+body.studio-ui-active .studio-docked .model-settings-zoom{background:#fff;color:#64748b;border-bottom:1px solid #e2e8f0;padding:12px;flex:none}
+body.studio-ui-active .studio-docked .expression-shortcut{background:#e9f4fb;color:#1681ba;border:1px solid #d4e8f5;border-radius:7px;padding:3px 7px}
+body.studio-ui-active .studio-docked .expression-list{max-height:none;overflow:visible}
+body.studio-ui-active .studio-docked .voice-card{background:#fff;color:#344760;border-color:#dfe7f0}
+body.studio-ui-active .studio-docked .voice-card.active{background:#e8f5fd;border-color:#168fd5}
+body.studio-ui-active .studio-docked .camera-phone-row select{flex:1 1 150px}
+body.studio-ui-active .studio-docked .tracking-options>p:first-child{padding:12px;background:#eaf5fc;border-radius:10px;color:#53768f}
+body.studio-ui-active #vtuber-collab-dialog {background:#fff;color:#344760;border-color:#dfe7f0;border-radius:16px}
+body.studio-ui-active #vtuber-collab-dialog input{background:#edf2f9;color:#344760;border:1px solid #d5e0ed}
+.studio-background-colors{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#vtuber-studio .studio-background-swatch{width:34px;height:34px;border-radius:50%!important;padding:0!important;background:var(--swatch)!important;border:2px solid #dfe7f0!important}
+#studio-stage-backdrop {position:fixed;inset:42px 0 0;z-index:0;background-position:center;background-size:cover;pointer-events:none;display:none}
+body.studio-ui-active.studio-image-background #studio-stage-backdrop{display:block}
+body.studio-ui-active.studio-image-background #viewer{background:transparent!important}
+body.studio-ui-active.studio-model-locked #viewer canvas{cursor:default!important}
+body.studio-ui-active .studio-docked [hidden]{display:none!important}
+@media(max-height:710px){#studio-dock{top:62px;gap:8px;bottom:70px}#studio-dock .studio-dock-button{width:43px;height:43px;flex-basis:43px;padding:10px}#studio-lock-label{top:67px;left:78px}#studio-panel,body.studio-ui-active .studio-docked{top:55px!important;bottom:55px!important}#studio-dock svg{width:21px;height:21px}}
+@media(max-width:650px){#studio-panel,body.studio-ui-active .studio-docked{right:10px!important;width:calc(100vw - 87px)!important}#studio-dock{left:10px}#studio-dock .studio-dock-button{width:44px;height:44px;flex-basis:44px;padding:10px}#studio-lock-label{display:none}#studio-statusbar{left:65px;right:10px;flex-wrap:wrap;gap:5px}#studio-statusbar .studio-status-text{max-width:100%;flex-basis:100%;font-size:11px}#studio-statusbar button{font-size:11px!important;padding:5px 10px!important}}
+@media(prefers-reduced-motion:reduce){#studio-dock .studio-dock-button{transition:none}}
+@media(max-height:540px){#studio-dock{overflow-y:auto;overflow-x:hidden;top:55px;bottom:75px;width:60px;gap:6px;scrollbar-width:thin}#studio-dock .studio-dock-button{width:36px;height:36px;flex-basis:36px;padding:8px}#studio-dock .studio-dock-button::after{display:none}}
+body.studio-ui-active .studio-docked .tracking-options>p:first-of-type{padding:12px;background:#eaf5fc;border-radius:10px;color:#53768f}
+#studio-model-results{padding-bottom:10px}
+body.studio-ui-active #top-bar{flex-wrap:nowrap!important}
+body.studio-ui-active #top-bar .brand{flex:1 1 auto!important;min-width:0;overflow:hidden;white-space:nowrap}
+body.studio-ui-active #top-bar .brand .logo{display:flex;width:23px;min-width:23px;height:26px;overflow:hidden;align-items:center}
+body.studio-ui-active #top-bar .brand .title{overflow:hidden;text-overflow:ellipsis;text-shadow:none}
+body.studio-ui-active #top-bar .win-controls{flex:0 0 auto!important;align-self:center!important}
+#vtuber-studio .dropdown-trigger{max-width:none!important}
+#vtuber-studio .dropdown-label{max-width:none;flex:1;min-width:0}
+#vtuber-studio fieldset.setting-group{border:1px solid #dfe7f0;background:#fff;border-radius:12px;padding:15px;margin:0 0 12px;min-width:0}
+#vtuber-studio fieldset.setting-group legend{padding:0 5px;color:#526279;font-weight:600;font-size:13px}
+#vtuber-studio fieldset.setting-group p{font-size:12px;color:#6d7b90;line-height:1.6}
+#vtuber-studio fieldset.setting-group label{color:#526279!important;font-size:13px}
+#vtuber-studio fieldset.setting-group .hint{color:#6d7b90!important}
+#vtuber-studio input[type="color"]{width:100%;height:40px;padding:3px;border:1px solid #dfe7f0;border-radius:8px}
+#studio-expression-search{display:none}
+body.studio-ui-active #studio-expression-search{display:block}
+@media(max-width:370px){body.studio-ui-active #top-bar .badge{display:none}}
+body.studio-ui-active .studio-docked {height:auto!important;min-height:0!important}
+body.studio-ui-active .studio-docked .settings-tabs{background:#fff;border-bottom:1px solid #dfe7f0;display:flex;flex-wrap:nowrap;overflow-x:auto;flex:none;padding:5px 8px;gap:3px}
+body.studio-ui-active .studio-docked .tab-content.active{overflow-y:auto;min-height:0;flex:1;scrollbar-width:thin;scrollbar-color:#b9d2e4 transparent}
+body.studio-ui-active .studio-docked #tracking-hands-enabled{background:#e9f4fb!important;color:#147caf!important;border:1px solid #d3e5f1!important}
+body.studio-ui-active .studio-docked #tracking-hands-enabled[aria-pressed="true"]{background:#168fd5!important;color:#fff!important}
+body.studio-ui-active .studio-docked .tab-btn[data-tab="ai"],body.studio-ui-active .studio-docked .tab-btn[data-tab="assistant"],body.studio-ui-active .studio-docked #system-tools,body.studio-ui-active .studio-ai-only{display:none!important}
+body.studio-ui-active .studio-docked button{font-size:13px}
+body.studio-ui-active .studio-docked .setting-group label,body.studio-ui-active .studio-docked label{font-size:13px}
+/* Keep the capture background picker compact instead of inheriting full-width fields. */
+#vtuber-studio #obs-background-dial{display:grid;grid-template-columns:minmax(0,176px) minmax(70px,1fr);align-items:center;gap:14px;margin:12px 0}
+#vtuber-studio #obs-background-dial .model-color-dial{width:100%;height:auto;aspect-ratio:1;max-width:176px;display:block}
+#vtuber-studio #obs-background-dial .model-color-rgb{display:flex;flex-direction:column;gap:8px;min-width:0}
+#vtuber-studio #obs-background-dial .model-color-rgb label{display:flex;align-items:center;gap:7px;margin:0}
+#vtuber-studio #obs-background-dial .model-color-rgb input{width:100%;min-width:0;height:30px;padding:4px 6px}
+#vtuber-studio #obs-background-color{width:100%;height:30px;padding:3px;border-radius:6px;box-shadow:none}
+#vtuber-studio #obs-background-color::-webkit-color-swatch{border:0;border-radius:3px}
+#vtuber-studio #obs-background-color::-moz-color-swatch{border:0;border-radius:3px}
+body.studio-ui-active #expression-modal .companion-part-edit-mode{display:flex!important;flex-direction:column;gap:8px;margin:12px 0;font-weight:600}
+body.studio-ui-active #model-part-edit-mode{width:100%}
+body.studio-ui-active #expression-modal.model-edit-transparency :is(label[for="model-color"],#model-color,#model-color-dial,label[for="model-color-strength"],#model-color-strength){display:none!important}
+body.studio-ui-active #expression-modal:not(.model-edit-transparency) :is(label[for="model-color-opacity"],#model-color-opacity,#model-color-opacity+.hint){display:none!important}

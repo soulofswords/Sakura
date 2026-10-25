@@ -3,7 +3,7 @@ const ctx={innerWidth:1200,innerHeight:800,devicePixelRatio:1};
 vm.runInNewContext(fs.readFileSync('static/js/render-budget.js','utf8').replace('export function','function'),ctx);
 vm.runInNewContext(fs.readFileSync('static/js/live2d-viewer.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export default class Live2DViewer','class Live2DViewer')+'\nthis.Live=Live2DViewer;',ctx);
 const v=Object.create(ctx.Live.prototype);let scale,anchor,position;
-v.owner={camera:{zoom:1},quality:'balanced',fullModelView:true};v.pan={x:0,y:0};
+v.owner={camera:{zoom:1},quality:'balanced',fullModelView:true,container:{}};v.pan={x:0,y:0};
 v.avatar={internalModel:{originalWidth:600,originalHeight:1800},scale:{set(x){scale=x;}},anchor:{set(x,y){anchor=[x,y];}},position:{set(x,y){position=[x,y];}}};
 v.app={screen:{width:1200,height:800},renderer:{resolution:1.25,resize(w,h){v.app.screen={width:w,height:h};}}};
 v.fit();const full=scale;assert.ok(1800*scale<=800);assert.deepEqual(anchor,[.5,.5]);

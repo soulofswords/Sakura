@@ -14,12 +14,15 @@ final class MobileModels {
  }
  static String read(File file)throws Exception{try(InputStream in=new FileInputStream(file);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1){out.write(b,0,n);if(out.size()>1000000)throw new IOException("Metadata too large");}return out.toString("UTF-8");}}
  static void remove(File file){if(file.isDirectory()){File[] children=file.listFiles();if(children!=null)for(File child:children)remove(child);}file.delete();}
- static JSONObject receive(String base,String token,JSONObject metadata,File root)throws Exception{
+ static JSONObject receive(String base,String token,String pin,JSONObject metadata,File root)throws Exception{
   String id=metadata.getString("id"),digest=metadata.getString("sha256");if(!id.matches("[a-f0-9]{32}")||!digest.matches("[a-f0-9]{64}"))throw new IOException("Invalid transfer metadata");
   root.mkdirs();File stage=new File(root,"incoming-"+UUID.randomUUID()),archive=File.createTempFile("transfer-",".zip",root);stage.mkdirs();
   HttpURLConnection connection=(HttpURLConnection)new URL(base+"/model/package/"+id).openConnection();connection.setInstanceFollowRedirects(false);connection.setRequestProperty("Authorization","Bearer "+token);connection.setConnectTimeout(10000);connection.setReadTimeout(120000);
+  if(connection instanceof javax.net.ssl.HttpsURLConnection){javax.net.ssl.HttpsURLConnection secure=(javax.net.ssl.HttpsURLConnection)connection;secure.setSSLSocketFactory(PcTls.factory(pin));secure.setHostnameVerifier(PcTls.verifier());}
   try{
-   if(connection.getResponseCode()!=200)throw new IOException("PC model transfer is no longer available. Send it again.");
+   int status=connection.getResponseCode();
+   if(status!=200)throw new IOException("PC model transfer is no longer available. Send it again.");
+   if(!pin.equals(PcTls.presented(connection)))throw new IOException("The PC's certificate changed during the model transfer.");
    MessageDigest sha=MessageDigest.getInstance("SHA-256");long bytes=0;
    try(InputStream in=connection.getInputStream();OutputStream out=new FileOutputStream(archive)){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1){bytes+=n;if(bytes>500000000)throw new IOException("Transfer exceeds 500 MB");sha.update(b,0,n);out.write(b,0,n);}}
    StringBuilder actual=new StringBuilder();for(byte value:sha.digest())actual.append(String.format(Locale.ROOT,"%02x",value&255));if(bytes!=metadata.getLong("bytes")||!actual.toString().equals(digest))throw new IOException("Model checksum mismatch. Send it again.");

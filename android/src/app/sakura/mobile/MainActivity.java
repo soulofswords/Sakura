@@ -26,7 +26,7 @@ public class MainActivity extends Activity {
  private String wakeState(){try{android.content.SharedPreferences p=getSharedPreferences("paired-pcs",0);return new JSONObject().put("download_active",WakeAssets.downloading).put("download_status",WakeAssets.downloadStatus).put("download_bytes",new File(getCacheDir(),"wake-model.download").length()).put("installed",WakeAssets.ready(this)).put("enabled",WakeService.live!=null&&!WakeService.live.stopped).put("phrase",p.getString("wake-phrase","hey sakura")).put("status",p.getString("wake-status","Wake phrase off")).toString();}catch(Exception error){return "{}";}}
  private void startWake(String id){try{if(!phoneForeground)throw new Exception("Open Sakura before enabling the wake microphone.");if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new Exception("Microphone permission is required.");if(!getSystemService(android.app.NotificationManager.class).areNotificationsEnabled())throw new Exception("Enable Sakura notifications in Android settings so the wake listener has a visible Stop control.");microphone.stop();WakeService.manual=false;startForegroundService(new Intent(this,WakeService.class).setAction("START"));web.postDelayed(()->new Bridge().complete(id,wakeState()),300);}catch(Exception error){try{new Bridge().complete(id,new JSONObject().put("error",error.getMessage()).toString());}catch(Exception ignored){}}}
 
- private PhoneMicrophone microphone;private boolean modelFullscreen;private int microphoneGeneration;private boolean dictationPending;
+ private PhoneMicrophone microphone;private boolean modelFullscreen;private int microphoneGeneration;private boolean dictationPending;private String modelImportJob;
  void microphoneEvent(boolean on,String message,String text){if(!on&&!dictationPending)WakeService.pauseManual(false);if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraMicrophone?.("+on+","+JSONObject.quote(message)+","+(text==null?"null":JSONObject.quote(text))+")",null));}
  private void fullscreen(boolean enabled){modelFullscreen=enabled;android.view.View decor=getWindow().getDecorView();if(android.os.Build.VERSION.SDK_INT>=30){getWindow().setDecorFitsSystemWindows(!enabled);android.view.WindowInsetsController controller=decor.getWindowInsetsController();if(controller!=null){controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);if(enabled)controller.hide(android.view.WindowInsets.Type.systemBars());else controller.show(android.view.WindowInsets.Type.systemBars());}}else decor.setSystemUiVisibility(enabled?android.view.View.SYSTEM_UI_FLAG_FULLSCREEN|android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE:android.view.View.SYSTEM_UI_FLAG_VISIBLE);}
  @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus&&modelFullscreen)fullscreen(true);}
@@ -35,7 +35,9 @@ public class MainActivity extends Activity {
  void callState(boolean active){if(active&&microphone!=null)runOnUiThread(()->{microphone.stop();microphone.state(false,"Call in progress · microphone off");});if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraCallState?.("+active+")",null));}
  void phoneNotice(String text){if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraPhoneNotice?.("+JSONObject.quote(text)+")",null));}
  void requestCall(String person){if(localAvailable&&calls!=null)calls.request(person);}
- private WebView web; private String base="",token=""; private PermissionRequest cameraRequest;
+ private WebView web; private volatile String base="",token="",pin="",lastFingerprint=""; private PermissionRequest cameraRequest;
+ private PhoneTrackingSender trackingSender;
+ private synchronized void stopTrackingSender(){if(trackingSender!=null){trackingSender.close();trackingSender=null;}}
  @Override public void onCreate(Bundle state){
   super.onCreate(state);getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);current=new java.lang.ref.WeakReference<>(this); web=new WebView(this);setContentView(web);if(localAvailable){calls=new CallController(this);locations=new PhoneLocation(this);microphone=new PhoneMicrophone(this);}
   web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);
@@ -70,6 +72,20 @@ public class MainActivity extends Activity {
  private void grantCamera(){if(cameraRequest!=null){cameraRequest.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});cameraRequest=null;}}
  @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==7){wakePermissionPending=false;String id=wakePermissionId;wakePermissionId=null;if(id!=null)startWake(id);return;}if(code==6){if(microphone!=null)microphone.permissionResult();return;}if(code==5){if(locations!=null)locations.permissionsResult();return;}if(code==3){if(calls!=null)calls.permissions();return;}if(code==1&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)grantCamera();else if(cameraRequest!=null){cameraRequest.deny();cameraRequest=null;}}
  class Bridge {
+  @JavascriptInterface public void submitTrackingFrame(String body){
+   if(!phoneForeground||body.length()>180000||base.isEmpty()||token.isEmpty())return;
+   synchronized(MainActivity.this){if(trackingSender==null)trackingSender=new PhoneTrackingSender(frame->{
+    JSONObject result=new JSONObject(call("POST","/frame",frame));if(result.has("error"))throw new IOException(result.optString("error"));
+   },(fps,dropped,ms,error)->{if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraTrackingTransport?.("+fps+","+dropped+","+ms+","+JSONObject.quote(error)+")",null));});trackingSender.submit(body);}
+  }
+  @JavascriptInterface public void stopTrackingFrames(){stopTrackingSender();}
+  @JavascriptInterface public void importPhoneModel(String id){runOnUiThread(()->{
+   if(modelImportJob!=null){complete(id,error(new Exception("A model picker is already open.")));return;}
+   modelImportJob=id;
+   try{Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);picker.addCategory(Intent.CATEGORY_OPENABLE);picker.setType("*/*");startActivityForResult(picker,71);}
+   catch(Exception e){modelImportJob=null;complete(id,error(e));}
+  });}
+  @JavascriptInterface public boolean systemDarkAppearance(){return (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;}
   private void complete(String id,String result){web.post(()->web.evaluateJavascript("window.sakuraNativeReply?.("+JSONObject.quote(id)+","+result+")",null));}
   @JavascriptInterface public String wakeState(){return MainActivity.this.wakeState();}
   @JavascriptInterface public void installWakePack(String id){new Thread(()->{try{if(WakeAssets.downloading)throw new Exception("A wake pack download is already running.");WakeAssets.downloading=true;WakeAssets.install(MainActivity.this,message->{WakeAssets.downloadStatus=message;});WakeAssets.downloadStatus="Wake pack ready";complete(id,MainActivity.this.wakeState());}catch(Exception error){WakeAssets.downloadStatus=error.getMessage();complete(id,error(error));}finally{WakeAssets.downloading=false;}}).start();}
@@ -135,7 +151,7 @@ public class MainActivity extends Activity {
    if(!localAvailable)throw new Exception("Local mode unavailable.");JSONObject state=new JSONObject(call("GET","/state","{}")),transfer=state.optJSONObject("transfer_request");
    if(transfer==null||!transfer.optString("id").equals(requestId)||!transfer.optString("status").equals("ready"))throw new Exception("The requested transfer is not ready.");
    JSONObject model=transfer.getJSONObject("model"),received;
-   try{received=MobileModels.receive(base,token,model,new File(getFilesDir(),"models"));}
+   try{received=MobileModels.receive(base,token,pin,model,new File(getFilesDir(),"models"));}
    catch(Exception failure){try{call("POST","/command",new JSONObject().put("type","model-result").put("request_id",requestId).put("model_id",model.getString("id")).put("status","failed").put("error",failure.getMessage()).toString());}catch(Exception ignored){}throw failure;}
    try{JSONObject ack=new JSONObject(call("POST","/command",new JSONObject().put("type","model-result").put("request_id",requestId).put("model_id",model.getString("id")).put("status","received").toString()));received.put("transfer_acknowledged",ack.optBoolean("ok"));}catch(Exception ignored){received.put("transfer_acknowledged",false);}
    complete(id,received.toString());
@@ -143,8 +159,9 @@ public class MainActivity extends Activity {
   @JavascriptInterface public void phoneState(String id){new Thread(()->{try{complete(id,call("GET","/state","{}"));}catch(Exception error){complete(id,error(error));}}).start();}
   @JavascriptInterface public void requestModelTransfer(String id){new Thread(()->{try{if(!localAvailable)throw new Exception("Local mode unavailable.");complete(id,call("POST","/command",new JSONObject().put("type","request-model").toString()));}catch(Exception error){complete(id,error(error));}}).start();}
   @JavascriptInterface public void cancelModelTransfer(String id,String requestId){new Thread(()->{try{if(!localAvailable)throw new Exception("Local mode unavailable.");complete(id,call("POST","/command",new JSONObject().put("type","cancel-model").put("request_id",requestId).toString()));}catch(Exception error){complete(id,error(error));}}).start();}
-  @JavascriptInterface public void connectAsync(String id,String address,String code){new Thread(()->complete(id,connect(address,code))).start();}
-  @JavascriptInterface public void reconnectAsync(String id,String address){new Thread(()->complete(id,reconnect(address))).start();}
+  @JavascriptInterface public void connectAsync(String id,String address,String code,String fingerprint){new Thread(()->complete(id,connect(address,code,fingerprint))).start();}
+  @JavascriptInterface public void reconnectAsync(String id,String computerId,String address){new Thread(()->complete(id,reconnect(computerId,address))).start();}
+  @JavascriptInterface public void discoverAsync(String id){new Thread(()->{try{complete(id,new JSONObject().put("computers",discover(1800)).toString());}catch(Exception error){complete(id,error(error));}},"SakuraDiscover").start();}
   private SharedPreferences prefs(){return getSharedPreferences("paired-pcs",MODE_PRIVATE);}
   private SecretKey pairingKey()throws Exception{
    KeyStore store=KeyStore.getInstance("AndroidKeyStore");store.load(null);
@@ -153,18 +170,109 @@ public class MainActivity extends Activity {
   }
   private String protect(String value)throws Exception{Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,pairingKey());return Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(cipher.doFinal(value.getBytes("UTF-8")),Base64.NO_WRAP);}
   private String unprotect(String value)throws Exception{String[] parts=value.split(":",2);Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,pairingKey(),new GCMParameterSpec(128,Base64.decode(parts[0],Base64.NO_WRAP)));return new String(cipher.doFinal(Base64.decode(parts[1],Base64.NO_WRAP)),"UTF-8");}
-  private void setAddress(String address)throws Exception{
-   URI uri=new URI(address);String host=uri.getHost();
-   if(!"http".equals(uri.getScheme())||host==null||!host.matches("[0-9.]+"))throw new Exception("Enter the PC's home-network IPv4 link.");
+  private void setAddress(String address,String fingerprint)throws Exception{
+   String text=address==null?"":address.trim();if(!text.contains("://"))text="https://"+text;
+   URI uri=new URI(text);String host=uri.getHost();
+   if(!"https".equals(uri.getScheme())||host==null||!host.matches("[0-9.]+"))throw new Exception("Enter the encrypted PC link shown in Sakura settings.");
    if(!InetAddress.getByName(host).isSiteLocalAddress())throw new Exception("Use a private home-network address.");
-   base="http://"+host+":"+(uri.getPort()>0?uri.getPort():8771);token="";
+   String candidate=fingerprint==null?"":fingerprint.toLowerCase(java.util.Locale.ROOT);
+   if(!candidate.isEmpty()&&!candidate.matches("[0-9a-f]{64}"))throw new Exception("That PC's certificate fingerprint is invalid.");
+   base="https://"+host+":"+(uri.getPort()>0?uri.getPort():8771);pin=candidate;token="";
   }
   @JavascriptInterface public String remembered(){return prefs().getString("computers","[]");}
-  @JavascriptInterface public String reconnect(String address){try{setAddress(address);JSONArray list=new JSONArray(remembered());for(int i=0;i<list.length();i++){JSONObject pc=list.getJSONObject(i);if(base.equals(pc.getString("address"))){token=unprotect(pc.getString("credential"));JSONObject state=new JSONObject(call("GET","/state","{}"));if(state.has("error")){token="";return state.toString();}return new JSONObject().put("name",pc.optString("name","Sakura")).put("edition",state.optString("edition","companion")).toString();}}throw new Exception("Pair this PC as a new device first.");}catch(Exception error){token="";return error(error);}}
-  @JavascriptInterface public String connect(String address,String code){
-   try{setAddress(address);String id=prefs().getString("device-id","");if(id.isEmpty()){id=java.util.UUID.randomUUID().toString();prefs().edit().putString("device-id",id).apply();}
-    String response=call("POST","/pair",new JSONObject().put("code",code).put("device_id",id).put("device_name",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL).toString());JSONObject data=new JSONObject(response);if(data.has("token")){token=data.getString("token");JSONArray old=new JSONArray(remembered()),list=new JSONArray();for(int i=0;i<old.length();i++)if(!base.equals(old.getJSONObject(i).optString("address")))list.put(old.getJSONObject(i));list.put(new JSONObject().put("address",base).put("name",data.optString("name","Sakura")).put("credential",protect(token)));prefs().edit().putString("computers",list.toString()).apply();}return response;
-   }catch(Exception error){return error(error);}
+  private JSONArray computers()throws Exception{return new JSONArray(remembered());}
+  private void saveComputers(JSONArray list){prefs().edit().putString("computers",list.toString()).apply();}
+  // Use the actual interface broadcast, including non-/24 home networks.
+  private JSONArray discover(long patienceMillis)throws Exception{
+   java.util.LinkedHashSet<String> targets=new java.util.LinkedHashSet<>();targets.add("255.255.255.255");
+   java.util.Enumeration<NetworkInterface> interfaces=NetworkInterface.getNetworkInterfaces();
+   while(interfaces.hasMoreElements()){NetworkInterface nic=interfaces.nextElement();
+    if(!nic.isUp()||nic.isLoopback())continue;
+    for(java.net.InterfaceAddress binding:nic.getInterfaceAddresses()){InetAddress address=binding.getAddress();
+     if(!(address instanceof Inet4Address)||address.isLoopbackAddress()||!address.isSiteLocalAddress())continue;
+     InetAddress broadcast=binding.getBroadcast();if(broadcast!=null)targets.add(broadcast.getHostAddress());}}
+   DatagramSocket socket=new DatagramSocket();socket.setBroadcast(true);
+   java.util.LinkedHashMap<String,JSONObject> found=new java.util.LinkedHashMap<>();
+   try{
+    byte[] magic="sakura-discover-v1".getBytes("UTF-8");
+    for(String target:targets)try{socket.send(new DatagramPacket(magic,magic.length,InetAddress.getByName(target),8770));}catch(IOException ignored){}
+    socket.setSoTimeout(300);byte[] buffer=new byte[2048];long deadline=System.currentTimeMillis()+patienceMillis;
+    while(System.currentTimeMillis()<deadline){
+     try{DatagramPacket packet=new DatagramPacket(buffer,buffer.length);socket.receive(packet);
+      JSONObject reply=new JSONObject(new String(packet.getData(),0,packet.getLength(),"UTF-8"));
+      if(!"sakura".equals(reply.optString("service")))continue;
+      String identity=reply.optString("id");
+      URI endpoint=new URI(reply.optString("https"));
+      if(identity.matches("[0-9a-f]{32}")&&reply.optString("fingerprint").matches("[0-9a-f]{64}")&&"https".equals(endpoint.getScheme())&&packet.getAddress().isSiteLocalAddress()
+         &&packet.getAddress().getHostAddress().equals(endpoint.getHost())&&endpoint.getPort()>0&&endpoint.getPort()<=65535
+         &&endpoint.getRawUserInfo()==null&&(endpoint.getPath()==null||endpoint.getPath().isEmpty())&&endpoint.getQuery()==null&&endpoint.getFragment()==null)found.put(identity,reply);
+     }catch(SocketTimeoutException slow){}catch(Exception ignored){}
+    }
+   }finally{socket.close();}
+   JSONArray list=new JSONArray();for(JSONObject reply:found.values())list.put(reply);return list;
+  }
+  private JSONObject authenticate(String address,String credential,String expectedId,String fingerprint)throws Exception{
+   setAddress(address,fingerprint);
+   String secret=unprotect(credential);
+   byte[] random=new byte[32];new java.security.SecureRandom().nextBytes(random);StringBuilder challenge=new StringBuilder();
+   for(byte b:random)challenge.append(String.format(java.util.Locale.ROOT,"%02x",b&255));String nonce=challenge.toString();
+   // No bearer token is sent until the PC proves possession of the paired secret.
+   JSONObject proof=new JSONObject(call("POST","/identity-proof",new JSONObject().put("device_id",prefs().getString("device-id","")).put("endpoint",base).put("nonce",nonce).toString()));
+   if(!base.equals(proof.optString("endpoint"))||!PhoneIdentity.verify(secret,expectedId,proof.optString("pc_id"),base,nonce,proof.optString("nonce"),proof.optString("proof")))throw new Exception("PC identity verification failed. Pair again if the PC was reset.");
+   token=secret;
+   JSONObject state=new JSONObject(call("GET","/state","{}"));
+   if(state.has("error"))throw new Exception(state.optString("error","The PC refused this connection."));
+   if(!proof.getString("pc_id").equals(state.optString("pc_id")))throw new Exception("PC identity changed during reconnect.");
+   return state;
+  }
+  private String accepted(JSONArray list,JSONObject record,JSONObject state,String address)throws Exception{
+   base=address;
+   if(state.has("pc_id"))record.put("id",state.getString("pc_id"));
+   record.put("address",address);record.put("fingerprint",pin);
+   if(state.has("name"))record.put("name",state.getString("name"));
+   if(state.has("edition"))record.put("edition",state.getString("edition"));
+   saveComputers(list);
+   return new JSONObject().put("name",record.optString("name","Sakura")).put("edition",state.optString("edition","companion")).toString();
+  }
+  @JavascriptInterface public String reconnect(String computerId,String address){
+   try{JSONArray list=computers();JSONObject record=null;
+    for(int i=0;i<list.length();i++){JSONObject pc=list.getJSONObject(i);
+     if(!computerId.isEmpty()&&computerId.equals(pc.optString("id"))){record=pc;break;}
+     if(computerId.isEmpty()&&!address.isEmpty()&&address.equals(pc.optString("address"))){record=pc;break;}}
+    if(record==null)throw new Exception("Pair this PC as a new device first.");
+    // A record saved before the encrypted link has no pin, so it cannot prove
+    // which PC it is talking to. Making the user pair once is the safe upgrade.
+    String fingerprint=record.optString("fingerprint","");
+    if(!fingerprint.matches("[0-9a-f]{64}"))throw new Exception("Pair this PC again once to enable the encrypted connection.");
+    String credential=record.getString("credential");
+    java.util.LinkedHashSet<String> candidates=new java.util.LinkedHashSet<>();candidates.add(record.optString("address",""));candidates.add(address);
+    for(String candidate:candidates){
+     if(candidate==null||candidate.isEmpty())continue;
+     try{return accepted(list,record,authenticate(candidate,credential,record.optString("id",""),fingerprint),candidate);}catch(Exception offline){token="";}}
+    JSONArray found=discover(1800);
+    for(int i=0;i<found.length();i++){JSONObject beacon=found.getJSONObject(i);
+     if(!record.optString("id","").isEmpty()&&!record.getString("id").equals(beacon.optString("id")))continue;
+     try{JSONObject state=authenticate(beacon.getString("https"),credential,record.optString("id",""),fingerprint);
+      if(!state.optString("pc_id","").equals(beacon.optString("id")))throw new Exception("That PC is not the one this phone paired with.");
+      return accepted(list,record,state,beacon.getString("https"));
+     }catch(Exception refused){token="";}}
+    token="";return new JSONObject().put("error","Sakura was not found on this network. Turn on Connect to Phone in PC Settings, then try again.").toString();
+   }catch(Exception error){token="";return error(error);}
+  }
+  @JavascriptInterface public String connect(String address,String code,String fingerprint){
+   try{setAddress(address,fingerprint);String id=prefs().getString("device-id","");if(id.isEmpty()){id=java.util.UUID.randomUUID().toString();prefs().edit().putString("device-id",id).apply();}
+    String response=call("POST","/pair",new JSONObject().put("code",code).put("device_id",id).put("device_name",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL).toString());JSONObject data=new JSONObject(response);
+    if(data.has("token")){
+     String advertised=data.optString("fingerprint","");
+     if(!advertised.matches("[0-9a-f]{64}")||!advertised.equals(lastFingerprint))throw new Exception("The PC did not prove the certificate it presented. Pair again.");
+     if(!pin.isEmpty()&&!pin.equals(advertised))throw new Exception("The PC's certificate changed since it was found. Check your Wi-Fi and try again.");
+     pin=advertised;token=data.getString("token");String identity=data.optString("id","");JSONArray old=computers(),list=new JSONArray();
+     for(int i=0;i<old.length();i++){JSONObject pc=old.getJSONObject(i);if(!identity.isEmpty()&&identity.equals(pc.optString("id")))continue;if(!base.equals(pc.optString("address")))list.put(pc);}
+     JSONObject saved=new JSONObject().put("address",base).put("fingerprint",pin).put("name",data.optString("name","Sakura")).put("edition",data.optString("edition","companion")).put("credential",protect(token));
+     if(!identity.isEmpty())saved.put("id",identity);
+     list.put(saved);saveComputers(list);}
+    return response;
+   }catch(Exception error){pin="";return error(error);}
   }
   @JavascriptInterface public void trackingStateAsync(String id){new Thread(()->{try{complete(id,call("GET","/state","{}"));}catch(Exception e){complete(id,error(e));}},"SakuraTrackingState").start();}
   @JavascriptInterface public void trackingFrameAsync(String id,String body){
@@ -180,18 +288,24 @@ public class MainActivity extends Activity {
   private String call(String method,String path,String body)throws Exception{
    if(base.isEmpty())throw new Exception("Connect to your PC first.");
    HttpURLConnection connection=(HttpURLConnection)new URL(base+path).openConnection();connection.setInstanceFollowRedirects(false);
+   if(connection instanceof javax.net.ssl.HttpsURLConnection){javax.net.ssl.HttpsURLConnection secure=(javax.net.ssl.HttpsURLConnection)connection;secure.setSSLSocketFactory(PcTls.factory(pin));secure.setHostnameVerifier(PcTls.verifier());}
    connection.setConnectTimeout(path.equals("/frame")?1000:5000);connection.setReadTimeout(path.equals("/frame")?1000:path.equals("/chat")?120000:10000);connection.setRequestMethod(method);
    connection.setRequestProperty("Content-Type","application/json");if(!token.isEmpty())connection.setRequestProperty("Authorization","Bearer "+token);
    try{if(method.equals("POST")){connection.setDoOutput(true);try(OutputStream output=connection.getOutputStream()){output.write(body.getBytes("UTF-8"));}}
-    InputStream input=connection.getResponseCode()<400?connection.getInputStream():connection.getErrorStream();if(input==null)throw new IOException("PC connection failed.");
+    int status=connection.getResponseCode();
+    if(connection instanceof javax.net.ssl.HttpsURLConnection){
+     lastFingerprint=PcTls.presented(connection);
+     if(!pin.isEmpty()&&!pin.equals(lastFingerprint))throw new IOException("The PC's certificate does not match the saved pairing. Check your Wi-Fi.");
+    }
+    InputStream input=status<400?connection.getInputStream():connection.getErrorStream();if(input==null)throw new IOException("PC connection failed.");
     ByteArrayOutputStream output=new ByteArrayOutputStream();try(InputStream stream=input){byte[] buffer=new byte[8192];int n;while((n=stream.read(buffer))!=-1){output.write(buffer,0,n);if(output.size()>2000000)throw new IOException("Response too large");}}return output.toString("UTF-8");
    }finally{connection.disconnect();}
   }
   private String error(Exception error){try{return new JSONObject().put("error",error.getMessage()).toString();}catch(Exception ignored){return "{}";}}
  }
- @Override protected void onPause(){super.onPause();microphoneGeneration++;if(microphone!=null)microphone.pause();boolean locationPrompt=(locations!=null&&locations.awaitingPermission)||(microphone!=null&&microphone.permissionPending)||wakePermissionPending;if(!locationPrompt){phoneForeground=false;if(locations!=null)locations.stop();}if(web!=null)web.evaluateJavascript("window.stopPhoneTracking?.();window.stopPhoneVision?.();"+(locationPrompt?"":"window.sakuraLocalPause?.()"),null);}
+ @Override protected void onPause(){super.onPause();stopTrackingSender();microphoneGeneration++;if(microphone!=null)microphone.pause();boolean locationPrompt=(locations!=null&&locations.awaitingPermission)||(microphone!=null&&microphone.permissionPending)||wakePermissionPending;if(!locationPrompt){phoneForeground=false;if(locations!=null)locations.stop();}if(web!=null)web.evaluateJavascript("window.stopPhoneTracking?.();window.stopPhoneVision?.();window.sakuraStopLocalTracking?.();"+(locationPrompt?"":"window.sakuraLocalPause?.()"),null);}
  @Override protected void onStop(){super.onStop();if(microphone!=null){microphone.stop();microphone.state(false,"Microphone off");}phoneForeground=false;WakeService.busy(false);if(web!=null){web.onPause();web.pauseTimers();}if(locations!=null)locations.stop();}
- @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==4){dictationPending=false;WakeService.pauseManual(false);}if(request==4&&result==RESULT_OK&&data!=null){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())web.evaluateJavascript("window.sakuraDictation?.("+JSONObject.quote(words.get(0))+")",null);}}
+ @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==71){String job=modelImportJob;modelImportJob=null;if(job==null)return;if(result!=RESULT_OK||data==null){new Bridge().complete(job,new Bridge().error(new Exception("Import cancelled.")));return;}android.net.Uri uri=data.getData();new Thread(()->{try{String name="model";try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)){if(cursor!=null&&cursor.moveToFirst())name=cursor.getString(0);}try(InputStream input=getContentResolver().openInputStream(uri)){if(input==null)throw new IOException("Cannot open the selected file.");new Bridge().complete(job,PhoneModelImport.importModel(input,name,new File(getFilesDir(),"models")).toString());}}catch(Exception e){new Bridge().complete(job,new Bridge().error(e));}},"SakuraModelImport").start();return;}if(request==4){dictationPending=false;WakeService.pauseManual(false);}if(request==4&&result==RESULT_OK&&data!=null){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())web.evaluateJavascript("window.sakuraDictation?.("+JSONObject.quote(words.get(0))+")",null);}}
  @Override protected void onResume(){super.onResume();phoneForeground=true;if(web!=null){web.resumeTimers();web.onResume();}if(microphone!=null)microphone.resume();if(calls!=null)calls.resume();if(web!=null)web.evaluateJavascript("window.sakuraResume?.()",null);}
- @Override protected void onDestroy(){if(current.get()==this)current.clear();if(microphone!=null)microphone.stop();if(calls!=null)calls.close();if(web!=null){web.removeJavascriptInterface("Sakura");web.destroy();}super.onDestroy();}
+ @Override protected void onDestroy(){stopTrackingSender();if(current.get()==this)current.clear();if(microphone!=null)microphone.stop();if(calls!=null)calls.close();if(web!=null){web.removeJavascriptInterface("Sakura");web.destroy();}super.onDestroy();}
 }

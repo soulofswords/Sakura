@@ -29,6 +29,14 @@ MAC_NAME='Sakura Installer'
 DMG_FILE='Sakura-Setup-macOS-Apple-Silicon.dmg'
 MAC_README=None
 PROTECT_RELEASE=True
+
+def release_asset_allowed(name):
+    """Never publish local source backups or debugging maps as application assets."""
+    path=Path(name)
+    lowered=path.name.lower()
+    return not (any(part in ('__pycache__','.git','.pytest_cache') for part in path.parts)
+        or lowered.endswith(('.bak','.backup','.orig','.rej','.tmp','.swp','.swo','.map','~'))
+        or '.before-' in lowered)
 DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'kokoro_af_heart',
             'ollama_model': 'qwen3-vl:2b-instruct', 'ollama_context': 2048,
             'ollama_models_folder': 'llm-models', 'computer_control_enabled': False,
@@ -65,9 +73,14 @@ def app_files():
     for name in ('companion.ico','companion-vtuber.ico','vtuber.ico','model-upload.ico'):
         yield BASE/'launcher'/name,'Sakura/launcher/'+name
     yield BASE/'static/index.html','Sakura/static/index.html'
+    camera=BASE/'native'/'sakura-camera'
+    for name in ('bin/x64/sakura-camera64.dll','bin/x64/sakura-camera-bridge64.dll','install-camera.ps1','README.md','COPYING','source.zip'):
+        path=camera/name
+        if not path.is_file():raise RuntimeError('Build Sakura Virtual Camera before packaging: tools/build-sakura-camera.py')
+        yield path,'Sakura/native/sakura-camera/'+name
     for folder in ('js','css','assets','vendor','audio'):
         for file in (BASE/'static'/folder).rglob('*'):
-            if file.is_file() and '__pycache__' not in file.parts:
+            if file.is_file() and release_asset_allowed(file):
                 yield file, 'Sakura/' + file.relative_to(BASE).as_posix()
 
 def windows():

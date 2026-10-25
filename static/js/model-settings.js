@@ -4,6 +4,7 @@ import {installMouthSettings} from './mouth-settings.js?v=audio-route5';
 import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=2';
 import {installBoneSettings} from './model-bones.js?v=persistent5';
 import {installTextureDiagnostics} from './texture-diagnostics.js?v=1';
+import {tintEdit,opacityEdit} from './part-appearance.js?v=1';
 
 export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,reloadModel) {
     const zoom=document.getElementById('model-settings-zoom');
@@ -41,8 +42,20 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
     let controller=null,root=null,modelKey='',revision=0,activeTab='coloring',busy=false;
     const storageKey=()=> 'sakura_model_colors:'+modelKey;
     const saveColors=()=>localStorage.setItem(storageKey(),JSON.stringify(controller.colors));
+    const editMode=document.createElement('select');editMode.id='model-part-edit-mode';editMode.setAttribute('aria-label','Choose what to change on the selected part');
+    editMode.add(new Option('Change color','color'));editMode.add(new Option('Change transparency','transparency'));
+    const modeLabel=document.createElement('label');modeLabel.className='companion-part-edit-mode';modeLabel.htmlFor=editMode.id;modeLabel.append(document.createTextNode('What would you like to change?'),editMode);
+    document.getElementById('model-pick-part').before(modeLabel);
+    const separatePartEdits=()=>document.body.classList.contains('companion-ui-active')||document.body.classList.contains('tracking-only');
+    const transparencyMode=()=>separatePartEdits()&&editMode.value==='transparency';
+    const syncEditMode=()=>{
+        panel.classList.toggle('model-edit-transparency',transparencyMode());
+        document.getElementById('model-color-apply').textContent=transparencyMode()?'Apply transparency':'Apply color';
+        document.getElementById('model-color-reset').textContent=transparencyMode()?'Restore original transparency':'Restore original color';
+    };
+    editMode.onchange=()=>{syncEditMode();updateColor();};
+    new MutationObserver(syncEditMode).observe(document.body,{attributes:true,attributeFilter:['class']});
     const tab=name=>{
-        if(name==='mouth'&&!getViewer()?.vtuberTrackingMode)name='coloring';
         activeTab=name;
         document.querySelectorAll('[data-model-tab]').forEach(button=>{const selected=button.dataset.modelTab===name;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));});
         document.querySelectorAll('[data-model-panel]').forEach(section=>section.hidden=section.dataset.modelPanel!==name);
@@ -58,10 +71,8 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         bones.refresh();
         textureDiagnostics.refresh();
         const viewer=getViewer(),identity=viewer?.live2d||viewer?.model,key=getModelKey();
-        const tracking=!!viewer?.vtuberTrackingMode;
         faceMapping.refresh();
-        document.querySelector('[data-model-tab="mouth"]').hidden=!tracking;
-        if(!tracking){mouth.stop();if(activeTab==='mouth')tab('coloring');}
+        document.querySelector('[data-model-tab="mouth"]').hidden=false;
         if(!identity){status.textContent='Load a model to customize its appearance.';return;}
         if(root!==identity||key!==modelKey){
             stopPicking();
@@ -100,8 +111,20 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         catch(error){status.textContent=error.message;}
         finally{busy=false;document.querySelectorAll('[data-material-action]').forEach(b=>b.disabled=false);}
     }
-    document.getElementById('model-color-apply').onclick=()=>action(async current=>{current.setHover(null);current.setColor(part.value,{color:picker.value,strength:Number(strength.value)/100,opacity:1-Number(opacity.value)/100});saveColors();});
-    document.getElementById('model-color-reset').onclick=()=>action(async current=>{current.setColor(part.value,null);saveColors();updateColor();});
+    document.getElementById('model-color-apply').onclick=()=>action(async current=>{
+        current.setHover(null);
+        const existing=current.colors[part.value];
+        const settings=separatePartEdits()
+            ?transparencyMode()?opacityEdit(existing,1-Number(opacity.value)/100):tintEdit(existing,picker.value,Number(strength.value)/100)
+            :{color:picker.value,strength:Number(strength.value)/100,opacity:1-Number(opacity.value)/100};
+        current.setColor(part.value,settings);saveColors();
+    });
+    document.getElementById('model-color-reset').onclick=()=>action(async current=>{
+        const existing=current.colors[part.value];
+        const settings=separatePartEdits()
+            ?transparencyMode()?opacityEdit(existing,1):tintEdit(existing,'#ffffff',0):null;
+        current.setColor(part.value,settings);saveColors();updateColor();
+    });
     document.getElementById('model-remap-apply').onclick=()=>action(async current=>{
         const blob=file.files[0];if(!blob)throw Error('Choose a PNG, JPG or WebP replacement image first.');
         const id=texture.value,key=modelKey;await current.setRemap(id,blob);await storedRemap(key,id,blob);file.value='';

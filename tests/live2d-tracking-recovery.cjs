@@ -33,3 +33,11 @@ console.log('PASS: time-based Live2D smoothing at 30/60 FPS and responsive mouth
 const source=fs.readFileSync('static/js/live2d-viewer.js','utf8');
 assert.match(source,/on\('afterMotionUpdate',\(\)=>v.applyParameters\(\)\)/,'Tracking inputs reach authored physics before visible model evaluation');
 assert.doesNotMatch(source,/on\('beforeModelUpdate',\(\)=>v.applyParameters\(\)\)/,'Tracking must not be written after the physics routing stage');
+
+const neutralMouthFace={landmarks:[{}],matrix:new THREE.Matrix4().identity().toArray(),blendshapes:[{categoryName:'jawOpen',score:.4}]};
+frame(neutralMouthFace);live.calibrate();assert.equal(values.ParamMouthOpenY,0,'Calibration immediately neutralizes Live2D mouth');
+for(let i=0;i<30;i++)frame(neutralMouthFace);
+assert(values.ParamMouthOpenY<.001,'Calibrated jaw bias stays neutral');
+for(let i=0;i<12;i++)frame({...neutralMouthFace,blendshapes:[{categoryName:'jawOpen',score:.85}]});
+assert(values.ParamMouthOpenY>.9,'Live2D mouth still opens for speech after calibration');
+console.log('PASS: explicit mouth calibration clears residual opening, removes jaw bias and preserves speech response');

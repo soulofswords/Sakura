@@ -163,7 +163,7 @@ export default class AvatarRetarget {
         this.palms = {};
         this.calibrated = false;
         this.trackedRotations = {};
-        this.faceNeutral = {leftEye:.28,rightEye:.28,mouth:.025};
+        this.faceNeutral = {leftEye:.28,rightEye:.28,mouth:.025,jaw:0};
         this.handPresence = {};
         this.handTargets = {};
     }
@@ -172,8 +172,8 @@ export default class AvatarRetarget {
         // MediaPipe's Matrix data is column-major, like Three.js Matrix4.
         return new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().fromArray(matrix), 'XYZ');
     }
-    calibrate(sample) {
-        this.bodyNeutral=null;this.shoulderNeutral=null;this.heightNeutral=null;
+    calibrate(sample, captureMouth = true) {
+        this.bodyNeutral=null;this.shoulderNeutral=null;this.heightNeutral=null;this.bodyTargets={};
         if (sample?.face?.matrix && sample.face.landmarks?.length) {
             this.neutral.copy(this.rotation(sample.face.matrix)); this.calibrated = true;
         }
@@ -185,12 +185,46 @@ export default class AvatarRetarget {
             if (ratio!==null && ratio>(glasses?.08:.14) && (glasses||(scores[left?'eyeBlinkLeft':'eyeBlinkRight']||0)<.3)) this.faceNeutral[key]=clamp(ratio,glasses?.08:.18,.4);
         }
         const mouth=faceAperture(points,[61,291],[[13,14]]);
-        if (mouth!==null && (scores.jawOpen||0)<.2) this.faceNeutral.mouth=clamp(mouth,0,.12);
+        if (mouth!==null && (captureMouth || (scores.jawOpen||0)<.2)) this.faceNeutral.mouth=clamp(mouth,0,.6);
+        if(captureMouth && points?.length){
+            this.faceNeutral.jaw=clamp(scores.jawOpen||0,0,.95);
+            for(const name of new Set(['A','jawOpen',...this.mouthMorphs])){
+                this.weights[name]=0;this.viewer.setMorph(name,0);
+            }
+        }
         this.palms={};
+    }
+    _stableBodyTarget(channel,value,stamp,valid) {
+        this.bodyTargets ||= {};
+        const state=this.bodyTargets[channel] ||= {value:0,seen:0,stamp:null,pending:null};
+        if(!valid || !Number.isFinite(value)) {
+            if(performance.now()-state.seen>250){state.value=0;state.pending=null;}
+            return state.value;
+        }
+        const now=performance.now();
+        state.seen=now;
+        if(state.stamp===stamp)return state.value;
+        state.stamp=stamp;
+        const difference=Math.abs(value-state.value);
+        // Once deliberate motion is confirmed, follow small incremental
+        // changes directly instead of repeatedly sticking at the rest threshold.
+        if(now<(state.movingUntil||0) && difference<=.08){
+            state.pending=null;
+            if(difference>.004){state.value=value;if(difference>.008)state.movingUntil=now+160;}
+            return state.value;
+        }
+        if(difference<.025){state.pending=null;return state.value;}
+        {
+            // Confirm motion outside the stationary hold in a second camera sample.
+            // Rendering the same packet again cannot confirm a detector jump.
+            if(state.pending===null || Math.abs(value-state.pending)>.035){state.pending=value;return state.value;}
+        }
+        state.pending=null;state.value=value;state.movingUntil=now+160;
+        return value;
     }
     reset() {
         if(this.verticalBone && Number.isFinite(this.verticalRest))this.verticalBone.position.y=this.verticalRest;
-        this.verticalOffset=0;this.bodyMotion=null;this.trackedRotations={};
+        this.verticalOffset=0;this.bodyMotion=null;this.trackedRotations={};this.bodyTargets={};
         for (const entry of this.fingers) entry.bone.quaternion.copy(entry.rest);
         for (const name of this.morphs || []) this.viewer.setMorph(name, 0);
         for (const entry of Object.values(this.viewer.animationBones)) entry.bone.rotation.copy(this.viewer.vtuberTrackingMode?(entry.trackingRest||entry.rest):entry.rest);
@@ -230,8 +264,9 @@ export default class AvatarRetarget {
         const face = fresh ? sample.face : null;
         // The first detected face is the neutral pose, rather than assuming
         // the camera's transformation matrix has zero Euler rotation.
-        if (!this.calibrated && face?.landmarks?.length) this.calibrate(sample);
+        if (!this.calibrated && face?.landmarks?.length) this.calibrate(sample,false);
         const scores = Object.fromEntries((face?.blendshapes || []).map(b=>[b.categoryName,clamp(b.score)]));
+        scores.jawOpen=clamp(((scores.jawOpen||0)-(this.faceNeutral.jaw||0))/Math.max(.05,1-(this.faceNeutral.jaw||0)));
         const morph = (name,value, responseSeconds=.07) => {
             if(this.viewer.mouthOptions?.source==='both'&&['A','I','U','E','O'].includes(name))value=Math.max(value,this.viewer.microphoneMouthWeights?.[name]||0);
             if (!name) return;
@@ -317,7 +352,7 @@ export default class AvatarRetarget {
         const gazeY=((scores.eyeLookDownLeft||0)+(scores.eyeLookDownRight||0)-(scores.eyeLookUpLeft||0)-(scores.eyeLookUpRight||0))*.15;
         const gaze = clamp(options.gaze ?? 1, 0, 2);
         if (!this.viewer.eyeTrackingEnabled) {
-            rotate('leftEye',gazeY*gaze,gazeX*gaze,0); rotate('rightEye',gazeY*gaze,gazeX*gaze,0);
+            rotate('leftEye',-gazeY*gaze,-gazeX*gaze,0); rotate('rightEye',-gazeY*gaze,-gazeX*gaze,0);
         }
         // Fresh packets alone do not establish a person: empty-camera pose
         // estimates must not move the body. Keep hands-only operation available.
@@ -342,7 +377,7 @@ export default class AvatarRetarget {
         }
         const leanPoints=poseWorld.length>=25?poseWorld:posePoints;
         const finitePoint=p=>p&&['x','y','z'].every(k=>Number.isFinite(p[k]));
-        const visibleTorso=poseShouldersValid&&[23,24].every(i=>finitePoint(leanPoints[i])&&posePoints[i]&&(posePoints[i].visibility??1)>.8);
+        const visibleTorso=poseWorld.length>=25&&poseShouldersValid&&[23,24].every(i=>finitePoint(leanPoints[i])&&posePoints[i]&&(posePoints[i].visibility??1)>.8);
         let pitch=0,roll=0,vertical=0;
         // Shoulder slope remains observable in seated/upper-body camera views.
         // Hidden hips must not disable sideways lean or supply invented depth.
@@ -370,10 +405,15 @@ export default class AvatarRetarget {
                 // Switching between torso-axis and shoulder angles caused jumps.
             }
         }
-        // Suppress tiny camera fluctuations without a hard snap at the edge.
+        // Include the head-to-torso contribution in the same stationary
+        // hold. Previously head pitch bypassed it and reintroduced jitter.
         const quiet=(value,threshold)=>Math.sign(value)*Math.max(0,Math.abs(value)-threshold);
-        pitch=quiet(pitch,.03)+trackedPitch*.12;
+        pitch=quiet(pitch,.03)+quiet(trackedPitch,.04)*.12;
         roll=quiet(roll,.018);
+        if(!poseTracking)this.bodyTargets={};
+        const bodyStamp=sample?.timestamp??sample?.receivedAt;
+        pitch=this._stableBodyTarget('pitch',pitch,bodyStamp,visibleTorso||facePresent);
+        roll=this._stableBodyTarget('roll',roll,bodyStamp,poseShouldersValid);
         vertical=quiet(vertical,this.height*.004);
         // Smooth each pose channel exactly once using the same response as
         // Live2D head parameters. Avoid cascaded body and bone smoothing.
@@ -448,8 +488,8 @@ export default class AvatarRetarget {
                 const target=localMotion.multiply(new THREE.Quaternion().setFromEuler(entry.rest));
                 const rest=new THREE.Quaternion().setFromEuler(entry.rest);
                 const angle=rest.angleTo(target);
-                if(angle>1.2)target.slerpQuaternions(rest,target,1.2/angle);
-                entry.bone.quaternion.slerp(target,(key==='torso'||key==='chest') ? 1 : alpha);
+                if(angle>1.2)target.slerpQuaternions(rest,target.clone(),1.2/angle);
+                entry.bone.quaternion.slerp(target,alpha);
             }
             for (const entry of this.fingers.filter(f=>f.side===side)) {
                 if (!hand) {
@@ -523,7 +563,7 @@ export default class AvatarRetarget {
                     const rest=new THREE.Quaternion().setFromEuler(entry.rest);
                     const limit=key.endsWith('Shoulder')?.5:key.endsWith('Elbow')?2.4:2.2;
                     const angle=rest.angleTo(joint.quaternion);
-                    if(angle>limit)joint.quaternion.slerpQuaternions(rest,joint.quaternion,limit/angle);
+                    if(angle>limit)joint.quaternion.slerpQuaternions(rest,joint.quaternion.clone(),limit/angle);
                 }
             }
         };

@@ -92,7 +92,7 @@ const viewer={live2d:false,setUserTracking(value){remoteTracking=value;},async u
     if(!remoteTracking||(frameBusy&&!Sakura.submitTrackingFrame))return;
     frameBusy=true;try{
     let cameraFrame;
-    if(pcNvidiaFrames&&tracker.video?.videoWidth&&performance.now()-lastRtxFrame>100){
+    if(pcNvidiaFrames&&tracker.video?.videoWidth&&performance.now()-lastRtxFrame>=1000/tracker.frameRate){
         lastRtxFrame=performance.now();
         const w=Math.min(480,tracker.video.videoWidth),h=Math.round(w*tracker.video.videoHeight/tracker.video.videoWidth);
         rtxCanvas.width=w;rtxCanvas.height=h;rtxCanvas.getContext('2d',{alpha:false}).drawImage(tracker.video,0,0,w,h);
@@ -112,7 +112,7 @@ const tracker=new AvatarTracking(viewer,status);tracker.handTrackingEnabled=true
 const rateLabel=document.createElement('label');rateLabel.htmlFor='phone-tracking-rate';rateLabel.textContent='Tracking performance';
 const rate=document.createElement('select');rate.id='phone-tracking-rate';rate.add(new Option('60 FPS target · low latency','60'));rate.add(new Option('30 FPS target · lower battery use','30'));
 try{rate.value=localStorage.getItem('sakura-phone-tracking-rate')==='30'?'30':'60';}catch(_){}
-const rateHint=document.createElement('small');rateHint.textContent='Actual FPS depends on camera and inference speed. In 60 FPS mode, face and shoulders are processed on every source frame; hands update up to 20 FPS when enabled. Uses more battery. NVIDIA image forwarding is limited to 10 FPS separately.';
+const rateHint=document.createElement('small');rateHint.textContent='Actual FPS depends on camera and inference speed. In 60 FPS mode, face and shoulders are processed on every source frame; hands update up to 20 FPS when enabled. Uses more battery. NVIDIA image forwarding targets the selected rate; actual speed depends on your phone, Wi-Fi and PC.';
 $('vtuber').querySelector('h2').after(rateLabel,rate,rateHint);
 const configureRate=()=>{const fast=rate.value==='60';tracker.frameRate=fast?60:30;tracker.poseStride=1;tracker.handStride=fast?3:2;tracker.lowLatency=fast;tracker.inferenceWidth=fast?480:640;};configureRate();
 rate.onchange=()=>{if(remoteTracking)window.stopPhoneTracking();configureRate();localStorage.setItem('sakura-phone-tracking-rate',rate.value);status('Tracking rate changed. Tap Start camera tracking to resume.');};
@@ -134,19 +134,19 @@ function showPairForm(pc){
     $('pair-target').textContent=`Enter the 6-digit code shown on “${pc.name||'this PC'}”.`;
     $('code').value='';$('code').focus();
 }
-async function pairWith(address,code,button){
+async function pairWith(address,code,button,fingerprint){
     if(!/^\d{6}$/.test(code)){status('Enter the 6-digit code shown on your PC.');return;}
     button.disabled=true;
-    try{connectedPc(await nativeJob('connectAsync',address,code));$('advanced-pair').open=false;}
+    try{connectedPc(await nativeJob('connectAsync',address,code,fingerprint||''));$('advanced-pair').open=false;}
     catch(error){status(error.message+' Keep the PC app open and check that Connect to Phone is on.');}
     finally{button.disabled=false;}
 }
-$('connect').onclick=()=>{if(!pairingPc){status('Choose your PC from the list first.');return;}return pairWith(pairingPc.http,$('code').value.trim(),$('connect'));};
+$('connect').onclick=()=>{if(!pairingPc){status('Choose your PC from the list first.');return;}return pairWith(pairingPc.https,$('code').value.trim(),$('connect'),pairingPc.fingerprint);};
 $('choose-another-pc').onclick=()=>{pairingPc=null;$('pair-code').classList.add('hidden');};
 $('manual-connect').onclick=()=>{
     const host=$('host').value.trim(),port=$('port').value.trim(),usable=/^\d{1,5}$/.test(port)&&+port>0&&+port<=65535;
     if(!/^\d{1,3}(\.\d{1,3}){3}$/.test(host)){status('Enter the PC’s IPv4 address, for example 192.168.1.10.');return;}
-    return pairWith('http://'+host+':'+(usable?port:'8771'),$('manual-code').value.trim(),$('manual-connect'));
+    return pairWith('https://'+host+':'+(usable?port:'8771'),$('manual-code').value.trim(),$('manual-connect'),'');
 };
 function renderSaved(){
     const list=$('saved-pcs');list.replaceChildren();

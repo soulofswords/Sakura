@@ -8,6 +8,27 @@ from nvidia_expressionapp_tracker import ExpressionAppTracker
 
 
 class ExpressionAppTrackerTests(unittest.TestCase):
+    def test_fps_reports_received_rate_separately_from_requested_cap(self):
+        from unittest.mock import patch
+        import time
+        tracker=ExpressionAppTracker();tracker._target_fps=60
+        payload=json.dumps({'exp':[0.0]*53}).encode()
+        class Socket:
+            count=0
+            def settimeout(self,value):pass
+            def close(self):pass
+            def recvfrom(self,size):
+                self.count+=1
+                if self.count==3:tracker._stop.set()
+                return payload,('127.0.0.1',9140)
+        with patch('nvidia_expressionapp_tracker.time.monotonic',side_effect=[100,100.2,100.7,101.2]):
+            tracker._receive(Socket())
+        tracker._updated_at=time.monotonic()
+        self.assertEqual(tracker.snapshot()['fps'],2)
+        self.assertEqual(tracker.snapshot()['target_fps'],60)
+        tracker._updated_at=time.monotonic()-2
+        self.assertEqual(tracker.snapshot()['fps'],0)
+
     def test_validates_dlc_folder_without_running_executable(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

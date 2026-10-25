@@ -69,6 +69,7 @@ class ExpressionAppTracker:
         self._folder = ''
         self._camera = 0
         self._fps = 0
+        self._target_fps = 0
 
     @staticmethod
     def validate_folder(folder):
@@ -118,7 +119,8 @@ class ExpressionAppTracker:
         except Exception:
             sock.close()
             raise
-        self._folder, self._camera, self._fps = str(root), camera, fps
+        self._folder, self._camera, self._target_fps = str(root), camera, fps
+        self._fps = 0
         self._error = ''
         self._result = {}
         self._updated_at = 0
@@ -130,6 +132,7 @@ class ExpressionAppTracker:
     def _receive(self, sock):
         try:
             sock.settimeout(.5)
+            count, started = 0, time.monotonic()
             while not self._stop.is_set():
                 if self._process and self._process.poll() is not None:
                     self._error = f'ExpressionApp exited with code {self._process.returncode}. Check its tracker folder, RTX driver, and camera index.'
@@ -143,6 +146,10 @@ class ExpressionAppTracker:
                     now = time.monotonic()
                     with self._lock:
                         self._result, self._updated_at = shapes, now
+                        count += 1
+                        if now-started >= 1:
+                            self._fps = round(count/(now-started))
+                            count, started = 0, now
                 except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
                     continue
         finally:
@@ -155,7 +162,7 @@ class ExpressionAppTracker:
             return {'running': process_running and not self._error,
                     'connected': age is not None and age < 1.5,
                     'age_ms': round(age * 1000) if age is not None else None,
-                    'fps': self._fps, 'blendshapes': expression_aliases(self._result) if age is not None and age < 1.5 else {},
+                    'fps': self._fps if age is not None and age < 1.5 else 0, 'target_fps': self._target_fps, 'blendshapes': expression_aliases(self._result) if age is not None and age < 1.5 else {},
                     'error': self._error, 'folder': self._folder, 'camera': self._camera}
 
     def stop(self):

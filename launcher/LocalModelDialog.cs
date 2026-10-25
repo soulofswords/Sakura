@@ -16,12 +16,12 @@ sealed class LocalModelChoice : RadioButton {
  }
  protected override void OnPaint(PaintEventArgs e) {
   e.Graphics.Clear(BackColor);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
-  Color accent=Checked?Color.FromArgb(104,235,221):Color.FromArgb(180,194,215);
+  Color accent=Checked?StartupTheme.Accent:StartupTheme.Muted;
   var circle=new Rectangle(4,(Height-18)/2,18,18);
   using(var pen=new Pen(accent,2))e.Graphics.DrawEllipse(pen,circle);
   if(Checked)using(var brush=new SolidBrush(accent))e.Graphics.FillEllipse(brush,circle.X+4,circle.Y+4,10,10);
   TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(31,0,Width-34,Height),
-   Enabled?Color.FromArgb(241,248,255):Color.FromArgb(200,216,232),
+   Enabled?StartupTheme.Ink:StartupTheme.Muted,
    TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
   if(Focused&&ShowFocusCues)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(28,2,Width-31,Height-4),accent,BackColor);
  }
@@ -32,10 +32,10 @@ sealed class LocalModelAction : Button {
   FlatStyle=FlatStyle.Flat;Font=new Font("Segoe UI",10,FontStyle.Bold);
  }
  protected override void OnPaint(PaintEventArgs e) {
-  e.Graphics.Clear(Enabled?Color.FromArgb(27,57,72):Color.FromArgb(31,39,54));
-  using(var pen=new Pen(Enabled?Color.FromArgb(104,235,221):Color.FromArgb(112,133,153)))e.Graphics.DrawRectangle(pen,0,0,Width-1,Height-1);
+  e.Graphics.Clear(Enabled?StartupTheme.Button:StartupTheme.Surface);
+  using(var pen=new Pen(Enabled?StartupTheme.Accent:StartupTheme.SurfaceLine))e.Graphics.DrawRectangle(pen,0,0,Width-1,Height-1);
   TextRenderer.DrawText(e.Graphics,Text,Font,ClientRectangle,
-   Enabled?Color.White:Color.FromArgb(200,216,232),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
+   Enabled?StartupTheme.Ink:StartupTheme.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
   if(Focused&&ShowFocusCues)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(4,4,Width-8,Height-8));
  }
 }
@@ -63,14 +63,14 @@ sealed class LocalModelDialog : Form {
   }
  }
  internal LocalModelDialog(string project,string choice=null) {
-  this.project=project; Text="Sakura — Optional local AI"; ClientSize=new Size(570,450);
-  BackColor=Color.FromArgb(12,15,26);ForeColor=Color.White;Font=new Font("Segoe UI",10);
+  this.project=project; StartupTheme.Load(project); Text="Sakura — Optional local AI"; ClientSize=new Size(570,450);
+  BackColor=StartupTheme.Background;ForeColor=StartupTheme.Ink;Font=new Font("Segoe UI",10);
   StartPosition=FormStartPosition.CenterScreen;FormBorderStyle=FormBorderStyle.FixedDialog;
   MaximizeBox=false;MinimizeBox=false;Icon=new Icon(Path.Combine(project,"launcher","companion.ico"));
   Controls.Add(new Label {Text="Choose your local companion",Location=new Point(24,24),Size=new Size(520,35),Font=new Font("Segoe UI",20,FontStyle.Bold)});
-  model=new ComboBox {Location=new Point(28,84),Size=new Size(510,32),DropDownStyle=ComboBoxStyle.DropDownList,BackColor=Color.FromArgb(27,34,49),ForeColor=Color.White};
+  model=new ComboBox {Location=new Point(28,84),Size=new Size(510,32),DropDownStyle=ComboBoxStyle.DropDownList,BackColor=StartupTheme.Surface,ForeColor=StartupTheme.Ink};
   model.Items.AddRange(ChoiceLabels);model.SelectedIndex=Math.Max(0,Array.IndexOf(ChoiceIds,choice??"2b"));Controls.Add(model);
-  requirements=new Label {Location=new Point(28,124),Size=new Size(510,175),ForeColor=Color.LightGray,Text=ChoiceDetails[model.SelectedIndex]};Controls.Add(requirements);
+  requirements=new Label {Location=new Point(28,124),Size=new Size(510,175),ForeColor=StartupTheme.Muted,Text=ChoiceDetails[model.SelectedIndex]};Controls.Add(requirements);
   model.SelectedIndexChanged+=(s,e)=>requirements.Text=ChoiceDetails[model.SelectedIndex];
   status=new Label {Text="Nothing is downloaded until you select Download. All listed models support vision.",Location=new Point(28,310),Size=new Size(510,44)};Controls.Add(status);
   progress=new ProgressBar {Location=new Point(28,360),Size=new Size(510,12),Style=ProgressBarStyle.Marquee};Controls.Add(progress);progress.Visible=false;

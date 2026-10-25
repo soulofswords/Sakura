@@ -10,6 +10,21 @@ class NvidiaARTrackerTests(unittest.TestCase):
         self.assertIn('CheekPuff_R', AR_EXPRESSION_NAMES)
         self.assertLess(AR_EXPRESSION_NAMES.index('CheekPuff_L'), AR_EXPRESSION_NAMES.index('CheekPuff_R'))
 
+    def test_recent_frame_is_not_proof_of_face_and_stale_face_expires(self):
+        import time
+        tracker=NvidiaARFaceTracker()
+        tracker._updated_at=time.monotonic()
+        tracker._result={'JawOpen':.7}
+        self.assertTrue(tracker.snapshot()['connected'])
+        self.assertFalse(tracker.snapshot()['face_detected'])
+        self.assertEqual(tracker.snapshot()['blendshapes'],{})
+        tracker._face_detected=True
+        self.assertTrue(tracker.snapshot()['face_detected'])
+        self.assertEqual(tracker.snapshot()['blendshapes']['jawOpen'],.7)
+        tracker._updated_at=time.monotonic()-.4
+        self.assertFalse(tracker.snapshot()['face_detected'])
+        self.assertEqual(tracker.snapshot()['blendshapes'],{})
+
     def test_frame_input_is_refused_when_tracker_is_disabled(self):
         tracker = NvidiaARFaceTracker()
         with self.assertRaisesRegex(RuntimeError, 'not enabled'):

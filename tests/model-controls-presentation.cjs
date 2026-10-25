@@ -7,7 +7,7 @@ const v=Object.create(context.Viewer.prototype);
 Object.assign(v,{model:{},renderer:{domElement:{width:800,height:600}},container:{appendChild(){},classList:{add(){held=true;},remove(){held=false;}}},controls:{mouseButtons:{},touches:{}},_renderFrame(){renders++;},_applyTrackingRestPose(){},clearManualExpression(){},setMorph(){}});
 for(const mode of ['gemini','local','vtuber']){
  v.desktopMode=false;v.setVtuberTrackingMode(mode==='vtuber');
- assert.equal(v.controls.mouseButtons.LEFT,2);assert.equal(v.controls.mouseButtons.RIGHT,0);assert.equal(v.controls.touches.ONE,1);assert.equal(v.controls.screenSpacePanning,true);
+ assert.equal(v.controls.mouseButtons.LEFT,-1,'Left drag belongs to the pointer-capture handler, not OrbitControls');assert.equal(v.controls.mouseButtons.RIGHT,0);assert.equal(v.controls.touches.ONE,1);assert.equal(v.controls.screenSpacePanning,true);
 }
 v._displayLoadTicket=1;v._holdPresentedFrame();assert.equal(copies,1);assert.equal(renders,1);assert.equal(v._heldFrame.width,800);
 assert.equal(held,true,'Live canvas hidden while the alpha snapshot replaces it');assert.equal(v._heldFrame.className,'model-held-frame');

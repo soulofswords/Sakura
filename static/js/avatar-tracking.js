@@ -43,7 +43,7 @@ export default class AvatarTracking {
             const stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {
                 ...(deviceId ? {deviceId: {exact: deviceId}} : {}),
                 ...(this.cameraFacingMode ? {facingMode:{ideal:this.cameraFacingMode}} : {}),
-                width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: this.frameRate, max: 60},
+                width: {ideal: this.captureWidth||1280}, height: {ideal: this.captureHeight||720}, frameRate: {ideal: this.frameRate, max: 60},
             }});
             if (session !== this.session) { stream.getTracks().forEach(t => t.stop()); return; }
             this.stream = stream;
@@ -56,7 +56,7 @@ export default class AvatarTracking {
             // MediaPipe's WASM loader calls importScripts internally, so this
             // must remain a classic worker.  The cache-busted module import in
             // the worker keeps Chromium from reusing its earlier MIME failure.
-            this.worker = new Worker('/static/js/avatar-tracking-worker.js?v=presence128');
+            this.worker = new Worker('/static/js/avatar-tracking-worker.js?v=phone60-1');
             await new Promise((resolve, reject) => {
                 const timer = setTimeout(() => finish(new Error('Tracking initialization timed out. Retry your camera.')), 45000);
                 const finish = error => {
@@ -141,9 +141,9 @@ export default class AvatarTracking {
                     // avoiding body inference that cannot move this avatar.
                     this.worker.postMessage({type: 'frame', image, timestamp: performance.now(),
                         bodyTracking: !this.viewer.live2d && this.poseTrackingEnabled,
-                        inferenceWidth:this.inferenceWidth||640,poseStride:this.poseStride||2}, [image]);
+                        inferenceWidth:this.inferenceWidth||640,poseStride:this.poseStride||2,handStride:this.handStride||1,lowLatency:this.lowLatency===true}, [image]);
                 } catch (error) { this.busy = false; this.status(error.message); }
-            }, Math.max(4, Math.floor(1000 / this.frameRate)));
+            }, this.lowLatency?4:Math.max(4, Math.floor(1000 / this.frameRate)));
         } catch (error) {
             if (session !== this.session) return;
             this.stop();
@@ -228,7 +228,8 @@ export default class AvatarTracking {
                 if (!response.ok || data.error) throw new Error(data.error || 'NVIDIA AR tracker is not running.');
                 this.nvidiaArBlendshapes = data.connected
                     ? Object.entries(data.blendshapes || {}).map(([categoryName, score]) => ({categoryName, score})) : [];
-                if (!data.connected) this.status(data.running
+                if(data.connected&&data.face_detected===false)this.status('NVIDIA RTX · camera frames received, no face detected');
+                else if (!data.connected) this.status(data.running
                     ? 'NVIDIA RTX tracker ready · waiting for a camera frame.'
                     : 'NVIDIA RTX tracker is not running. Enable it again in Camera settings.');
             } catch (error) { this.status(`NVIDIA RTX tracker unavailable: ${error.message}`); }

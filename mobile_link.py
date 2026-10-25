@@ -1,11 +1,15 @@
 """Opt-in LAN relay: exposes only paired phone controls, never the PC API."""
 import asyncio
+import os
 import ipaddress
 import secrets
 import socket
+import select
+import platform
 import threading
 import time
 import hashlib
+import hmac
 import json
 import re
 from pathlib import Path
@@ -14,6 +18,10 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse,FileResponse
 import uvicorn
+import mobile_tls
+
+DISCOVERY_MAGIC=b'sakura-discover-v1'
+DISCOVERY_PORT=8770
 
 class MobileLink:
     def __init__(self,store_path=None):
@@ -21,16 +29,27 @@ class MobileLink:
         from product import EDITION
         from config import BASE_DIR
         self.store=Path(store_path) if store_path else BASE_DIR/'phone-devices.json'
+        from vtuber_instances import instance_index
+        slot=instance_index() if EDITION=='vtuber' or os.environ.get('SAKURA_VTUBER_INSTANCE')=='1' else 1
+        if store_path is None and slot>1:
+            self.store=BASE_DIR/f'desktop-profile-{slot}'/'phone-devices.json'
+            self.store.parent.mkdir(parents=True,exist_ok=True)
+        self.identity_file=self.store.with_name('phone-link-id.txt')
+        self.pc_id=self._load_identity();self.pc_name=(platform.node() or 'Sakura PC')[:60]+(f' · VTuber {slot}' if slot>1 else '')
+        self.discovery_port=DISCOVERY_PORT;self.beacon_sockets=[];self.beacon_thread=None;self.beacon_stop=None;self.beacon_replies=[]
+        self.identity_attempts={}
+        self.tracking_arrivals=deque(maxlen=240)
         try:self.devices=json.loads(self.store.read_text(encoding='utf-8'))
         except (OSError,ValueError):self.devices={}
         if not isinstance(self.devices,dict):self.devices={}
         self.devices={key:value for key,value in self.devices.items() if isinstance(key,str) and isinstance(value,dict)
             and re.fullmatch(r'[0-9a-f]{64}',str(value.get('token_hash','')))}
-        self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={}
-        self.pc_port=8766;self.port=8772 if EDITION=='vtuber' else 8771;self.code_expires=0;self.thread=None
+        self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={};self._tls=None
+        self.pc_port=8766;self.port=(8772 if slot==1 else 8810+slot) if EDITION=='vtuber' else (8771 if slot==1 else 8820+slot);self.code_expires=0;self.thread=None
         self.model_transfer=None;self.model_package=None;self.transfer_request=None;self.tracking_control=None;self.tracking_sequence=0
         self.api=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
         self.api.add_api_route('/pair',self.pair,methods=['POST'])
+        self.api.add_api_route('/identity-proof',self.identity_proof,methods=['POST'])
         self.api.add_api_route('/state',self.phone_state,methods=['GET'])
         self.api.add_api_route('/tools',self.device_tools,methods=['POST'])
         self.api.add_api_route('/model/package/{identifier}',self.download_model,methods=['GET'])
@@ -46,35 +65,153 @@ class MobileLink:
         try:private=ipaddress.ip_address(host).is_private
         except ValueError:private=False
         if not self.enabled or not private:return JSONResponse({'error':'Phone link is off.'},403)
-        if int(request.headers.get('content-length','0') or 0)>250000:return JSONResponse({'error':'Request too large'},413)
-        if request.url.path!='/pair':
+        # A chunked body has no Content-Length, so demand one before reading anything.
+        if request.method in ('POST','PUT','PATCH'):
+            try:length=int(request.headers.get('content-length',''))
+            except (TypeError,ValueError):return JSONResponse({'error':'A Content-Length header is required.'},411)
+            if length>250000:return JSONResponse({'error':'Request too large'},413)
+        elif int(request.headers.get('content-length','0') or 0)>250000:return JSONResponse({'error':'Request too large'},413)
+        if request.url.path not in ('/pair','/identity-proof'):
             token=request.headers.get('authorization','').removeprefix('Bearer ')
             digest=hashlib.sha256(token.encode()).hexdigest()
             with self.lock:device=next((d for d in self.devices.values() if secrets.compare_digest(str(d.get('token_hash','')),digest)),None)
+            if device is not None and device.get('expires_at',0)<=time.time():return JSONResponse({'error':'Pairing expired. Pair this phone again.'},401)
             if not token or (token not in self.tokens and device is None):return JSONResponse({'error':'Pair with the PC first.'},401)
             if device is not None:device['last_seen']=time.time()
         return await call_next(request)
 
-    def start(self,pc_port):
-        self.pc_port=pc_port
-        if not self.enabled:
-            self.enabled=True;self.code=f'{secrets.randbelow(1000000):06d}';self.code_expires=time.time()+300
-            self.server=uvicorn.Server(uvicorn.Config(self.api,host='0.0.0.0',port=self.port,log_level='warning',access_log=False))
-            if self.thread and self.thread.is_alive():self.thread.join(timeout=2)
-            self.thread=threading.Thread(target=self.server.run,daemon=True);self.thread.start()
-        return self.info()
+    def _load_identity(self):
+        # A random id saved beside the device list is what lets a phone keep its
+        # pairing after the router hands this PC a different address.
+        try:
+            stored=self.identity_file.read_text(encoding='utf-8').strip()
+            if re.fullmatch(r'[0-9a-f]{32}',stored):return stored
+        except OSError:pass
+        generated=secrets.token_hex(16)
+        try:self.identity_file.parent.mkdir(parents=True,exist_ok=True);self.identity_file.write_text(generated,encoding='utf-8')
+        except OSError:pass
+        return generated
 
-    def info(self):
+    @property
+    def tls(self):
+        with self.lock:
+            if self._tls is None:self._tls=mobile_tls.ensure_identity(self.store.parent)
+        return self._tls
+
+    def lan_addresses(self):
         addresses=set()
         try:
             for entry in socket.getaddrinfo(socket.gethostname(),None,socket.AF_INET):
                 address=entry[4][0]
                 if ipaddress.ip_address(address).is_private and not address.startswith('127.'):addresses.add(address)
         except OSError:pass
+        return sorted(addresses)
+
+    def start_beacon(self):
+        self.stop_beacon()
+        sockets=[]
+        for address in self.lan_addresses():
+            try:
+                probe=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+                probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                probe.setblocking(False);probe.bind((address,self.discovery_port));sockets.append(probe)
+            except OSError:
+                probe.close()
+        self.beacon_sockets=sockets;self.beacon_stop=threading.Event()
+        self.beacon_thread=threading.Thread(target=self.beacon_loop,args=(sockets,self.beacon_stop),daemon=True,name='sakura-discovery')
+        self.beacon_thread.start()
+
+    def stop_beacon(self):
+        stop=self.beacon_stop;self.beacon_stop=None
+        if stop:stop.set()
+        sockets,self.beacon_sockets=self.beacon_sockets,[]
+        for probe in sockets:
+            try:probe.close()
+            except OSError:pass
+        thread=self.beacon_thread;self.beacon_thread=None
+        if thread and thread.is_alive():thread.join(timeout=1.5)
+
+    def discovery_reply(self,data,host):
+        # A flooded probe still must not starve the phone's HTTP pairing calls.
+        if not self.enabled or data.strip()!=DISCOVERY_MAGIC:return None
+        now=time.time()
+        self.beacon_replies=[stamp for stamp in self.beacon_replies if now-stamp<1]
+        if len(self.beacon_replies)>=10:return None
+        self.beacon_replies.append(now)
+        # The phone pins this certificate before it sends the pairing code, so a
+        # spoofed beacon cannot read the code or impersonate this PC later.
+        return json.dumps({'service':'sakura','id':self.pc_id,'name':self.pc_name,'edition':self.edition,
+            'https':f'https://{host}:{self.port}','port':self.port,'fingerprint':self.tls['fingerprint']}).encode()
+
+    def beacon_loop(self,sockets,stop):
+        addresses=tuple(self.lan_addresses());next_refresh=time.monotonic()+2
+        while not stop.is_set() and self.enabled:
+            if time.monotonic()>=next_refresh:
+                current=tuple(self.lan_addresses());next_refresh=time.monotonic()+2
+                if current!=addresses or not sockets:
+                    for probe in sockets:
+                        try:probe.close()
+                        except OSError:pass
+                    sockets[:]=[]
+                    for address in current:
+                        probe=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+                        try:
+                            probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                            probe.setblocking(False);probe.bind((address,self.discovery_port));sockets.append(probe)
+                        except OSError:probe.close()
+                    addresses=current
+            if not sockets:
+                stop.wait(.4);continue
+            try:readable,_,_=select.select(sockets,[],[],0.4)
+            except (OSError,ValueError):
+                if stop.is_set():return
+                next_refresh=0;continue
+            for probe in readable:
+                try:data,sender=probe.recvfrom(512)
+                except OSError:continue
+                reply=self.discovery_reply(data,probe.getsockname()[0])
+                if reply is None:continue
+                try:probe.sendto(reply,sender)
+                except OSError:pass
+
+    async def identity_proof(self,request:Request):
+        now=time.monotonic();host=request.client.host
+        recent=[stamp for stamp in self.identity_attempts.get(host,[]) if now-stamp<60]
+        if len(recent)>=30:return JSONResponse({'error':'Too many identity checks. Retry in a minute.'},429)
+        recent.append(now);self.identity_attempts[host]=recent
+        body=await request.json()
+        nonce=str(body.get('nonce',''));device_id=str(body.get('device_id',''))
+        endpoint=str(body.get('endpoint',''))
+        # Bind proof to this server address: a spoofed beacon must not relay a
+        # challenge to the real PC and pass its answer off as its own.
+        if request.url.hostname not in self.lan_addresses() or endpoint!=f'{request.url.scheme}://{request.url.hostname}:{self.port}':
+            return JSONResponse({'error':'Identity endpoint does not match this PC.'},400)
+        if not re.fullmatch(r'[0-9a-f]{64}',nonce) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',device_id):
+            return JSONResponse({'error':'Invalid identity challenge.'},400)
+        with self.lock:device=self.devices.get(device_id)
+        if not device:return JSONResponse({'error':'Pair this phone first.'},401)
+        key=bytes.fromhex(device['token_hash'])
+        proof=hmac.new(key,(self.pc_id+'\n'+endpoint+'\n'+nonce).encode(),hashlib.sha256).hexdigest()
+        return {'pc_id':self.pc_id,'endpoint':endpoint,'nonce':nonce,'proof':proof}
+
+    def start(self,pc_port):
+        self.pc_port=pc_port
+        if not self.enabled:
+            self.enabled=True;self.code=f'{secrets.randbelow(1000000):06d}';self.code_expires=time.time()+300
+            identity=self.tls
+            self.server=uvicorn.Server(uvicorn.Config(self.api,host='0.0.0.0',port=self.port,
+                ssl_certfile=identity['cert'],ssl_keyfile=identity['key'],log_level='warning',access_log=False))
+            if self.thread and self.thread.is_alive():self.thread.join(timeout=2)
+            self.thread=threading.Thread(target=self.server.run,daemon=True);self.thread.start()
+            self.start_beacon()
+        return self.info()
+
+    def info(self):
         with self.lock:devices=[{'id':id,'name':device.get('name','Android device'),'connected':self.enabled and time.time()-device.get('last_seen',0)<15} for id,device in self.devices.items()]
         return {'enabled':self.enabled,'code':self.code if self.enabled else '',
-                'addresses':[f'http://{ip}:{self.port}' for ip in sorted(addresses)],'port':self.port,'paired':len(self.tokens),
-                'devices':devices}
+                'addresses':[f'https://{ip}:{self.port}' for ip in self.lan_addresses()],'port':self.port,'paired':len(self.tokens),
+                'id':self.pc_id,'name':self.pc_name,'discovery_port':self.discovery_port,'devices':devices,
+                'fingerprint':self.tls['fingerprint']}
 
     def save_devices(self):
         with self.lock:
@@ -92,10 +229,14 @@ class MobileLink:
 
     def stop(self):
         self.enabled=False;self.tokens.clear();self.code='';self.frame=None;self.camera=None;self.commands.clear();self.transfer_request=None
+        self.stop_beacon()
         if self.server:self.server.should_exit=True
 
     async def pair(self,request:Request):
         host=request.client.host;now=time.time()
+        global_attempts=[stamp for stamp in self.attempts.get('*',[]) if now-stamp<60]
+        if len(global_attempts)>=15:return JSONResponse({'error':'Too many pairing attempts. Wait one minute.'},429)
+        global_attempts.append(now);self.attempts['*']=global_attempts
         attempts=[stamp for stamp in self.attempts.get(host,[]) if now-stamp<60]
         if len(attempts)>=5:return JSONResponse({'error':'Too many attempts. Wait one minute.'},429)
         attempts.append(now);self.attempts[host]=attempts
@@ -108,9 +249,13 @@ class MobileLink:
         if device_id not in self.devices and len(self.devices)>=32:return JSONResponse({'error':'Forget an old device before adding another.'},409)
         with self.lock:
             self.devices[device_id]={'name':str(body.get('device_name') or 'Android device')[:80],
-                'token_hash':hashlib.sha256(token.encode()).hexdigest(),'last_seen':now}
+                'token_hash':hashlib.sha256(token.encode()).hexdigest(),'last_seen':now,'expires_at':now+30*86400}
             self.save_devices()
-        return {'token':token,'name':'Sakura','edition':self.state.get('edition','companion')}
+            self.code='';self.code_expires=0
+        # The phone records this fingerprint with the token and rejects any other
+        # certificate on reconnect, so a later LAN impostor cannot collect frames.
+        return {'token':token,'id':self.pc_id,'name':self.pc_name,'edition':self.state.get('edition','companion'),
+            'fingerprint':self.tls['fingerprint']}
 
     async def device_tools(self,request:Request):
         body=await request.json()
@@ -134,7 +279,10 @@ class MobileLink:
         return {'ok':True}
 
     async def phone_state(self):
-        return {**self.state,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request,'tracking_control':self.tracking_control}
+        # The id lets a phone that reached this address confirm it is the same PC it
+        # paired with, and refresh its saved address after a DHCP change.
+        return {**self.state,'pc_id':self.pc_id,'name':self.pc_name,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request,
+            'tracking_control':self.tracking_control,'fingerprint':self.tls['fingerprint']}
 
     def transfer_result(self,identifier,status,error=''):
         if status not in ('preparing','cancelled','failed'):raise ValueError('Invalid transfer status.')
@@ -253,8 +401,12 @@ class MobileLink:
                 from nvidia_ar_tracker import tracker
                 if tracker.snapshot()['running']:
                     tracker.submit_frame(jpeg,width,height)
-                    shapes=tracker.snapshot().get('blendshapes',{})
-                    if shapes:clean['blendshapes']=[{'categoryName':k,'score':v} for k,v in shapes.items()]
+        # Every packet uses the same selected expression source, including packets
+        # without a JPEG. The tracker expires results when inference stops.
+        if self.state.get('tracking_face_source')=='nvidia_ar':
+            from nvidia_ar_tracker import tracker
+            shapes=tracker.snapshot().get('blendshapes',{})
+            clean['blendshapes']=[{'categoryName':k,'score':v} for k,v in shapes.items()]
 
         def points(value, count):
             return isinstance(value,list) and len(value)==count and all(isinstance(p,dict)
@@ -274,8 +426,18 @@ class MobileLink:
             or pose.get('world') is not None and not points(pose['world'],33)):
             return JSONResponse({'error':'Invalid body pose'},400)
         enabled=data.get('handTrackingEnabled',True) is not False
-        with self.lock:self.frame={'face':clean,'hands':hands if enabled else [],'pose':pose,
-            'handTrackingEnabled':enabled,'headPoseFiltered':data.get('headPoseFiltered') is True,'timestamp':time.time()*1000}
+        reported=data.get('trackingMetrics',{})
+        if not isinstance(reported,dict):reported={}
+        metrics={}
+        for key,limit in [('sequence',9007199254740991),('cameraFps',240),('processedFps',240),('uploadedFps',240),('processingMs',10000)]:
+            value=reported.get(key)
+            if type(value) in (int,float) and math.isfinite(value) and 0<=value<=limit:metrics[key]=value
+        with self.lock:
+            now=time.monotonic();self.tracking_arrivals.append(now)
+            while self.tracking_arrivals and now-self.tracking_arrivals[0]>1:self.tracking_arrivals.popleft()
+            metrics['receivedFps']=len(self.tracking_arrivals)
+            self.frame={'face':clean,'hands':hands if enabled else [],'pose':pose,
+                'handTrackingEnabled':enabled,'headPoseFiltered':data.get('headPoseFiltered') is True,'timestamp':time.time()*1000,'trackingMetrics':metrics}
         return {'ok':True}
 
     async def chat(self,request:Request):
@@ -283,7 +445,7 @@ class MobileLink:
         body=await request.json();text=str(body.get('text','')).strip()[:4000]
         if not text:return JSONResponse({'error':'Enter a message'},400)
         async with httpx.AsyncClient(timeout=120) as client:
-            response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/chat',json={'text':text,'defer_audio':True})
+            response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/chat',json={'text':text,'defer_audio':True,'phone':True})
             if not response.is_success:return JSONResponse({'error':'PC companion could not reply. Check its AI settings.'},response.status_code)
             reply=response.json().get('reply','')
             with self.lock:self.commands.append({'type':'phone-reply','text':reply})

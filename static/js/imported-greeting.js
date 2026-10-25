@@ -12,7 +12,7 @@ export default class ImportedGreeting {
         this.data=await cached;return this.data;
     }
     begin(){
-        const v=this.viewer;if(!this.data||!v.model||v.live2d||v.userTracking||v.vtuberTrackingMode)return null;
+        const v=this.viewer;if(!this.data||!v.model||v.live2d||(v.userTracking||v.vtuberTrackingMode)&&!v.companionTracking)return null;
         const entries=Object.entries(v.animationBones).filter(([key])=>Object.hasOwn(this.data.frames[0].rotations,key))
             .map(([key,e])=>({key,bone:e.bone,rest:new THREE.Quaternion().setFromEuler(e.rest)}));
         for(const f of v.conversationFingers||[]){const key=f.side+'Finger'+f.finger+'_'+f.segment;

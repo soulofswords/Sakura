@@ -43,7 +43,7 @@ export async function transferSetup(){
     const intro=document.createElement('p');intro.textContent='Use the same Wi-Fi for this one-time transfer. Enable Connect to Phone on your PC. After transfer, Local works away from home.';modal.content.append(intro);
     const saved=JSON.parse(Sakura.remembered()||'[]'),last=localStorage.getItem('sakura-last-pc'),recent=saved.find(p=>p.address===last)||saved.at(-1);
     const pc=field(modal.content,'Remembered PC','select',saved.map(p=>[p.address,p.name+' · '+p.address]));if(recent)pc.value=recent.address;
-    const address=field(modal.content,'PC address (for a new PC)');address.placeholder='http://192.168.1.10:8771';address.inputMode='url';
+    const address=field(modal.content,'PC address (for a new PC)');address.placeholder='https://192.168.1.10:8771';address.inputMode='url';
     const code=field(modal.content,'Pairing code (new PC only)');code.inputMode='numeric';code.maxLength=6;
     const connect=document.createElement('button');connect.textContent='Connect / retry';modal.content.append(connect);
     let pending=false,activeRequest='';
@@ -53,7 +53,7 @@ export async function transferSetup(){
             if(pending||modal.cancelled)return;pending=true;connect.disabled=true;connect.setAttribute('aria-busy','true');connect.textContent='Connecting…';
             try{
                 modal.message.textContent='Connecting…';
-                const data=address.value.trim()?await nativeJob('connectAsync',address.value.trim(),code.value.trim()):pc.value?await nativeJob('reconnectAsync',pc.value):null;
+                const data=address.value.trim()?await nativeJob('connectAsync',address.value.trim(),code.value.trim(),''):pc.value?await nativeJob('reconnectAsync',pc.value):null;
                 if(!data)throw Error('Enter the PC address and pairing code, or choose a remembered PC.');
                 if(modal.cancelled)return;code.value='';localStorage.setItem('sakura-last-pc',address.value.trim()||pc.value);
                 modal.message.textContent='Connection Passed · Waiting for you to select the model on your PC…';

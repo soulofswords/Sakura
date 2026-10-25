@@ -1,0 +1,34 @@
+# Sakura Windows + Android Beta - 25 October 2026
+
+## Downloads
+
+Published download assets belong in the public Sakura-Downloads repository; application source remains in the private Sakura repository.
+
+- Sakura-Companion-Setup-Windows-x64.exe: Companion with Cloud API, Local LLM and VTuber startup choices. Agent mode remains inside Companion.
+- Sakura-VTuber-Setup-Windows-x64.exe: dedicated standalone performance application.
+- Sakura-Mobile-Android-0.3.29.apk: combined mobile app, Android version code 35, same package/signing identity as the previous testing build.
+- Sakura_Companion_Guide.pdf and Sakura_VTuber_Guide.pdf: separate guides rebuilt for the current left-toolbar/right-panel UI.
+- Offline HTML editions of both guides and SHA256SUMS.txt accompany the downloads.
+
+## Main fixes
+
+- Replace expensive CPU-skinned hover/drag hit-testing with a one-pixel GPU pass for PMX and VRM. Preserve model-only dragging, texture alpha, collaborator exclusion and renderer-state restoration.
+- Keep cursor gaze responsive through local streaming and direct pointer updates, and correct head/eye mapping and VRM expression-based look-at ranges.
+- Exclude backup files and source maps from protected packages. Assert the native core is present, original application Python is absent, and the current GPU cursor implementation is included in extracted EXEs.
+- Run the cursor, material, stage-item, navigation, mobile-theme and protection regression checks as part of the release gate.
+- Package the current Companion/VTuber navigation, mobile appearance/discovery/secure-pairing support and shared model controls.
+
+## Guides
+
+The guides cover searching characters without merging the PMX/VRM/Live2D selectors; toolbar and panel navigation; independent tint/opacity edits; phone pairing by discovered PC name plus six-digit code; tracking and optional NVIDIA inputs; Sakura Virtual Camera and Spout; and Companion AI/Agent workflows.
+
+## Verification and limits
+
+- Windows builds run the release gate, extracted-installer checks and compiled-backend smoke checks for both editions.
+- Android build verifies Java/R8 compilation, APK signatures and archive integrity. Physical Android device/camera/network testing remains necessary.
+- All PDF pages are rendered and visually reviewed; chapter boundaries are checked automatically.
+- Renderer profiling uses actual PMX/VRM assets on an RTX 3080. The measured improvement is a benchmark, not an FPS or zero-latency guarantee for every PC.
+- No character models, local LLM weights, personal API keys, signed-in accounts or MCP connections are bundled. Optional models and third-party services need their own setup.
+- Windows installers are unsigned tester builds. The APK uses the existing local testing signing identity. Compilation and obfuscation deter casual inspection but are not irreversible encryption.
+
+Release: https://github.com/soulofswords/Sakura-Downloads/releases/tag/windows-beta-2026-10-25

@@ -1,3 +1,4 @@
+import json
 import time
 import unittest
 import tempfile
@@ -6,6 +7,32 @@ import httpx
 from mobile_link import MobileLink
 
 class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_phone_performance_metrics_are_bounded_and_fresh(self):
+        await self.pair()
+        payload={'face':{},'hands':[],'trackingMetrics':{'sequence':12,'cameraFps':60,'processedFps':58,'uploadedFps':57,'processingMs':14,'unexpected':'ignored'}}
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,200)
+        metrics=self.link.poll({})['frame']['trackingMetrics']
+        self.assertEqual(metrics['sequence'],12);self.assertEqual(metrics['processedFps'],58);self.assertNotIn('unexpected',metrics)
+        payload['trackingMetrics']={'cameraFps':9999,'processingMs':-1,'sequence':True}
+        self.assertEqual((await self.client.post('/frame',json=payload)).status_code,200)
+        metrics=self.link.poll({})['frame']['trackingMetrics']
+        self.assertNotIn('cameraFps',metrics);self.assertNotIn('processingMs',metrics);self.assertNotIn('sequence',metrics)
+        self.assertIsNone(self.link.poll({})['frame'],'Polling does not manufacture duplicate tracking frames')
+    async def test_nvidia_source_is_preserved_between_image_uploads(self):
+        from unittest.mock import patch
+        await self.pair()
+        self.link.state['tracking_face_source']='nvidia_ar'
+        payload={'face':{'blendshapes':[{'categoryName':'jawOpen','score':.9}]},'hands':[]}
+        with patch('nvidia_ar_tracker.tracker') as tracker:
+            tracker.snapshot.return_value={'blendshapes':{'jawOpen':.2}}
+            await self.client.post('/frame',json=payload)
+            self.assertEqual(self.link.poll({})['frame']['face']['blendshapes'],[{'categoryName':'jawOpen','score':.2}])
+            tracker.snapshot.return_value={'blendshapes':{}}
+            self.link.state['tracking_face_source']='nvidia_ar'
+            await self.client.post('/frame',json=payload)
+            self.assertEqual(self.link.poll({})['frame']['face']['blendshapes'],[])
+            tracker.submit_frame.assert_not_called()
+
     async def test_pc_controls_paired_phone_tracking(self):
         await self.pair()
         self.assertTrue(self.link.control_tracking({'action':'start'})['ok'])
@@ -187,4 +214,57 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
         await self.pair();before=self.client.headers['Authorization']
         self.link.new_pairing_code();self.assertEqual((await self.client.get('/state')).status_code,200)
         self.assertEqual(len(self.link.devices),1);self.assertEqual(self.client.headers['Authorization'],before)
+
+    async def test_pc_identity_survives_restart_and_ip_change(self):
+        identity=self.link.pc_id
+        self.assertRegex(identity,r'^[0-9a-f]{32}$')
+        self.assertEqual(MobileLink(self.store).pc_id,identity)
+        self.assertEqual(self.link.info()['id'],identity)
+        self.assertEqual(self.link.info()['name'],self.link.pc_name)
+        await self.pair()
+        self.assertEqual((await self.client.get('/state')).json()['pc_id'],identity)
+
+    async def test_pairing_returns_the_identity_a_phone_should_remember(self):
+        response=await self.client.post('/pair',json={'code':'123456','device_id':'test-phone'})
+        self.assertEqual(response.json()['id'],self.link.pc_id)
+        self.assertEqual(response.json()['name'],self.link.pc_name)
+        self.assertEqual(response.json()['edition'],self.link.edition)
+        self.assertEqual(response.json()['fingerprint'],self.link.info()['fingerprint'])
+
+    async def test_pairing_code_is_single_use_and_tokens_expire_after_thirty_days(self):
+        response=await self.client.post('/pair',json={'code':'123456','device_id':'test-phone'})
+        token=response.json()['token']
+        device=self.link.devices['test-phone']
+        self.assertAlmostEqual(device['expires_at']-device['last_seen'],30*86400,delta=60)
+        self.assertEqual((await self.client.post('/pair',json={'code':'123456'})).status_code,401)
+        device['expires_at']=time.time()-1;self.link.save_devices()
+        restarted=MobileLink(self.store);restarted.enabled=True
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=restarted.api,client=('192.168.1.22',1000)),base_url='http://pc',headers={'Authorization':'Bearer '+token}) as client:
+            self.assertEqual((await client.get('/state')).status_code,401)
+
+    async def test_discovery_answers_a_probe_with_the_bound_address(self):
+        reply=json.loads(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
+        self.assertEqual(reply['service'],'sakura')
+        self.assertEqual(reply['id'],self.link.pc_id)
+        self.assertEqual(reply['https'],f'https://192.168.1.103:{self.link.port}')
+        self.assertEqual(reply['port'],self.link.port)
+        self.assertRegex(reply['fingerprint'],r'^[0-9a-f]{64}$')
+        self.assertEqual(reply['fingerprint'],self.link.info()['fingerprint'])
+        self.assertNotIn('http',reply,'A legacy cleartext endpoint is not advertised')
+        self.assertIsNone(self.link.discovery_reply(b'maldroid-discover-v1','192.168.1.103'))
+        self.link.enabled=False
+        self.assertIsNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
+
+    async def test_discovery_probe_flood_cannot_starve_the_link(self):
+        for _ in range(10):self.assertIsNotNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
+        self.assertIsNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
+        self.link.beacon_replies=[stamp-1.1 for stamp in self.link.beacon_replies]
+        self.assertIsNotNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
+
+    async def test_discovery_only_advertises_private_network_addresses(self):
+        import ipaddress
+        for address in self.link.lan_addresses():
+            self.assertTrue(ipaddress.IPv4Address(address).is_private)
+        self.assertEqual(self.link.discovery_port,8770)
+        self.link.stop_beacon()
 

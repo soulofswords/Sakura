@@ -53,7 +53,7 @@ try:
     Image.open(BASE/'static/assets/desktop-companion.png').convert('RGBA').resize((192,192)).save(res/'sakura_flower.png')
     run([tools/'aapt2.exe','compile','--dir',BUILD/'res','-o',BUILD/'resources.zip'])
     unsigned=BUILD/'unsigned.apk'
-    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','34','--version-name','0.3.28','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
+    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','35','--version-name','0.3.29','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
     classes=BUILD/'classes';classes.mkdir(exist_ok=True)
     run([java/'javac.exe','-encoding','UTF-8','-source','8','-target','8','-classpath',os.pathsep.join(map(str,[platform,*wake_jars])),'-d',classes,*sorted((source_root/'src').rglob('*.java'))])
     classes_jar=BUILD/'classes.jar'
@@ -63,7 +63,7 @@ try:
     run([java/'java.exe','-cp',tools/'lib/d8.jar','com.android.tools.r8.R8','--release','--pg-conf',source_root/'proguard-rules.pro','--lib',platform,'--min-api','28','--output',dex,classes_jar,*wake_jars])
     assets={}
     for path in (source_root/'assets').rglob('*'):
-        if path.is_file() and not (args.edition=='vtuber' and path.name in ('phone-local.js','phone-avatar.js','phone-stage.js','phone-stage.css','local-viewer.html','local-setup.js','provider-tools.js')):assets[path]='assets/'+path.relative_to(source_root/'assets').as_posix()
+        if path.is_file() and path.suffix.lower() not in ('.bak','.map','.tmp','.orig') and not (args.edition=='vtuber' and path.name in ('phone-local.js','phone-avatar.js','phone-stage.js','phone-stage.css','local-viewer.html','local-setup.js','provider-tools.js')):assets[path]='assets/'+path.relative_to(source_root/'assets').as_posix()
     if args.edition=='combined':
         for path in (BASE/'static/js').rglob('*.js'):assets[path]='assets/static/js/'+path.relative_to(BASE/'static/js').as_posix()
         for path in (BASE/'static/vendor').rglob('*'):
@@ -97,6 +97,7 @@ try:
     run([tools/'aapt2.exe','dump','badging',apk])
     with zipfile.ZipFile(apk) as archive:
         assert archive.testzip() is None
+        assert not any(n.lower().endswith(('.bak','.map','.tmp','.orig')) for n in archive.namelist()), 'Backup/debug source leaked into APK'
         for name in ('AndroidManifest.xml','classes.dex','assets/mobile.js','assets/static/vendor/tracking/face_landmarker.task'):assert name in archive.namelist()
         html_text=archive.read('assets/index.html').decode('utf-8')
         assert '🌸 Sakura' in html_text and 'Settings → General' in html_text, 'UI Unicode was corrupted during packaging'

@@ -16,6 +16,13 @@ static class EditionInstallerCheck {
   }
   var extract=type.GetMethod("Extract",BindingFlags.Static|BindingFlags.NonPublic);
   extract.Invoke(null,new object[]{args[1],null});
+  string appRoot=Path.Combine(args[1],"Sakura");
+  Require(Directory.GetFiles(appRoot,"sakura_core*.pyd").Length==1,"Protected native core missing");
+  Require(!File.Exists(Path.Combine(appRoot,"app.py"))&&!File.Exists(Path.Combine(appRoot,"llm.py")),"Readable application Python leaked");
+  foreach(string asset in Directory.GetFiles(Path.Combine(appRoot,"static"),"*",SearchOption.AllDirectories))
+   Require(!Regex.IsMatch(Path.GetFileName(asset),@"(?i)(\.(bak|backup|orig|rej|tmp|swp|swo|map)|~)$|\.before-"),"Backup/debug asset leaked: "+asset);
+  Require(File.ReadAllText(Path.Combine(appRoot,"static","js","model-viewer.js")).Contains("_hitModelPixelAt"),"GPU cursor lag fix missing");
+  Require(File.ReadAllText(Path.Combine(appRoot,"static","index.html")).Contains("cursor-gpu6"),"Stale renderer cache version");
   Require(File.Exists(Path.Combine(args[1],display+".exe")),"Branded launcher missing");
   Require(File.Exists(Path.Combine(args[1],"Sakura","tools","pmx-editor","PmxEditor.exe")),"PMX Editor integration missing");
   Require(Directory.Exists(Path.Combine(args[1],"Sakura","tools","pmx-editor","Lib")),"PMX Editor libraries missing");

@@ -1,10 +1,12 @@
-import ImportedGreeting from './imported-greeting.js?v=fbx89';
+import ImportedGreeting from './imported-greeting.js?v=fbx90';
 import {presentHand} from './hand-presentation.js?v=session87';
 // Original procedural routines retargeted to the currently loaded 3D rig.
 export default class ModelDance {
     constructor(viewer){this.viewer=viewer;this.active=null;this.importedGreeting=new ImportedGreeting(viewer);void this.importedGreeting.load().catch(error=>console.warn(error.message));}
     async prepare(style){if(style==='greeting_wave')await this.importedGreeting.load();}
-    supported(){const v=this.viewer;return !!(v.model&&!v.live2d&&!v.vtuberTrackingMode&&!v.userTracking&&v.animationBones?.torso&&v.animationBones?.leftArm&&v.animationBones?.rightArm);}
+    // Companion tracking keeps the AI choreography; the clip simply takes over
+    // the bones while it plays and the tracked pose resumes when it ends.
+    supported(){const v=this.viewer;return !!(v.model&&!v.live2d&&(!v.vtuberTrackingMode||v.companionTracking)&&(!v.userTracking||v.companionTracking)&&v.animationBones?.torso&&v.animationBones?.leftArm&&v.animationBones?.rightArm);}
     start(style='groove'){
         if(!this.supported())return false;
         const v=this.viewer;

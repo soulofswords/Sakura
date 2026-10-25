@@ -13,12 +13,18 @@ class NativePickerTests(unittest.TestCase):
         exec(compile(ast.Module(body=[method],type_ignores=[]),'picker','exec'),scope)
         with tempfile.TemporaryDirectory() as folder:
             calls=[]
-            win=types.SimpleNamespace(create_file_dialog=lambda *a,**kw:calls.append((a,kw)))
+            focus=[]
+            win=types.SimpleNamespace(create_file_dialog=lambda *a,**kw:calls.append((a,kw)),
+                                      show=lambda:focus.append('show'),restore=lambda:focus.append('restore'))
             obj=types.SimpleNamespace(holder={'window':win,'library_mode':True})
             with patch('config.MODELS_DIR',Path(folder)):
                 for kind in ['pmx','vrm','live2d']:
                     self.assertEqual(scope['import_model_package'](obj,kind),{'cancelled':True})
                     self.assertEqual(calls[-1][1]['directory'],str(Path(folder)/kind))
                     self.assertEqual(calls[-1][0][0],'file' if kind=='vrm' else 'folder')
+                self.assertEqual(focus,[],'The library window is not resized for an import dialog')
+                # The studio panel offers the same three imports in the small companion window.
                 obj.holder['library_mode']=False
-                self.assertIn('error',scope['import_model_package'](obj,'pmx'))
+                self.assertEqual(scope['import_model_package'](obj,'pmx'),{'cancelled':True})
+                self.assertEqual(focus,['show','restore'],'A companion window behind other apps is raised for its dialog')
+                self.assertEqual(calls[-1][1]['directory'],str(Path(folder)/'pmx'))

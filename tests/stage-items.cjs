@@ -1,0 +1,40 @@
+const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});try{
+ const page=await browser.newPage({viewport:{width:900,height:800}}),errors=[];page.setDefaultTimeout(7000);page.on('console',m=>{if(m.type()==='error')process.stderr.write(m.text()+'\n')});page.on('pageerror',e=>errors.push(e.message));
+ await page.route('http://127.0.0.1:9999/**',route=>{const path=new URL(route.request().url()).pathname;if(path==='/api/models')return route.fulfill({json:{live2d_models:[{name:'Animated hat',path:'live2d/hat/hat.model3.json'}]}});return route.fulfill({contentType:'text/html',body:'<body class="tracking-only"><div id="viewer" style="position:relative;width:400px;height:400px"><canvas id="main" width="400" height="400"></canvas></div><nav><button id="studio-model-lock">Lock</button></nav><div data-studio-content="background"></div></body>'});});
+ async function setup(){await page.goto('http://127.0.0.1:9999/');await page.evaluate(()=>{
+  window.loadedAssets=[];
+  window.Live2DViewer={createStageItem:async url=>{loadedAssets.push(url);const canvas=document.createElement('canvas');canvas.width=canvas.height=64;canvas.getContext('2d').fillRect(0,0,64,64);return{app:{view:canvas,stage:{},renderer:{render(){}},destroy(){}},avatar:{update(){}}};}};
+  window.viewer={container:document.getElementById('viewer'),renderer:{domElement:document.getElementById('main')},captureSpoutFrame:()=>{const p=new Uint8Array(400*400*4);for(let y=190;y<210;y++)for(let x=190;x<210;x++){p[(y*400+x)*4+2]=255;p[(y*400+x)*4+3]=255;}return{width:400,height:400,pixels:p};}};
+ });await page.addScriptTag({content:fs.readFileSync('static/js/stage-items.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function','function')+';window.items=installStageItems(viewer);'});await page.evaluate(()=>items.ready);}
+ await setup();
+ assert.equal(await page.locator('#studio-model-lock + #studio-item-lock').count(),1,'Small item lock sits directly below model lock');
+ assert.equal(await page.locator('#studio-item-lock').isDisabled(),true);
+ const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=100;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(10,10,80,80);return c.toDataURL().split(',')[1];});
+ await page.click('#stage-add-item');await page.locator('#stage-item-image').setInputFiles({name:'Red prop.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+ await page.waitForFunction(()=>items.items.length===1);
+ assert.equal(await page.locator('#stage-item-controls').isVisible(),true);
+ const composite=()=>page.evaluate(()=>{const f=viewer.captureSpoutFrame(0);return{center:[...f.pixels.slice((200*400+200)*4,(200*400+200)*4+4)],edge:[...f.pixels.slice(0,4)]};});
+ assert.deepEqual((await composite()).center,[255,0,0,255],'Above item overlays model');
+ await page.selectOption('#stage-item-layer','below');assert.deepEqual((await composite()).center,[0,0,255,255],'Below item is behind model');
+ assert.deepEqual((await composite()).edge,[0,0,0,0],'Transparent output remains transparent');
+ await page.selectOption('#stage-item-layer','above');
+ await page.evaluate(()=>{const r=viewer.container.getBoundingClientRect();window.r=r;});
+ const r=await page.locator('#viewer').boundingBox();
+ await page.mouse.move(r.x+200,r.y+200);await page.mouse.down();await page.mouse.move(r.x+240,r.y+220);await page.mouse.up();
+ assert.ok(Math.abs(await page.evaluate(()=>items.selected.x)-.6)<.001,'Item can be dragged');
+ await page.click('#studio-item-lock');const before=await page.evaluate(()=>items.selected.x);
+ await page.mouse.move(r.x+240,r.y+220);await page.mouse.down();await page.mouse.move(r.x+270,r.y+220);await page.mouse.up();assert.equal(await page.evaluate(()=>items.selected.x),before,'Locked item cannot move');
+ await page.evaluate(()=>{viewer.live2d={avatar:{x:200,y:200,scale:{x:1}}};});
+ await page.check('#stage-item-follow');const attached=await page.evaluate(()=>items.rect(items.selected));
+ await page.evaluate(()=>{viewer.live2d.avatar.x+=40;viewer.live2d.avatar.scale.x=2;});
+ const moved=await page.evaluate(()=>items.rect(items.selected));assert.ok(moved.x>attached.x);assert.equal(moved.width,attached.width*2,'Attached item follows model scale');
+ await page.evaluate(()=>items.save(items.selected));await setup();
+ assert.equal(await page.evaluate(()=>items.items.length),1,'Saved image restored');assert.equal(await page.evaluate(()=>items.items[0].locked),true,'Lock persists');
+ await page.click('#stage-add-item');await page.waitForFunction(()=>document.getElementById('stage-item-library').options.length===2);
+ await page.selectOption('#stage-item-library','live2d/hat/hat.model3.json');await page.click('#stage-item-use-live2d');await page.waitForFunction(()=>items.items.length===2);
+ assert.equal(await page.evaluate(()=>loadedAssets[0]),'/models/live2d/hat/hat.model3.json','Live2D item uses independent renderer without replacing main model');
+ await page.click('#stage-item-remove');assert.equal(await page.evaluate(()=>items.items.length),1);
+ assert.deepEqual(errors,[]);
+ console.log('PASS: transparent images, Live2D library, layer composition in capture, drag, item lock, model attachment, persistence and removal.');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

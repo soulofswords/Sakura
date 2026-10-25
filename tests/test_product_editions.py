@@ -36,6 +36,21 @@ class ProductTemplateTests(unittest.TestCase):
                 self.assertIn(display,(stage/'Installer.cs').read_text(encoding='utf-8'))
                 self.assertIn(launcher,(stage/'Installer.cs').read_text(encoding='utf-8'))
                 source=(stage/'Launcher.cs').read_text(encoding='utf-8')
+                html=(stage/'index.html').read_text(encoding='utf-8')
+                opened=html.index('id="startup-render-status"')
+                startup=html[opened:html.index('</div>',opened)]
+                if edition=='vtuber':
+                    self.assertNotIn('desktop-companion.png',html)
+                    self.assertNotIn('companion-vtuber.png',html)
+                    self.assertIn('vtuber-app.png',startup)
+                    self.assertIn('<strong>Sakura VTuber</strong>',startup)
+                else:
+                    self.assertIn('startup-logo-flower" src="/static/assets/desktop-companion.png',startup)
+                    self.assertIn('startup-logo-vtuber" src="/static/assets/companion-vtuber.png',startup)
+                    self.assertNotIn('vtuber-app.png',html)
+                    self.assertIn('<strong>Sakura Companion</strong>',startup)
+                    self.assertIn('html.vtuber-startup #startup-render-status .startup-logo-flower { display: none; }',html)
+                    self.assertIn('html.vtuber-startup #startup-render-status .startup-logo-vtuber { display: block; }',html)
                 if edition=='vtuber':
                     self.assertNotIn('LocalModelDialog',source)
                     self.assertNotIn('new StartupDialog',source)

@@ -11,7 +11,7 @@ Sakura is a desktop character companion and webcam VTuber application under acti
 - Built-in speech voices and optional RVC voice conversion.
 - Optional NVIDIA Broadcast camera selection and NVIDIA AR SDK setup guidance. Native NVIDIA AR facial inference is not connected yet.
 
-See [15 October 2026 update notes](docs/UPDATE-2026-10-15.md) for mobile setup, cloud diagnostics, animation, rendering and installer changes, including testing limitations. Source stays private; compiled/obfuscated tester builds are published separately in [Sakura Downloads](https://github.com/soulofswords/Sakura-Downloads/releases/tag/beta-2026-10-15).
+See [15 October 2026 update notes](docs/UPDATE-2026-10-15.md) for mobile setup, cloud diagnostics, animation, rendering and installer changes, including testing limitations. Source stays private; compiled/obfuscated tester builds are published separately in [Sakura Downloads](https://github.com/soulofswords/Sakura-Downloads/releases/tag/windows-beta-2026-10-25).
 
 ## Run from source on Windows
 
@@ -38,3 +38,5 @@ Third-party libraries retain their own licenses and distribution terms. A privat
 ## Feedback
 
 This app is currently under development. Feedback is welcome through [Discord](https://discord.gg/kgxeMRFWDw).
+
+Latest release: [25 October 2026 Windows + Android beta](https://github.com/soulofswords/Sakura-Downloads/releases/tag/windows-beta-2026-10-25). See [release notes](docs/UPDATE-2026-10-25.md) and the separate [Companion](docs/user-guides/companion.md) / [VTuber](docs/user-guides/vtuber.md) guides for the current UI.

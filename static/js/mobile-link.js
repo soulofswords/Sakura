@@ -12,6 +12,8 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
     }
     const show=data=>{enabled=!!data.enabled;toggle.checked=enabled;
         document.getElementById('phone-link-address').value=enabled?(data.addresses||[])[0]||'':'';
+        const fingerprint=document.getElementById('phone-link-fingerprint');
+        if(fingerprint){fingerprint.hidden=!(enabled&&data.fingerprint);fingerprint.textContent=fingerprint.hidden?'':'Certificate fingerprint '+data.fingerprint.replace(/(.{4})/g,'$1 ').trim();}
         document.getElementById('phone-link-code').value=enabled?data.code||'':'';
         for(const kind of ['address','code'])document.getElementById('phone-link-copy-'+kind).disabled=!document.getElementById('phone-link-'+kind).value;
         if(devices){

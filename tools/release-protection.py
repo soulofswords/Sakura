@@ -5,7 +5,12 @@ import sys
 import shutil
 BASE=Path(__file__).resolve().parents[1]
 
+def protected_asset_allowed(name):
+    lowered=Path(name).name.lower()
+    return not (lowered.endswith(('.bak','.backup','.orig','.rej','.tmp','.swp','.swo','.map','~')) or '.before-' in lowered)
+
 def protected_files(records,output):
+    records=[(path,name) for path,name in records if protected_asset_allowed(name)]
     output=Path(output);output.mkdir(parents=True,exist_ok=True)
     native=BASE/'tools/protected-build/native'
     subprocess.run([sys.executable,str(BASE/'tools/build-native-core.py')],check=True)

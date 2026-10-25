@@ -7,6 +7,7 @@
     <link id="app-favicon" rel="icon" type="image/png" href="/static/assets/desktop-companion.png?v=flower79">
     <script>
         document.documentElement.classList.add('sakura-starting');
+        if (new URLSearchParams(location.search).has('tracking')) document.documentElement.classList.add('vtuber-startup');
         try {
             if (new URLSearchParams(location.search).has('desktop') && !new URLSearchParams(location.search).has('agent') && localStorage.getItem('sakura_transparency') !== 'false') {
                 document.documentElement.classList.add('transparent-mode');
@@ -23,15 +24,30 @@
         .response-evidence p { margin: 6px 0; }
         .response-evidence a { color: #72dce8; overflow-wrap: anywhere; }
         html.sakura-starting body { transition: none !important; }
-        html.sakura-starting #viewer { visibility: hidden; }
+        html.sakura-starting body > :not(#startup-render-status) { visibility: hidden !important; }
+        html.vtuber-startup #model-upload-splash,html.vtuber-startup #desktop-companion-splash { display: none !important; }
         #startup-render-status { display: none; }
         html.sakura-starting #startup-render-status {
-            display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 100; padding: 12px 20px; border-radius: 12px;
-            color: #b9fbff; background: #151021; font: 14px 'Segoe UI', sans-serif;
+            display: flex; position: fixed; inset: 0; align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+            z-index: 100000; padding: 24px; color: #fff; background: #090713; font: 14px 'Segoe UI', sans-serif;
         }
+        #startup-render-status img { width: min(260px, 50vw, 38vh); height: min(260px, 50vw, 38vh); object-fit: contain; animation: sakura-startup-pulse 1.8s ease-in-out infinite; }
+        #startup-render-status .startup-logo-vtuber { display: none; }
+        html.vtuber-startup #startup-render-status .startup-logo-flower { display: none; }
+        html.vtuber-startup #startup-render-status .startup-logo-vtuber { display: block; }
+        #startup-render-status strong { font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 600; letter-spacing: .04em; }
+        #startup-render-status .startup-track { width: min(280px, 65vw); height: 5px; border-radius: 3px; background: #ffffff20; overflow: hidden; }
+        #startup-render-status .startup-track::after { content: ''; display: block; width: 45%; height: 100%; background: #a7ceee; animation: sakura-startup-progress 1.2s ease-in-out infinite; }
+        #startup-render-status .startup-label { color: #e7dfff; font-size: clamp(.85rem, 1.3vw, 1rem); }
+        @keyframes sakura-startup-pulse { 50% { opacity: .6; transform: scale(.96); } }
+        @keyframes sakura-startup-progress { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
+        @media(prefers-reduced-motion:reduce) { #startup-render-status img,#startup-render-status .startup-track::after { animation: none; } }
     </style>
-    <link rel="stylesheet" href="/static/css/style.css?v=sdk-links109">
+    <link rel="stylesheet" href="/static/css/style.css?v=compact-settings156">
+
+    <link rel="stylesheet" href="/static/css/vtuber-studio.css?v=part-edit11">
+    <link rel="stylesheet" href="/static/css/companion-studio.css?v=fullheight14">
+    <link rel="stylesheet" href="/static/css/appearance.css?v=8">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -44,7 +60,7 @@
     </script>
 </head>
 <body>
-    <div id="startup-render-status" role="status">Preparing Sakura…</div>
+    <div id="startup-render-status" role="status" aria-live="polite"><img class="startup-logo-flower" src="/static/assets/desktop-companion.png?v=flower79" alt=""><img class="startup-logo-vtuber" src="/static/assets/companion-vtuber.png" alt=""><strong>Sakura Companion</strong><div class="startup-track" aria-hidden="true"></div><span class="startup-label">Preparing your workspace…</span></div>
     <script>
         if (/(?:desktop|library|upload)=1/.test(location.search)) document.body.classList.add('native-renderer');
         if (new URLSearchParams(location.search).has('library')) document.body.classList.add('native-library');
@@ -451,31 +467,47 @@
                     <p id="phone-link-status" role="status">Phone connection off</p>
                     <label for="phone-link-address">PC connection link</label><input id="phone-link-address" readonly placeholder="Enable phone connection first">
                     <button id="phone-link-copy-address" type="button" disabled>Copy link</button>
+                    <p id="phone-link-fingerprint" class="phone-link-fingerprint" hidden></p>
                     <label for="phone-link-code">Pairing code</label><input id="phone-link-code" readonly placeholder="Enable phone connection first">
                     <button id="phone-link-copy-code" type="button" disabled>Copy pairing code</button>
                     <p class="modal-hint">Choose New device to pair an Android phone. Existing devices lists remembered phones; reconnect from the phone without another code. Turning this off disconnects phones but keeps the list. Forget removes that phone's access. Keep both devices on the same trusted home network.</p>
                 </fieldset>
-                <div class="setting-group checkbox-group">
-                    <label><input id="preserve-configuration" type="checkbox" checked> Preserve configuration on reinstall</label>
-                    <p class="modal-hint">Keep your settings when updating or reinstalling. Turning this off resets configuration on the next reinstall; imported models, voices and artwork remain intact. A configuration backup is kept.</p>
+                <section class="setting-group general-preferences-card">
+                    <h3>Updates &amp; reinstall</h3>
+                    <label class="general-preference-toggle"><input id="preserve-configuration" type="checkbox" checked> Keep my settings when reinstalling</label>
+                    <p class="modal-hint">Keep your preferences through app updates and reinstalls. Turn this off to reset preferences on the next reinstall. Your imported models, voices and artwork are kept.</p>
+                </section>
                     <fieldset class="setting-group"><legend>Virtual Camera</legend>
                         <button id="virtual-camera-settings-toggle" type="button" aria-pressed="false">Virtual Camera: Off</button>
                         <p id="virtual-camera-status" role="status">Virtual camera off.</p>
-                        <p class="modal-hint">Send your character to Discord, Zoom, or other video apps. Requires the OBS Studio virtual camera driver. Stop Virtual Camera in OBS while Sakura uses it, then select OBS Virtual Camera in your video app. Outputs the character on a dark background, without controls. Works in Companion and VTuber modes; off on launch.</p>
+                        <button id="install-sakura-camera" type="button">Install Sakura Virtual Camera</button>
+                        <button id="uninstall-sakura-camera" type="button">Uninstall Sakura Virtual Camera</button>
+                        <p class="modal-hint">One-time setup requires Windows approval. Then enable Virtual Camera and select Sakura Virtual Camera in Discord, Zoom or your recording app. Sends your character at 1280 × 720 without controls. Works independently of OBS; off on launch. Uninstall removes the camera from Windows — close your video apps first — and you can reinstall it here at any time.</p>
                     </fieldset>
                     <fieldset class="setting-group"><legend>Spout2 · OBS output</legend>
                         <label><input id="spout-enabled" type="checkbox"> Enable Spout2 output</label>
                         <label for="spout-name">Spout sender name</label><input id="spout-name" value="Sakura" maxlength="64">
-                        <label for="spout-resolution">Output size (long edge)</label><select id="spout-resolution"><option value="480">480 px</option><option value="720" selected>720 px</option><option value="1080">1080 px</option></select>
+                        <label for="spout-resolution">Output size (long edge)</label><select id="spout-resolution"><option value="480">480 px</option><option value="720">720 px · lower bandwidth</option><option value="1080">1080 px long edge</option><option value="1920">1920 px · Full HD widescreen</option><option value="2560">2560 px · QHD widescreen</option><option value="0" selected>Match app viewport · up to 2560 px</option></select>
                         <label for="spout-fps">Frame rate limit</label><select id="spout-fps"><option value="15" selected>15 FPS</option><option value="30">30 FPS</option><option value="60">60 FPS</option></select>
                         <p id="spout-status" role="status">Spout output is off.</p>
                         <p class="modal-hint">Windows: add Spout2 Capture in OBS and select Sakura. Outputs the character with alpha, without controls or background. Works in Gemini, Local LLM and VTuber modes. Off by default. The browser bridge copies frames through memory; lower size/FPS reduces overhead. Glow post-processing is not included.</p>
                     </fieldset>
-                    <label for="transparency-hotkey">Transparency hotkey (AI companion)</label>
+                <section class="setting-group general-preferences-card companion-shortcut-settings">
+                    <h3>Companion shortcut</h3>
+                    <label for="transparency-hotkey">Toggle transparent background</label>
                     <input id="transparency-hotkey" readonly placeholder="Ctrl+Shift+T (default)" aria-label="Click then press your transparency shortcut">
-                    <button id="reset-transparency-hotkey" type="button">Use default Ctrl+Shift+T</button>
-                    <p class="modal-hint">Click the field and press a shortcut with Ctrl, Alt or Meta. Leave it empty to use the default. Save to apply.</p>
-                    <button id="save-general-settings" type="button" class="accent-btn save-btn">Save General settings</button>
+                    <button id="reset-transparency-hotkey" type="button">Reset to Ctrl+Shift+T</button>
+                    <p class="modal-hint">Click the shortcut field, then press your key combination. Choose Save preferences to apply it.</p>
+                </section>
+                <section class="setting-group general-preferences-card studio-shortcut-settings">
+                    <h3>Studio controls</h3>
+                    <div class="general-shortcut-row"><span>Hide or show the controls</span><kbd>Ctrl+Shift+H</kbd></div>
+                    <p class="modal-hint">The eye button hides the toolbar for a clean view. Use Show controls to bring it back.</p>
+                    <div class="general-shortcut-row"><span>Lock the model’s position</span><span>Padlock button</span></div>
+                    <p class="modal-hint">Prevents accidental dragging or resizing. Face and hand tracking keep working.</p>
+                </section>
+                <div class="save-actions general-preferences-save">
+                    <button id="save-general-settings" type="button" class="accent-btn save-btn">Save preferences</button>
                     <p id="general-save-status" role="status" class="modal-hint"></p>
                 </div>
             </div>
@@ -1049,7 +1081,10 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=model-clean136"></script>
+    <script type="module" src="/static/js/app.js?v=cursor-gpu6"></script>
+    <script type="module" src="/static/js/vtuber-studio.js?v=companion-parity153"></script>
+    <script type="module" src="/static/js/appearance.js?v=2"></script>
+    <script type="module" src="/static/js/companion-studio.js?v=modelsearch141"></script>
 </body>
 </html>
 

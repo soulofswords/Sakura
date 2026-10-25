@@ -13,6 +13,7 @@ rich
 # ── GUI Mode ───────────────────
 fastapi
 uvicorn[standard]
+cryptography>=42
 python-multipart
 pywebview
 PySide6==6.8.3

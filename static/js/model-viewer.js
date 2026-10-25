@@ -1,7 +1,8 @@
 import {waitForModelGpu} from './model-presentation.js?v=switch85';
-import Live2DViewer from './live2d-viewer.js?v=collab-fit1';
+import Live2DViewer from './live2d-viewer.js?v=stage-items151';
 import ModelBlockTransition from './model-block-transition.js?v=switch85';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
+import {restoreIdleBreathing,applyIdleBreathing} from './idle-breathing.js?v=2';
 import * as THREE from 'three';
 import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -11,16 +12,16 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/static/vendor/vrm/three-vrm.module.min.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import AvatarRetarget from './avatar-retarget.js?v=vrm-brows131';
+import AvatarRetarget from './avatar-retarget.js?v=torso-fluid145';
 import ArmClearance from './arm-clearance.js?v=clearance1';
 import ModelPhysics from './model-physics.js?v=rest-clearance112';
 import ModelRigMonitor from './model-rig-monitor.js?v=authored-cloth76';
 import ModelRepairStore from './model-repair-store.js?v=1';
 import {ModelBones} from './model-bones.js?v=persistent5';
 import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
-import ReactionExpressions from './reaction-expressions.js?v=files105';
+import ReactionExpressions from './reaction-expressions.js?v=files106';
 import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
-import ModelDance from './model-dance.js?v=fbx89';
+import ModelDance from './model-dance.js?v=fbx90';
 import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
 
 /**
@@ -200,7 +201,7 @@ export default class ModelViewer {
         // path below for mouse panning; retain OrbitControls for right-rotate,
         // wheel zoom and native touch gestures.
         this.renderer.domElement.style.touchAction = 'none';
-        this.renderer.domElement.style.cursor = 'grab';
+        this.renderer.domElement.style.cursor = 'default';
         this.controls.target.set(0, 13, 0);
         this.controls.maxPolarAngle = Math.PI / 2 + 0.1;
         this.desktopMode = new URLSearchParams(location.search).has('desktop');
@@ -232,6 +233,16 @@ export default class ModelViewer {
         this._hairDragVector = new THREE.Vector3();
         this._hairDragAxis = new THREE.Vector3();
         let modelPanPointer = null;
+        // Gate OrbitControls and the captured pan path at gesture start.
+        // Captured drags can continue outside the silhouette once started.
+        this.renderer.domElement.addEventListener('pointerdown',event=>{
+            if(!this.controls.enabled)return;
+            if(!this._hitModelPixelAt(event.clientX,event.clientY)){
+                this.renderer.domElement.style.cursor='default';
+                event.stopImmediatePropagation();
+                if(event.cancelable)event.preventDefault();
+            }
+        },{capture:true});
         this.renderer.domElement.addEventListener('pointerdown', event => {
             if (event.button === 0 && this.controls.enabled && event.pointerType !== 'touch') {
                 modelPanPointer = {id:event.pointerId, x:event.clientX, y:event.clientY};
@@ -240,6 +251,15 @@ export default class ModelViewer {
             }
         });
         this.renderer.domElement.addEventListener('pointermove', event => {
+            // Limit synchronous GPU reads for high-polling-rate mice.
+            // Cursor gaze still updates on every pointer event; only the drag
+            // cursor icon is sampled here. Pointerdown always checks a fresh pixel.
+            const hoverNow = performance.now();
+            if(!modelPanPointer && event.pointerType!=='touch' &&
+                (this._lastHoverPick === undefined || hoverNow-this._lastHoverPick >= 100)) {
+                this._lastHoverPick=hoverNow;
+                this._updateModelDragCursor(event.clientX,event.clientY);
+            }
             if (modelPanPointer?.id === event.pointerId && this.controls.enabled) {
                 const dx=event.clientX-modelPanPointer.x,dy=event.clientY-modelPanPointer.y;
                 this._panCameraByScreenDelta(dx,dy);
@@ -247,9 +267,10 @@ export default class ModelViewer {
             }
         });
         for (const type of ['pointerup','pointercancel','lostpointercapture'])
-            this.renderer.domElement.addEventListener(type, () => {
-                modelPanPointer=null;this.renderer.domElement.style.cursor='grab';
+            this.renderer.domElement.addEventListener(type, event => {
+                modelPanPointer=null;this._updateModelDragCursor(event.clientX,event.clientY);
             });
+        this.renderer.domElement.addEventListener('pointerleave',()=>{if(!modelPanPointer)this.renderer.domElement.style.cursor='default';});
         window.addEventListener('sakura-window-drag', event => {
             this.applyHairScreenDrag(event.detail?.dx,event.detail?.dy);
         });
@@ -265,6 +286,9 @@ export default class ModelViewer {
         this.userTracking = false;
         this.trackingMouthEnabled = true;
         this.vtuberTrackingMode = false;
+        // Companion mode layers face/hand tracking on top of the AI companion.
+        // Unlike VTuber tracking it leaves reactions, choreography and lip-sync on.
+        this.companionTracking = false;
 
         // Event listeners
         this._resizeHandler=()=>this.onResize();
@@ -280,6 +304,7 @@ export default class ModelViewer {
         if(this.destroyed)return;
         this.destroyed=true;
         if(this.animationFrame)cancelAnimationFrame(this.animationFrame);
+        this._cursorPickTarget?.dispose();
         window.removeEventListener('resize',this._resizeHandler);
         this._disposeLive2D();
         if(this.model)this._disposeObject(this.model);
@@ -322,6 +347,69 @@ export default class ModelViewer {
         this.controls.mouseButtons.LEFT = -1;
         this.controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
         this.controls.touches.ONE = THREE.TOUCH.PAN;
+    }
+
+    _updateModelDragCursor(x,y) {
+        const picking=document.body.classList.contains('model-part-picking')||document.body.classList.contains('picking-model-part');
+        this.renderer.domElement.style.cursor=picking?'':this.controls.enabled&&!document.body.classList.contains('studio-model-locked')&&this._hitModelPixelAt(x,y)?'grab':'default';
+    }
+
+    _hitModelPixelAt(x,y) {
+        if(!this.model || this._displayLoading)return false;
+        const renderer=this.renderer,rect=renderer.domElement.getBoundingClientRect();
+        if(!rect.width||!rect.height||x<rect.left||y<rect.top||x>=rect.right||y>=rect.bottom)return false;
+        // A one-pixel view of the model uses GPU skinning and the original
+        // texture alpha. CPU raycasting skins every triangle of every mesh.
+        this._cursorPickTarget ||= new THREE.WebGLRenderTarget(1,1,{depthBuffer:true});
+        this._cursorPickTarget.texture.colorSpace=renderer.outputColorSpace;
+        this._cursorPickCamera ||= this.camera.clone();
+        const camera=this._cursorPickCamera;
+        camera.copy(this.camera,false);
+        camera.setViewOffset(rect.width,rect.height,x-rect.left,y-rect.top,1,1);
+        const priorTarget=renderer.getRenderTarget();
+        const priorViewport=renderer.getViewport(this._cursorPickViewport ||= new THREE.Vector4()).clone();
+        const priorScissor=renderer.getScissor(this._cursorPickScissor ||= new THREE.Vector4()).clone();
+        const priorScissorTest=renderer.getScissorTest(),priorAlpha=renderer.getClearAlpha();
+        const priorColor=renderer.getClearColor(this._cursorPickColor ||= new THREE.Color()).clone();
+        const background=this.scene.background,hidden=[];
+        try {
+            for(const child of this.scene.children)if(child!==this.model&&!child.isLight&&child.visible){hidden.push(child);child.visible=false;}
+            this.scene.background=null;
+            renderer.setRenderTarget(this._cursorPickTarget);
+            renderer.setViewport(0,0,1,1);
+            renderer.setScissorTest(false);
+            renderer.setClearColor(0,0);
+            renderer.clear();
+            renderer.render(this.scene,camera);
+            const pixel=this._cursorPickPixel ||= new Uint8Array(4);
+            renderer.readRenderTargetPixels(this._cursorPickTarget,0,0,1,1,pixel);
+            return pixel[3]>5;
+        } finally {
+            for(const child of hidden)child.visible=true;
+            this.scene.background=background;
+            renderer.setRenderTarget(priorTarget);
+            renderer.setViewport(priorViewport);
+            renderer.setScissor(priorScissor);
+            renderer.setScissorTest(priorScissorTest);
+            renderer.setClearColor(priorColor,priorAlpha);
+        }
+    }
+
+    _hitModelAt(x,y) {
+        if(!this.model || this._displayLoading)return false;
+        const rect=this.renderer.domElement.getBoundingClientRect();
+        if(!rect.width||!rect.height)return false;
+        this.model.updateMatrixWorld(true);this.camera.updateMatrixWorld(true);
+        this.model.traverse(object=>{if(object.isSkinnedMesh)object.computeBoundingSphere?.();});
+        this._dragRay ||= new THREE.Raycaster();
+        this._dragPointer ||= new THREE.Vector2();
+        this._dragPointer.set((x-rect.left)/rect.width*2-1,-(y-rect.top)/rect.height*2+1);
+        this._dragRay.setFromCamera(this._dragPointer,this.camera);
+        return this._dragRay.intersectObject(this.model,true).some(hit=>{
+            for(let node=hit.object;node;node=node.parent)if(node.visible===false)return false;
+            const material=Array.isArray(hit.object.material)?hit.object.material[hit.face?.materialIndex??0]:hit.object.material;
+            return material && material.visible!==false && (material.opacity??1)>.02;
+        });
     }
 
     _panCameraByScreenDelta(dx,dy) {
@@ -1049,6 +1137,16 @@ export default class ModelViewer {
             throw new Error(`This VRM does not contain a complete humanoid rig (missing ${missingHumanoidBones.join(', ')}). Import a humanoid VRM avatar.`);
         }
         this.humanoidInfo = {format:'VRM', groups: requiredHumanoidBones.slice()};
+        // Avatar authors compress look-at into a few degrees (this rig allows
+        // 8/12), which makes cursor tracking invisible; widen the output range.
+        const lookAtApplier = vrm.lookAt?.applier;
+        // Expression maps produce 0..1 weights, not degrees. Enlarging those
+        // to 30 saturates the pupils and makes these VRMs appear unresponsive.
+        if (lookAtApplier && !lookAtApplier.expressions && lookAtApplier.constructor?.type !== 'expression') {
+            for (const key of ['rangeMapHorizontalInner', 'rangeMapHorizontalOuter', 'rangeMapVerticalDown', 'rangeMapVerticalUp']) {
+                if (lookAtApplier[key]) lookAtApplier[key].outputScale = 30;
+            }
+        }
         VRMUtils.rotateVRM0(vrm);
         // VRM uses meters; the existing MMD stage uses larger model units.
         vrm.scene.scale.setScalar(10);
@@ -1066,7 +1164,7 @@ export default class ModelViewer {
         this.scene.add(this.model);
         this._indexMorphTargets(this.model);
         this._setupCharacterAnimation(this.model);
-        for (const [key, name] of Object.entries({ torso: 'spine', chest: 'chest', head: 'head', neck: 'neck', leftArm: 'leftUpperArm', rightArm: 'rightUpperArm', leftElbow: 'leftLowerArm', rightElbow: 'rightLowerArm', leftWrist: 'leftHand', rightWrist: 'rightHand',leftThigh:'leftUpperLeg',rightThigh:'rightUpperLeg',leftKnee:'leftLowerLeg',rightKnee:'rightLowerLeg' })) {
+        for (const [key, name] of Object.entries({ torso: 'spine', chest: 'chest', head: 'head', neck: 'neck', leftEye: 'leftEye', rightEye: 'rightEye', leftArm: 'leftUpperArm', rightArm: 'rightUpperArm', leftElbow: 'leftLowerArm', rightElbow: 'rightLowerArm', leftWrist: 'leftHand', rightWrist: 'rightHand',leftThigh:'leftUpperLeg',rightThigh:'rightUpperLeg',leftKnee:'leftLowerLeg',rightKnee:'rightLowerLeg' })) {
             const bone = vrm.humanoid?.getNormalizedBoneNode(name);
             if (bone) this.animationBones[key] = { bone, rest: bone.rotation.clone() };
         }
@@ -1180,8 +1278,8 @@ export default class ModelViewer {
             chest: ['上半身2', 'chest', 'Chest'],
             head: ['頭', 'head', 'Head'],
             neck: ['首', 'neck', 'Neck'],
-            leftEye: ['左目', 'LeftEye', 'eye.L', 'leftEye'],
-            rightEye: ['右目', 'RightEye', 'eye.R', 'rightEye'],
+            leftEye: ['左目', 'LeftEye', 'eye.L', 'leftEye', 'Eye_L', 'eye_l', 'J_Adj_L_FaceEye', 'mixamorigLeftEye'],
+            rightEye: ['右目', 'RightEye', 'eye.R', 'rightEye', 'Eye_R', 'eye_r', 'J_Adj_R_FaceEye', 'mixamorigRightEye'],
             leftShoulder: ['左肩', '左肩P', '左鎖骨', '左锁骨', 'LeftShoulder', 'LeftClavicle', 'mixamorigLeftShoulder', 'shoulder.L', 'clavicle.L', 'clavicleLeft'],
             rightShoulder: ['右肩', '右肩P', '右鎖骨', '右锁骨', 'RightShoulder', 'RightClavicle', 'mixamorigRightShoulder', 'shoulder.R', 'clavicle.R', 'clavicleRight'],
             leftWrist: ['左手首', 'LeftHand', 'hand.L'],
@@ -1588,21 +1686,66 @@ export default class ModelViewer {
     }
 
     clearEyeTracking() {
+        this._restoreCursorHeadPose();
         this.eyeTrackingTarget = null;
         this.eyeTrackingPosition={x:0,y:0};
+        this.headGazePosition={x:0,y:0};
+        const lookAt = this.vrm?.lookAt;
+        if (lookAt) { lookAt.yaw = 0; lookAt.pitch = 0; }
         this.live2d?.clearGaze();
     }
 
     _animateEyeTracking(delta) {
         const target = this.eyeTrackingTarget || { x: 0, y: 0 };
         this.eyeTrackingPosition ||= { x: 0, y: 0 };
-        const alpha = 1 - Math.exp(-Math.min(delta, 0.1) / 0.12);
-        for (const axis of ['x', 'y']) this.eyeTrackingPosition[axis] += (target[axis] - this.eyeTrackingPosition[axis]) * alpha;
-        for (const key of ['leftEye', 'rightEye']) {
-            const entry = this.animationBones[key];
-            if (entry) entry.bone.rotation.set(entry.rest.x + this.eyeTrackingPosition.y * 0.12,
-                entry.rest.y + this.eyeTrackingPosition.x * 0.18, entry.rest.z, entry.rest.order);
+        this.headGazePosition ||= { x: 0, y: 0 };
+        const step = Math.min(delta, 0.1);
+        // Cursor response settles in 1–3 frames, without a second slow head filter at
+        // glance speed, which is what keeps a 60 Hz cursor feed from looking twitchy.
+        const eyeFollow = 1 - Math.exp(-step / 0.006);
+        const headFollow = 1 - Math.exp(-step / 0.016);
+        for (const axis of ['x', 'y']) {
+            this.eyeTrackingPosition[axis] += (target[axis] - this.eyeTrackingPosition[axis]) * eyeFollow;
+            this.headGazePosition[axis] += (target[axis] - this.headGazePosition[axis]) * headFollow;
         }
+        if (this.vrm?.lookAt) {
+            // three-vrm's lookAt applier keeps VRM 0.x and 1.0 axis conventions
+            // (and expression-based look-at) out of this file; it takes degrees.
+            this.vrm.lookAt.autoUpdate = false;
+            this.vrm.lookAt.yaw = this.eyeTrackingPosition.x * 48;
+            this.vrm.lookAt.pitch = this.eyeTrackingPosition.y * 36;
+        } else {
+            for (const key of ['leftEye', 'rightEye']) {
+                const entry = this.animationBones[key];
+                if (entry) entry.bone.rotation.set(entry.rest.x + this.eyeTrackingPosition.y * 0.20,
+                    entry.rest.y + this.eyeTrackingPosition.x * 0.30, entry.rest.z, entry.rest.order);
+            }
+        }
+        // Explicit cursor gaze also adds a head glance during camera tracking.
+        // Restore this additive offset before the next animation pass, including
+        // VTuber/dance paths that do not rewrite the head every frame.
+        const head = this.animationBones.head;
+        if (head) {
+            this._restoreCursorHeadPose();
+            const rotation = head.bone.rotation;
+            const base = {x: rotation.x, y: rotation.y, z: rotation.z, order: rotation.order};
+            const pitchSign = this.vrm ? -1 : 1;
+            rotation.set(base.x + this.headGazePosition.y * 0.15 * pitchSign,
+                base.y + this.headGazePosition.x * 0.30, base.z, base.order);
+            this._cursorHeadPose = {bone: head.bone, base,
+                applied: {x: rotation.x, y: rotation.y, z: rotation.z}};
+        }
+    }
+
+    _restoreCursorHeadPose() {
+        const pose = this._cursorHeadPose;
+        this._cursorHeadPose = null;
+        if (!pose) return;
+        const rotation = pose.bone.rotation;
+        // Leave a newer camera/calibration/manual pose intact.
+        if (Math.abs(rotation.x-pose.applied.x)<1e-6 && Math.abs(rotation.y-pose.applied.y)<1e-6 &&
+            Math.abs(rotation.z-pose.applied.z)<1e-6)
+            rotation.set(pose.base.x, pose.base.y, pose.base.z, pose.base.order);
     }
 
     _shouldUseCursorGaze() {
@@ -1641,7 +1784,9 @@ export default class ModelViewer {
 
     setVtuberTrackingMode(enabled) {
         this.vtuberTrackingMode = !!enabled;
-        if (!enabled) this.clearManualExpression();
+        // Leaving the companion add-on must not wipe an expression the user or
+        // the phone app chose; only leaving pure VTuber tracking resets it.
+        if (!enabled && !this.companionTracking) this.clearManualExpression();
         // VTuber uses the library window, which previously kept OrbitControls'
         // default left-rotate mapping instead of the companion's drag mapping.
         this._configureModelControls();
@@ -1654,6 +1799,12 @@ export default class ModelViewer {
             this.blinkTimer = 0;
             this.setMorph('Blink', 0);
         }
+    }
+
+    // The Companion camera add-on still needs the VTuber rig preparation
+    // (relaxed arms, tracked blink) but must not mute the AI companion itself.
+    setCompanionTracking(enabled) {
+        this.companionTracking = !!enabled;
     }
 
     _shouldAutoBlink() {
@@ -1848,7 +1999,25 @@ export default class ModelViewer {
         if(this.dance?.update(delta))return;
         if (this.userTracking) {
             if(this.physics)this.physics.allowIdleSleep = false;
-            this.avatarRetarget.apply(this.userTrackingSample, delta);
+            try { this.avatarRetarget.apply(this.userTrackingSample, delta); }
+            catch(error) {
+                // A bad tracking packet must not enter the fatal GPU/render
+                // cleanup path and dispose an otherwise healthy avatar.
+                this.userTracking=false;this.userTrackingSample=null;
+                try { this.avatarRetarget?.reset(); } catch(_) {}
+                console.error('Tracking paused; model preserved:',error);
+                window.dispatchEvent(new CustomEvent('sakura-tracking-error',{detail:String(error.message||error)}));
+                return;
+            }
+            // Keep a little authored life under the tracked pose; retarget
+            // rewrites these bones every frame, so the offset never accumulates.
+            if (this.companionTracking) {
+                const sway = Math.sin(elapsed * .43) * .03 + Math.sin(elapsed * .23 + 1.4) * .008;
+                for (const key of ['torso', 'chest']) {
+                    const entry = this.animationBones?.[key];
+                    if (entry?.bone) entry.bone.rotation.z += sway * (key === 'torso' ? 1 : .4);
+                }
+            }
             return;
         }
         if (this.vtuberTrackingMode && (this.chatReaderActive || this.chatReaderMotion)) {
@@ -2066,14 +2235,17 @@ export default class ModelViewer {
     }
 
     captureSpoutFrame(maxSize=720) {
-        if(this.live2d)return this.live2d.capture(maxSize);
+        if(this.live2d){if(maxSize===0)maxSize=Math.min(2560,Math.max(this.live2d.app.view.width,this.live2d.app.view.height));return this.live2d.capture(maxSize);}
         if (!this.model || this._displayLoading) return null;
         const aspect=this.camera.aspect;
+        // Spout's native option follows the actual drawing buffer, including
+        // display pixel ratio, rather than enlarging a 720px preview in OBS.
+        if(maxSize===0){const buffer=this.renderer.getDrawingBufferSize(new THREE.Vector2());maxSize=Math.min(2560,Math.max(buffer.x,buffer.y));}
         const width=Math.max(1,Math.round(aspect>=1?maxSize:maxSize*aspect));
         const height=Math.max(1,Math.round(aspect>=1?maxSize/aspect:maxSize));
         if (!this._spoutTarget || this._spoutTarget.width!==width || this._spoutTarget.height!==height) {
             this._spoutTarget?.dispose();
-            this._spoutTarget=new THREE.WebGLRenderTarget(width,height);
+            this._spoutTarget=new THREE.WebGLRenderTarget(width,height,{samples:Math.min(4,this.renderer.capabilities.maxSamples||0)});
             this._spoutTarget.texture.colorSpace=THREE.SRGBColorSpace;
             this._spoutPixels=new Uint8Array(width*height*4);
         }
@@ -2421,8 +2593,11 @@ export default class ModelViewer {
             }
         }
 
+        this._restoreCursorHeadPose();
+        restoreIdleBreathing(this);
         this._animateCharacter(delta, elapsed);
         this.boneControls?.apply();
+        applyIdleBreathing(this, delta, elapsed);
         this.reactionExpressions?.update(delta);
         this.autoExpressions?.update(delta);
         // Apply after webcam/idle morphs so tracking cannot overwrite the

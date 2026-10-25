@@ -20,10 +20,13 @@ export function availableReactionExpressions(viewer){
     return (viewer.getMorphNames?.()||[]).filter(name=>typeof name==='string'&&!unsafe.test(name))
         .map(name=>({name,moods:Object.entries(moods).filter(([,pattern])=>pattern.test(name)).map(([mood])=>mood)})).filter(e=>e.moods.length);
 }
+// Companion tracking is an add-on: the user's face and hands drive the rig,
+// but AI reactions keep running. Only pure VTuber tracking mutes them.
+const aiLayersMuted = v => (v.vtuberTrackingMode || v.userTracking) && !v.companionTracking;
 export default class ReactionExpressions {
     constructor(viewer){this.viewer=viewer;this.entries=[];}
     begin(text,detectedMood=null){
-        const v=this.viewer;if(v.vtuberTrackingMode||v.userTracking||!v.model||v.areAiExpressionsAutomatic?.()===false)return false;
+        const v=this.viewer;if(aiLayersMuted(v)||!v.model||v.areAiExpressionsAutomatic?.()===false)return false;
         if(v.areAiExpressionsAutomatic?.())v.clearManualExpression?.();
         this.clear();this.root=v.live2d||v.model;
         const available=availableReactionExpressions(v),mood=Object.hasOwn(moods,detectedMood)?detectedMood:reactionMood(text);
@@ -43,7 +46,7 @@ export default class ReactionExpressions {
     }
     update(delta){
         const v=this.viewer;
-        if(v.vtuberTrackingMode||v.userTracking||v.areAiExpressionsAutomatic?.()===false||this.root!==(v.live2d||v.model)){this.clear();return;}
+        if(aiLayersMuted(v)||v.areAiExpressionsAutomatic?.()===false||this.root!==(v.live2d||v.model)){this.clear();return;}
         for(const e of this.entries){
             e.weight+=(e.target-e.weight)*(1-Math.exp(-Math.min(.1,Math.max(0,delta))/.28));
             // PMX smiles can include mouth vertices. Keep audio vowels clear.

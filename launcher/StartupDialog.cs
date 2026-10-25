@@ -1,9 +1,53 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
+
+// The chooser opens before any browser exists, so it reads the appearance the
+// web app saved into settings.json and mirrors those palettes natively.
+static class StartupTheme {
+ internal static Color Background=Of(12,15,26), Surface=Of(21,27,44), SurfaceLine=Of(48,59,82), Frame=Of(53,63,88);
+ internal static Color Ink=Of(242,245,255), Body=Of(230,236,250), Muted=Of(145,155,180), Footer=Of(205,213,232);
+ internal static Color Accent=Of(97,225,235), Accent2=Of(168,113,244), Error=Of(255,151,177), CloseHover=Of(48,28,44);
+ internal static Color CardLine=Of(44,54,76), CardTop=Of(23,30,46), CardTopHover=Of(34,43,63), CardBottom=Of(18,23,37);
+ internal static Color CardTitle=Of(240,244,255), CardText=Of(154,166,189), MenuHover=Of(39,57,76);
+ internal static Color Button=Of(27,57,72);
+ internal static Color[] ModeAccents={Of(97,225,235),Of(180,153,255),Of(245,144,196)};
+ static Color Of(int r,int g,int b){return Color.FromArgb(r,g,b);}
+ internal static void Load(string project) {
+  string mode="system";
+  try {
+   string path=Path.Combine(project,"settings.json");
+   if(File.Exists(path)) {
+    var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(path));
+    object value;
+    if(data!=null&&data.TryGetValue("ui_theme",out value)) {
+     string text=value as string;
+     if(text=="light"||text=="dark"||text=="system")mode=text;
+    }
+   }
+  } catch {}
+  if(mode!="light"&&!(mode=="system"&&WindowsAppsUseLightTheme()))return;
+  Background=Of(237,242,248); Surface=Of(255,255,255); SurfaceLine=Of(216,227,238); Frame=Of(198,212,226);
+  Ink=Of(39,54,75); Body=Of(39,54,75); Muted=Of(82,98,121); Footer=Of(82,98,121);
+  Accent=Of(20,124,175); Accent2=Of(109,74,200); Error=Of(178,58,90); CloseHover=Of(248,225,232);
+  CardLine=Of(216,227,238); CardTop=Of(255,255,255); CardTopHover=Of(233,244,251); CardBottom=Of(244,248,252);
+  CardTitle=Of(39,54,75); CardText=Of(82,98,121); MenuHover=Of(233,244,251); Button=Of(206,232,246);
+  ModeAccents=new[]{Of(20,124,175),Of(109,74,200),Of(196,62,132)};
+ }
+ static bool WindowsAppsUseLightTheme() {
+  try {
+   using(var key=Microsoft.Win32.Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize")) {
+    if(key!=null) {object value=key.GetValue("AppsUseLightTheme"); if(value is int)return (int)value!=0;}
+   }
+  } catch {}
+  return false;
+ }
+}
 
 // Native, lightweight launcher UI. No browser or AI runtime starts until a mode is chosen.
 sealed class StartupDialog : Form {
@@ -15,51 +59,49 @@ sealed class StartupDialog : Form {
  readonly Panel keyFrame;
  readonly StartupProviderCombo apiProvider;
  readonly TextBox cloudModel;
- static readonly Color Background = Color.FromArgb(12,15,26);
- static readonly Color Muted = Color.FromArgb(145,155,180);
- static readonly Color Cyan = Color.FromArgb(97,225,235);
 
  internal StartupDialog(string project) {
   this.project=project;
+  StartupTheme.Load(project);
   Text="Sakura Companion — Choose startup mode";
   Font=new Font("Segoe UI",10);
   AutoScaleDimensions=new SizeF(96,96); AutoScaleMode=AutoScaleMode.Dpi;
-  ClientSize=new Size(620,755); BackColor=Background; ForeColor=Color.White;
+  ClientSize=new Size(620,755); BackColor=StartupTheme.Background; ForeColor=StartupTheme.Ink;
   FormBorderStyle=FormBorderStyle.None; StartPosition=FormStartPosition.CenterScreen;
   MaximizeBox=false; MinimizeBox=false; DoubleBuffered=true;
   Icon=new Icon(Path.Combine(project,"launcher","companion.ico"));
 
   var close=new StartupCloseButton {Location=new Point(566,6),Size=new Size(42,34),
-   BackColor=Background,ForeColor=Muted,
+   BackColor=StartupTheme.Background,ForeColor=StartupTheme.Muted,
    AccessibleName="Close startup chooser",TabIndex=5,DialogResult=DialogResult.Cancel,Cursor=Cursors.Hand};
   close.Click+=(s,e)=>Close(); Controls.Add(close); CancelButton=close;
-  Controls.Add(LabelAt("CHOOSE YOUR EXPERIENCE",32,59,500,23,9,Cyan,FontStyle.Bold));
-  Controls.Add(LabelAt("Welcome to Sakura",30,86,555,48,28,Color.FromArgb(242,245,255),FontStyle.Bold));
-  Controls.Add(LabelAt("One companion. Three ways to connect.",33,137,550,26,11,Muted,FontStyle.Regular));
-  Controls.Add(LabelAt("CLOUD API KEY",33,183,230,22,9,Muted,FontStyle.Bold));
+  Controls.Add(LabelAt("CHOOSE YOUR EXPERIENCE",32,59,500,23,9,StartupTheme.Accent,FontStyle.Bold));
+  Controls.Add(LabelAt("Welcome to Sakura",30,86,555,48,28,StartupTheme.Ink,FontStyle.Bold));
+  Controls.Add(LabelAt("One companion. Three ways to connect.",33,137,550,26,11,StartupTheme.Muted,FontStyle.Regular));
+  Controls.Add(LabelAt("CLOUD API KEY",33,183,230,22,9,StartupTheme.Muted,FontStyle.Bold));
   var providerFrame=new StartupInputFrame {Location=new Point(320,174),Size=new Size(268,34)};
   apiProvider=new StartupProviderCombo {Location=new Point(10,4),Size=new Size(248,26),
-   BackColor=providerFrame.BackColor,ForeColor=Color.White,AccessibleName="API provider"};
+   BackColor=providerFrame.BackColor,ForeColor=StartupTheme.Body,AccessibleName="API provider"};
   apiProvider.Items.AddRange(new object[]{"Auto-detect key","Google Gemini","OpenAI","Anthropic Claude","DeepSeek","OpenRouter","Groq","xAI"});apiProvider.SelectedIndex=0;
   providerFrame.Controls.Add(apiProvider);Controls.Add(providerFrame);
 
   keyFrame=new StartupInputFrame {Location=new Point(32,210),Size=new Size(556,42)};
   keyBox=new TextBox {Location=new Point(14,11),Size=new Size(528,24),BorderStyle=BorderStyle.None,
-   BackColor=keyFrame.BackColor,ForeColor=Color.FromArgb(230,236,250),UseSystemPasswordChar=true,
+   BackColor=keyFrame.BackColor,ForeColor=StartupTheme.Body,UseSystemPasswordChar=true,
    AccessibleName="Cloud API key. Leave blank to use your saved provider and key.",TabIndex=0};
   keyBox.Enter+=(s,e)=>keyFrame.Invalidate(); keyBox.Leave+=(s,e)=>keyFrame.Invalidate();
   keyFrame.Controls.Add(keyBox); Controls.Add(keyFrame);
-  keyHint=LabelAt("Blank keeps saved key. Model ID (optional):",33,258,350,28,8,Muted,FontStyle.Regular);
+  keyHint=LabelAt("Blank keeps saved key. Model ID (optional):",33,258,350,28,8,StartupTheme.Muted,FontStyle.Regular);
   Controls.Add(keyHint);
   var modelFrame=new StartupInputFrame {Location=new Point(393,255),Size=new Size(195,30)};
-  cloudModel=new TextBox {Location=new Point(10,5),Size=new Size(175,22),BackColor=modelFrame.BackColor,ForeColor=Color.White,BorderStyle=BorderStyle.None,AccessibleName="Cloud model ID"};
+  cloudModel=new TextBox {Location=new Point(10,5),Size=new Size(175,22),BackColor=modelFrame.BackColor,ForeColor=StartupTheme.Body,BorderStyle=BorderStyle.None,AccessibleName="Cloud model ID"};
   modelFrame.Controls.Add(cloudModel);Controls.Add(modelFrame);
 
   string[] modes={"gemini","local","vtuber"};
   string[] titles={"Cloud API","Local LLM","VTuber"};
   string[] descriptions={"Cloud AI companion · Use your API key","On-device AI companion · Run on this PC","Face + hand tracking · No AI models loaded"};
   string[] tags={"CLOUD","LOCAL","TRACKING"};
-  Color[] accents={Cyan,Color.FromArgb(180,153,255),Color.FromArgb(245,144,196)};
+  Color[] accents=StartupTheme.ModeAccents;
   ModeCard firstModeCard=null;
   for(int i=0;i<modes.Length;i++) {
    string mode=modes[i];
@@ -68,14 +110,14 @@ sealed class StartupDialog : Form {
    card.Click+=(s,e)=>SelectMode(mode); Controls.Add(card);
    if(i==0)firstModeCard=card;
   }
-  Controls.Add(LabelAt("This app is currently under development.\nYour feedback is most important.",33,625,550,44,10,Color.FromArgb(205,213,232),FontStyle.Regular));
+  Controls.Add(LabelAt("This app is currently under development.\nYour feedback is most important.",33,625,550,44,10,StartupTheme.Footer,FontStyle.Regular));
   var discord=new LinkLabel {Text="Join my Discord and DM me",Location=new Point(33,675),Size=new Size(550,24),
-   Font=new Font("Segoe UI",9,FontStyle.Bold),LinkColor=Cyan,ActiveLinkColor=Color.FromArgb(180,153,255),
-   VisitedLinkColor=Cyan,BackColor=Color.Transparent,TabStop=true,AccessibleName="Join the Sakura Discord and send feedback"};
+   Font=new Font("Segoe UI",9,FontStyle.Bold),LinkColor=StartupTheme.Accent,ActiveLinkColor=StartupTheme.Accent2,
+   VisitedLinkColor=StartupTheme.Accent,BackColor=Color.Transparent,TabStop=true,AccessibleName="Join the Sakura Discord and send feedback"};
   discord.Links.Add(0,discord.Text.Length,"https://discord.gg/kgxeMRFWDw");
   discord.LinkClicked+=(s,e)=>Process.Start(new ProcessStartInfo((string)e.Link.LinkData){UseShellExecute=true});
   Controls.Add(discord);
-  Controls.Add(LabelAt("You can change your AI provider later in Settings.",33,714,550,22,9,Muted,FontStyle.Regular));
+  Controls.Add(LabelAt("You can change your AI provider later in Settings.",33,714,550,22,9,StartupTheme.Muted,FontStyle.Regular));
   Shown+=(s,e)=>{BringToFront();Activate();ActiveControl=firstModeCard;};
  }
  void SelectMode(string mode) {
@@ -84,14 +126,14 @@ sealed class StartupDialog : Form {
    using(var setup=new LocalModelDialog(project))if(setup.ShowDialog(this)!=DialogResult.OK)return;
   }
   if(mode=="gemini" && keyBox.Text.Trim().Length==0 && !File.Exists(Path.Combine(project,".gemini-key.bin")) && !File.Exists(Path.Combine(project,".cloud-keys.bin"))) {
-   keyHint.Text="Enter an API key to continue."; keyHint.ForeColor=Color.FromArgb(255,151,177);
+   keyHint.Text="Enter an API key to continue."; keyHint.ForeColor=StartupTheme.Error;
    keyBox.Focus(); return;
   }
   if(mode=="gemini" && keyBox.Text.Trim().Length>0) {
    string key=keyBox.Text.Trim();string[] providers={"auto","gemini","openai","anthropic","deepseek","openrouter","groq","xai"};string provider=providers[apiProvider.SelectedIndex];
    if(provider=="auto") {
     if(key.StartsWith("AIza"))provider="gemini";else if(key.StartsWith("sk-ant-"))provider="anthropic";else if(key.StartsWith("sk-or-"))provider="openrouter";else if(key.StartsWith("sk-proj-")||key.StartsWith("sk-svcacct-"))provider="openai";else if(key.StartsWith("gsk_"))provider="groq";else if(key.StartsWith("xai-"))provider="xai";
-    else {keyHint.Text="Ambiguous key. Select its provider above.";keyHint.ForeColor=Color.FromArgb(255,151,177);return;}
+    else {keyHint.Text="Ambiguous key. Select its provider above.";keyHint.ForeColor=StartupTheme.Error;return;}
    }
    if((provider=="groq"||provider=="xai"||provider=="openrouter")&&cloudModel.Text.Trim().Length==0){keyHint.Text="Enter this provider's model ID on the right.";return;}
    Environment.SetEnvironmentVariable("SAKURA_START_API_PROVIDER",provider);
@@ -113,11 +155,11 @@ sealed class StartupDialog : Form {
   float scale=ClientSize.Width/620f;
   var state=g.Save();g.ScaleTransform(scale,scale);
   using(var path=Round(new RectangleF(.5f,.5f,619,ClientSize.Height/scale-1),16))
-  using(var pen=new Pen(Color.FromArgb(53,63,88)))g.DrawPath(pen,path);
-  using(var line=new LinearGradientBrush(new Rectangle(32,46,556,2),Cyan,Color.FromArgb(168,113,244),0f))g.FillRectangle(line,32,46,556,2);
+  using(var pen=new Pen(StartupTheme.Frame))g.DrawPath(pen,path);
+  using(var line=new LinearGradientBrush(new Rectangle(32,46,556,2),StartupTheme.Accent,StartupTheme.Accent2,0f))g.FillRectangle(line,32,46,556,2);
   g.DrawIcon(Icon,new Rectangle(32,14,22,22));
   g.Restore(state);
-  using(var font=new Font("Segoe UI",9,FontStyle.Bold))TextRenderer.DrawText(g,"SAKURA  /  COMPANION",font,new Point((int)(65*scale),(int)(17*scale)),Muted);
+  using(var font=new Font("Segoe UI",9,FontStyle.Bold))TextRenderer.DrawText(g,"SAKURA  /  COMPANION",font,new Point((int)(65*scale),(int)(17*scale)),StartupTheme.Muted);
  }
  protected override void OnResize(EventArgs e) {
   base.OnResize(e);
@@ -149,7 +191,7 @@ sealed class StartupProviderCombo : Button {
   TextRenderer.DrawText(g,Text,Font,new Rectangle(3,0,Math.Max(0,Width-27),Height),ForeColor,
    TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
   float x=Width-11,y=Height/2f;
-  using(var pen=new Pen(Color.FromArgb(145,155,180),1.6f)) {
+  using(var pen=new Pen(StartupTheme.Muted,1.6f)) {
    g.DrawLine(pen,x-4,y-2,x,y+2);g.DrawLine(pen,x,y+2,x+4,y-2);
   }
  }
@@ -178,16 +220,16 @@ sealed class StartupProviderCombo : Button {
  }
 }
 sealed class StartupProviderMenuRenderer : ToolStripProfessionalRenderer {
- protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e){e.Graphics.Clear(Color.FromArgb(21,27,44));}
+ protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e){e.Graphics.Clear(StartupTheme.Surface);}
  protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e){
-  using(var fill=new SolidBrush(e.Item.Selected?Color.FromArgb(39,57,76):Color.FromArgb(21,27,44)))e.Graphics.FillRectangle(fill,new Rectangle(Point.Empty,e.Item.Size));
+  using(var fill=new SolidBrush(e.Item.Selected?StartupTheme.MenuHover:StartupTheme.Surface))e.Graphics.FillRectangle(fill,new Rectangle(Point.Empty,e.Item.Size));
  }
- protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e){e.TextColor=Color.FromArgb(230,236,250);base.OnRenderItemText(e);}
+ protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e){e.TextColor=StartupTheme.Body;base.OnRenderItemText(e);}
 }
 
 sealed class StartupInputFrame : Panel {
  internal StartupInputFrame() {
-  BackColor=Color.FromArgb(21,27,44);
+  BackColor=StartupTheme.Surface;
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
  }
  protected override void OnControlAdded(ControlEventArgs e) {
@@ -195,13 +237,13 @@ sealed class StartupInputFrame : Panel {
   e.Control.Enter+=(s,a)=>Invalidate();e.Control.Leave+=(s,a)=>Invalidate();
  }
  protected override void OnPaintBackground(PaintEventArgs e) {
-  e.Graphics.Clear(Parent==null?Color.FromArgb(12,15,26):Parent.BackColor);
+  e.Graphics.Clear(Parent==null?StartupTheme.Background:Parent.BackColor);
  }
  protected override void OnPaint(PaintEventArgs e) {
   var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
   using(var path=StartupDialog.Round(new RectangleF(.75f,.75f,Width-1.5f,Height-1.5f),10))
   using(var fill=new SolidBrush(BackColor))
-  using(var border=new Pen(ContainsFocus?Color.FromArgb(97,225,235):Color.FromArgb(48,59,82),ContainsFocus?1.5f:1)) {
+  using(var border=new Pen(ContainsFocus?StartupTheme.Accent:StartupTheme.SurfaceLine,ContainsFocus?1.5f:1)) {
    g.FillPath(fill,path);g.DrawPath(border,path);
   }
  }
@@ -216,7 +258,7 @@ sealed class StartupCloseButton : Button {
  protected override void OnMouseEnter(EventArgs e){hovered=true;Invalidate();base.OnMouseEnter(e);}
  protected override void OnMouseLeave(EventArgs e){hovered=false;Invalidate();base.OnMouseLeave(e);}
  protected override void OnPaint(PaintEventArgs e) {
-  var g=e.Graphics;g.Clear(hovered?Color.FromArgb(48,28,44):BackColor);
+  var g=e.Graphics;g.Clear(hovered?StartupTheme.CloseHover:BackColor);
   g.SmoothingMode=SmoothingMode.AntiAlias;
   float x=Width/2f,y=Height/2f,r=Math.Min(Width,Height)*.14f;
   using(var pen=new Pen(ForeColor,Math.Max(1.5f,Height/22f))) {
@@ -234,7 +276,7 @@ sealed class ModeCard : Button {
  internal ModeCard(string title,string description,string tag,Color accent,int symbol) {
   this.title=title;this.description=description;this.tag=tag;this.accent=accent;this.symbol=symbol;
   Text=title; AccessibleName=title+". "+description; Cursor=Cursors.Hand;
-  FlatStyle=FlatStyle.Flat; FlatAppearance.BorderSize=0; BackColor=Color.FromArgb(12,15,26);
+  FlatStyle=FlatStyle.Flat; FlatAppearance.BorderSize=0; BackColor=StartupTheme.Background;
   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
  }
  protected override void OnMouseEnter(EventArgs e){hovered=true;Invalidate();base.OnMouseEnter(e);}
@@ -244,8 +286,8 @@ sealed class ModeCard : Button {
  protected override void OnPaint(PaintEventArgs e) {
   var g=e.Graphics;g.Clear(BackColor);g.SmoothingMode=SmoothingMode.AntiAlias;
   using(var path=StartupDialog.Round(new RectangleF(1,1,Width-3,Height-3),12))
-  using(var fill=new LinearGradientBrush(ClientRectangle,Color.FromArgb(hovered?34:23,hovered?43:30,hovered?63:46),Color.FromArgb(18,23,37),0f))
-  using(var pen=new Pen(hovered||Focused?accent:Color.FromArgb(44,54,76),Focused?2:1)) {g.FillPath(fill,path);g.DrawPath(pen,path);}
+  using(var fill=new LinearGradientBrush(ClientRectangle,hovered?StartupTheme.CardTopHover:StartupTheme.CardTop,StartupTheme.CardBottom,0f))
+  using(var pen=new Pen(hovered||Focused?accent:StartupTheme.CardLine,Focused?2:1)) {g.FillPath(fill,path);g.DrawPath(pen,path);}
   float scale=Height/82f, logicalWidth=Width/scale;
   var state=g.Save();g.ScaleTransform(scale,scale);
   using(var brush=new SolidBrush(Color.FromArgb(30,accent)))g.FillEllipse(brush,18,19,44,44);
@@ -260,8 +302,8 @@ sealed class ModeCard : Button {
   using(var heading=new Font("Segoe UI",14,FontStyle.Bold))
   using(var body=new Font("Segoe UI",9))
   using(var badge=new Font("Segoe UI",8,FontStyle.Bold)) {
-   TextRenderer.DrawText(g,title,heading,Scaled(78,16,220,27,scale),Color.FromArgb(240,244,255),TextFormatFlags.Left|TextFormatFlags.NoPadding);
-   TextRenderer.DrawText(g,description,body,Scaled(79,47,logicalWidth-120,23,scale),Color.FromArgb(154,166,189),TextFormatFlags.Left|TextFormatFlags.NoPadding);
+   TextRenderer.DrawText(g,title,heading,Scaled(78,16,220,27,scale),StartupTheme.CardTitle,TextFormatFlags.Left|TextFormatFlags.NoPadding);
+   TextRenderer.DrawText(g,description,body,Scaled(79,47,logicalWidth-120,23,scale),StartupTheme.CardText,TextFormatFlags.Left|TextFormatFlags.NoPadding);
    TextRenderer.DrawText(g,tag,badge,Scaled(logicalWidth-137,22,91,22,scale),accent,TextFormatFlags.Right|TextFormatFlags.NoPadding);
   }
  }

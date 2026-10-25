@@ -25,7 +25,7 @@ static class StartupCheck {
      if(mode=="gemini") {
       type.GetMethod("SelectMode",Private).Invoke(form,new object[]{mode});
       Require(type.GetField("SelectedMode",Private).GetValue(form)==null,"Missing key must not launch Gemini");
-      keyBox.Text="test-key-not-a-real-credential";
+      keyBox.Text="AIza-test-key-not-a-real-credential";
      }
      type.GetMethod("SelectMode",Private).Invoke(form,new object[]{mode});
      Require((string)type.GetField("SelectedMode",Private).GetValue(form)==mode,"Incorrect startup mode");

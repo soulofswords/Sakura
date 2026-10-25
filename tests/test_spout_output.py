@@ -28,6 +28,13 @@ class SpoutTests(unittest.TestCase):
    finally:receiver.releaseReceiver()
   finally:sender.stop()
   self.assertFalse(sender.enabled);self.assertFalse(sender.worker)
+ def test_full_hd_frames_are_not_limited_to_preview_resolution(self):
+  sender=SpoutOutput();sender.enabled=True;sender.token='test'
+  pixels=bytes(1920*1080*4)
+  sender.submit('test',pixels,1920,1080)
+  queued=sender.frames.get_nowait()
+  self.assertEqual(queued[1:],(1920,1080))
+  with self.assertRaises(ValueError):sender.submit('test',b'',2561,1440)
  def test_disabled_does_not_start_worker(self):
   sender=SpoutOutput();self.assertFalse(sender.configure(False)['enabled']);self.assertIsNone(sender.worker)
 if __name__=='__main__':unittest.main()
