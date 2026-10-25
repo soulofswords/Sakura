@@ -14,6 +14,7 @@ _CAPABILITIES=[
  {'id':'files.find','name':'Find files by name','examples':['find file report in downloads'],'permission':'computer_access','scope':'Top level of Downloads, Documents or Desktop; read-only; up to 20 matches'},
  {'id':'apps.open','name':'Launch an installed app or approved website','examples':['open YouTube','open calculator'],'permission':'computer_access'},
  {'id':'reminders','name':'Timers and alarms','examples':['start a timer for 2 minutes','cancel the timer'],'permission':'none'},
+ {'id':'broadcast.effects','name':'NVIDIA Broadcast camera and microphone effects','examples':['blur my background','put studio voice on','turn off background blur'],'permission':'computer_access','scope':'Only the listed effects, and only through an NVIDIA Broadcast MCP connection you added yourself'},
  {'id':'workflow','name':'Explicit action sequence','examples':['open YouTube then set volume to 30%'],'scope':'At most five known steps, preflight permissions, stop on failure; no arbitrary code'},
 ]
 
@@ -43,6 +44,12 @@ def classify(text):
     if t in ('volume','volume level','current volume','what is the volume','what is my volume'):return ('audio.volume',{'action':'get'})
     match=re.fullmatch(r'(?:find|search for) (?:a |the )?file (.{1,100}?) in (?:my )?(downloads|documents|desktop)',text.strip(),re.I)
     if match:return ('files.find',{'query':match[1],'location':match[2].lower()})
+    from broadcast_effects import classify as classify_effects
+    effects=classify_effects(text)
+    if effects:
+        changes=effects.get('changes') or []
+        if changes:return ('broadcast.effects',{'changes':changes})
+        if effects.get('needs_asset'):return ('broadcast.effects',{'changes':[],'needs_asset':effects['needs_asset']})
     return None
 
 def execute(action,arguments):
@@ -56,6 +63,9 @@ def execute(action,arguments):
         reply=('Found: '+', '.join(x['name'] for x in data['files'])+'.' if data['files'] else 'No matching files found in '+arguments['location']+'.')
         if data['limited']:reply+=' Results are limited; try a more specific file name.'
         return {'ok':True,'reply':reply,'data':data}
+    if action=='broadcast.effects':
+        from broadcast_effects import handle_request
+        return handle_request(arguments)
     raise ValueError('Unsupported action.')
 
 def _delegate_known(text):
@@ -73,7 +83,7 @@ def handle_command(text,computer_access=False,assistant_name='Sakura'):
     if text in ('stop current task','cancel current task','stop current sequence'):
         return 'Stopping before the next action.' if cancel_run() else 'There is no running action sequence.'
     if text in ('what actions can you do','show capabilities','list capabilities','show available actions','what can you do','what are your capabilities'):
-        return 'I can check PC status, change system volume, find files by name, open apps and websites, and manage timers and alarms. Join up to five supported actions with “then”. PC and file actions need computer access enabled.'
+        return 'I can check PC status, change system volume, find files by name, open apps and websites, manage timers and alarms, and switch NVIDIA Broadcast camera and microphone effects such as background blur or studio voice. Join up to five supported actions with “then”. PC, file and Broadcast actions need computer access enabled.'
     try:
         action=classify(text)
         if action:
