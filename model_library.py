@@ -156,6 +156,7 @@ def router(root, local_check):
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
     from agent_connections import secret_get, secret_set
+    from model_library_confirm import reset_pending
 
     routes = APIRouter(prefix='/api/model-library')
     session_lock = threading.Lock()
@@ -184,7 +185,8 @@ def router(root, local_check):
         if action == 'recover':
             # Auth replies the same way whether or not the address has an account, so the
             # wording must not confirm either case.
-            return {'reset_sent': True, 'message': 'If that email has a Sakura account, a reset link is on its way. Check your inbox and your spam folder.'}
+            return {'reset_sent': True, 'message': 'If that email has a Sakura account, a reset link is on its way. Check your inbox and your spam folder.'
+                        ' Open the link on this computer and choose the new password there: Sakura keeps using your old password until you press Set new password.'}
         # A refresh must always carry a session, so only a sign-up or sign-in answer may read as
         # "confirm your email first".
         if action != 'refresh' and (data.get('confirmation_required') or (endpoint == LIBRARY_URL and not data.get('access_token'))):
@@ -219,6 +221,8 @@ def router(root, local_check):
             return JSONResponse({'error': 'Use Sakura on this computer.'}, 403)
         if action not in ('signin', 'signup', 'recover'):
             return JSONResponse({'error': 'Unknown account action.'}, 400)
+        # The reset hint below may run before the body is read, so it needs a value either way.
+        email = None
         try:
             body = await request.json()
             if not isinstance(body, dict):
@@ -254,7 +258,13 @@ def router(root, local_check):
             secret_set('model-library', candidate)
             return {'ok': True}
         except AccountError as exc:
-            return JSONResponse({'error': str(exc)}, 400)
+            text = str(exc)
+            # A reset link the user has opened but not finished looks exactly like a wrong
+            # password from here, so say which of the two it is while the link still waits.
+            if action == 'signin' and isinstance(email, str) and reset_pending(email):
+                text += (' You have a reset link open on this computer that has not been finished yet:'
+                         ' choose the new password on that page and press Set new password, then sign in with it.')
+            return JSONResponse({'error': text}, 400)
         except requests.exceptions.JSONDecodeError:
             # A reply that is not JSON means the service is reachable and confused, which is a
             # different thing to tell the user from a network that is not there at all.

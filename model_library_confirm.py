@@ -159,9 +159,9 @@ def _detail(response):
 
 
 def _spend(token, kind, transport):
-    """(state, access_token) after Auth answers a link token; the token never comes back."""
+    """(state, access_token, email) after Auth answers a link token; the token never comes back."""
     if not TOKEN.fullmatch(str(token or '')):
-        return 'invalid', ''
+        return 'invalid', '', ''
     # A link carries a hashed token; only a typed one-time password is the literal code.
     key = 'token' if ONE_TIME_PASSWORD.fullmatch(token) else 'token_hash'
     try:
@@ -170,77 +170,100 @@ def _spend(token, kind, transport):
                             timeout=(8, 25), allow_redirects=False) as response:
             if response.status_code in (200, 201):
                 try:
-                    session = str((response.json() or {}).get('access_token') or '')
+                    data = response.json() or {}
                 except ValueError:
-                    session = ''
-                return 'ok', session
-            return ('already' if ALREADY_USED.search(_detail(response)) else 'invalid'), ''
+                    data = {}
+                session = str(data.get('access_token') or '')
+                email = str((data.get('user') or {}).get('email') or '')
+                return 'ok', session, email
+            return ('already' if ALREADY_USED.search(_detail(response)) else 'invalid'), '', ''
     except (requests.RequestException, ValueError, AttributeError):
-        return 'offline', ''
+        return 'offline', '', ''
 
 
 def verify(token, transport=requests):
     """'confirmed', 'already', 'invalid' or 'offline'. Nothing the provider said is echoed."""
-    state, _ = _spend(token, 'signup', transport)
+    state, _, _ = _spend(token, 'signup', transport)
     return 'confirmed' if state == 'ok' else state
 
 
 def recover(token, transport=requests):
-    """('recovered', session) when the reset link is live, else ('invalid'|'already'|'offline', '')."""
-    state, session = _spend(token, 'recovery', transport)
+    """('recovered', session, email) when the reset link is live, else ('invalid'|'already'|'offline', '', '')."""
+    state, session, email = _spend(token, 'recovery', transport)
     if state != 'ok':
-        return state, ''
+        return state, '', ''
     # A recovery answer without a session cannot carry a new password, so treat it as a failure
     # rather than offering a form that is guaranteed to reject it.
-    return ('recovered', session) if session else ('invalid', '')
+    return ('recovered', session, email) if session else ('invalid', '', '')
 
 
-def set_password(session, password, transport=requests):
+def set_password(session, password, email='', transport=requests):
     """'done', 'weak', 'failed' or 'offline' after Auth answers a new password."""
     try:
         with transport.put(USER_ENDPOINT, json={'password': password},
                            headers={'apikey': SUPABASE_PUBLISHABLE_KEY, 'Authorization': 'Bearer ' + session},
                            timeout=(8, 25), allow_redirects=False) as response:
-            if response.status_code == 200:
-                return 'done'
-            detail = _detail(response)
-            return 'weak' if WEAK_PASSWORD.search(detail) else 'failed'
+            if response.status_code != 200:
+                detail = _detail(response)
+                return 'weak' if WEAK_PASSWORD.search(detail) else 'failed'
+            # A 200 that is not this account proves nothing about the password, so only the
+            # updated user object may say it changed.
+            try:
+                data = response.json()
+            except ValueError:
+                return 'failed'
+            if not isinstance(data, dict) or not data.get('id'):
+                return 'failed'
+            if email and str(data.get('email') or '').casefold() != email.casefold():
+                return 'failed'
+            return 'done'
     except (requests.RequestException, ValueError, AttributeError):
         return 'offline'
 
 
 def _retire():
     now = time.time()
-    for stale in [key for key, (_, until) in _pending.items() if until < now]:
+    for stale in [key for key, (_, until, _) in _pending.items() if until < now]:
         _pending.pop(stale, None)
 
 
-def hold(session):
+def hold(session, email=''):
     """Hand out a one-use id for a recovered session; the session itself never reaches the page."""
     identifier = secrets.token_urlsafe(18)
     with _pending_lock:
         _retire()
         while len(_pending) >= MAX_PENDING:
             _pending.pop(next(iter(_pending)))
-        _pending[identifier] = (session, time.time() + RESET_TTL)
+        _pending[identifier] = (session, time.time() + RESET_TTL, email)
     return identifier
 
 
 def take(identifier):
-    """Pop a slot, returning (session, deadline); an unknown or spent id yields ('', 0)."""
+    """Pop a slot, returning (session, deadline, email); an unknown or spent id yields ('', 0, '')."""
     with _pending_lock:
         _retire()
-        return _pending.pop(str(identifier or ''), ('', 0))
+        return _pending.pop(str(identifier or ''), ('', 0, ''))
 
 
-def give_back(identifier, session, until):
+def give_back(identifier, session, until, email=''):
     """Return a slot the user has not yet spent, so a typo does not cost them a new email."""
     if not session or until <= time.time():
         return
     with _pending_lock:
         while len(_pending) >= MAX_PENDING:
             _pending.pop(next(iter(_pending)))
-        _pending[str(identifier)] = (session, until)
+        _pending[str(identifier)] = (session, until, email)
+
+
+def reset_pending(email):
+    """True while a verified reset link waits unspent for this address, so the sign-in error can
+    say that the new password is not live yet rather than calling it a wrong password."""
+    target = str(email or '').casefold()
+    if not target:
+        return False
+    with _pending_lock:
+        _retire()
+        return any(kept.casefold() == target for _, _, kept in _pending.values())
 
 
 _pending = {}
@@ -291,10 +314,10 @@ def router(local_check, form_check, transport=requests):
         token = argument(request, RECOVERY_PARAMS)
         if not token:
             return html('absent')
-        state, session = await run_in_threadpool(recover, token, transport)
+        state, session, email = await run_in_threadpool(recover, token, transport)
         if state != 'recovered':
             return html(state)
-        return html('form', hold(session), headers=FORM_HEADERS)
+        return html('form', hold(session, email), headers=FORM_HEADERS)
 
     @routes.post('/reset')
     async def apply_reset(request: Request):
@@ -310,7 +333,7 @@ def router(local_check, form_check, transport=requests):
         identifier = value('reset_id')
         if not SLOT.fullmatch(identifier):
             return html('expired', headers=FORM_HEADERS)
-        session, until = take(identifier)
+        session, until, email = take(identifier)
         if not session:
             return html('expired', headers=FORM_HEADERS)
         password = value('password')
@@ -319,9 +342,9 @@ def router(local_check, form_check, transport=requests):
         elif password != value('confirm'):
             state = 'mismatch'
         else:
-            state = await run_in_threadpool(set_password, session, password, transport)
+            state = await run_in_threadpool(set_password, session, password, email, transport)
         if state in RETRYABLE:
-            give_back(identifier, session, until)
+            give_back(identifier, session, until, email)
             return html(state, identifier, headers=FORM_HEADERS)
         return html(state, headers=FORM_HEADERS)
 

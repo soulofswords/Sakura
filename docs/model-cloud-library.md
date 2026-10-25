@@ -112,6 +112,15 @@ fields carry a show/hide eye, which needs one inline script, so that page's poli
 a `script-src` naming a nonce minted for that response alone; a reset page without the
 form ships no script and no `script-src`.
 
+Spending the link is not the reset. Opening the emailed page only proves the token, so
+the account keeps answering the old password until that page's form is submitted, and
+the recovery reply says so. If a sign-in is refused while a verified link still waits
+for that address, the error adds that the new password is not live yet, because from the
+sign-in box an unfinished reset is indistinguishable from a wrong password. The slot
+remembers the address Auth named in the recovery session, so it only ever speaks for that
+address, and `PUT /auth/v1/user` may report success only when Auth answers with an
+updated user object for the same email.
+
 For initial non-public smoke tests an optional SAKURA_LIBRARY_MEMBERS file maps
 tester labels to SHA256 hashes of random access codes of at least 32 characters.
 It must stay outside the public root and source control. Removing a member entry

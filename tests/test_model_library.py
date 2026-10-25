@@ -219,6 +219,40 @@ class ModelLibraryTests(unittest.TestCase):
         post.assert_not_called()
 
     @patch('model_library.requests.post')
+    def test_a_refused_sign_in_while_a_reset_link_waits_blames_the_unfinished_link(self, post):
+        from fastapi import FastAPI
+        from model_library import router
+        from model_library_confirm import hold, take
+        post.return_value.__enter__.return_value = Mock(status_code=400, json=lambda: {'error_code': 'invalid_credentials', 'msg': 'private provider detail'})
+        identifier = hold('recovered-session', 'tester@example.com')
+        try:
+            app = FastAPI()
+            app.include_router(router(self.root / 'models', lambda request: True))
+            with TestClient(app) as client:
+                response = client.post('/api/model-library/account/signin', json={'email': 'Tester@Example.com', 'password': 'password-for-test'})
+            self.assertEqual(400, response.status_code)
+            text = response.json()['error']
+            self.assertIn('incorrect', text)
+            self.assertIn('not been finished yet', text)
+            self.assertNotIn('private provider detail', response.text)
+        finally:
+            take(identifier)
+
+    @patch('model_library.requests.post')
+    def test_a_finished_or_abandoned_reset_link_stops_explaining_later_refused_sign_ins(self, post):
+        from fastapi import FastAPI
+        from model_library import router
+        from model_library_confirm import hold, take
+        post.return_value.__enter__.return_value = Mock(status_code=400, json=lambda: {'error_code': 'invalid_credentials', 'msg': 'private provider detail'})
+        take(hold('recovered-session', 'tester@example.com'))
+        app = FastAPI()
+        app.include_router(router(self.root / 'models', lambda request: True))
+        with TestClient(app) as client:
+            response = client.post('/api/model-library/account/signin', json={'email': 'tester@example.com', 'password': 'password-for-test'})
+        self.assertEqual(400, response.status_code)
+        self.assertNotIn('finished', response.json()['error'])
+
+    @patch('model_library.requests.post')
     def test_custom_library_answer_without_a_session_is_not_called_a_password_problem(self, post):
         from fastapi import FastAPI
         from model_library import router

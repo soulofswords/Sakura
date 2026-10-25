@@ -38,7 +38,13 @@ class Response:
 
 def recovered():
     """What Auth answers a live recovery link with: a session, not just a user."""
-    return Response(200, {'access_token': SESSION, 'refresh_token': 'refresh-' + 'y' * 24, 'user': {'id': 'u1'}})
+    return Response(200, {'access_token': SESSION, 'refresh_token': 'refresh-' + 'y' * 24,
+                          'user': {'id': 'u1', 'email': 'tester@example.com'}})
+
+
+def updated(email='tester@example.com'):
+    """What Auth answers a successful PUT /user with: the updated account itself."""
+    return Response(200, {'id': 'u1', 'aud': 'authenticated', 'email': email})
 
 
 class Transport:
@@ -53,8 +59,9 @@ class Transport:
                            'timeout': timeout, 'allow_redirects': allow_redirects})
         if self.error:
             raise self.error
-        if method == 'PUT' and self.put_reply is not None:
-            return self.put_reply
+        if method == 'PUT':
+            # Auth answers a successful password change with the updated user, and nothing else.
+            return self.put_reply if self.put_reply is not None else updated()
         return self.reply
 
     def post(self, url, json=None, headers=None, timeout=None, allow_redirects=None):
@@ -281,6 +288,12 @@ class Recover(unittest.TestCase):
         self.assertIn('reset link no longer works', page.text)
         self.assertNotIn('<form', page.text)
 
+    def test_an_opened_link_remembers_which_address_it_was_for(self):
+        model_library_confirm._pending.clear()
+        self.addCleanup(model_library_confirm._pending.clear)
+        client(transport=Transport(reply=recovered())).get('/api/model-library/reset?recovery_token=' + HASH)
+        self.assertTrue(model_library_confirm.reset_pending('tester@example.com'))
+
     def test_a_link_a_scanner_opened_first_is_reported_as_used_not_broken(self):
         spent = Transport(reply=Response(400, {'message': 'Token has already been used once'}))
         page = client(transport=spent).get('/api/model-library/reset?recovery_token=' + HASH)
@@ -391,7 +404,7 @@ class Reset(unittest.TestCase):
 class SetPassword(unittest.TestCase):
     def test_the_new_password_is_put_with_the_recovered_bearer_session(self):
         transport = Transport(put_reply=Response(200, {'id': 'u1'}))
-        self.assertEqual(model_library_confirm.set_password(SESSION, 'FreshPassw0rd!', transport), 'done')
+        self.assertEqual(model_library_confirm.set_password(SESSION, 'FreshPassw0rd!', transport=transport), 'done')
         call = transport.calls[0]
         self.assertEqual((call['method'], call['url']), ('PUT', USER_ENDPOINT))
         self.assertEqual(call['json'], {'password': 'FreshPassw0rd!'})
@@ -403,18 +416,33 @@ class SetPassword(unittest.TestCase):
             with self.subTest(field=field):
                 reply = Response(422, {'code': 422, 'error_code': 'weak_password',
                                        field: 'Password should be at least 8 characters'})
-                state = model_library_confirm.set_password(SESSION, 'abc', Transport(put_reply=reply))
+                state = model_library_confirm.set_password(SESSION, 'abc', transport=Transport(put_reply=reply))
                 self.assertEqual(state, 'weak')
 
     def test_a_failure_that_is_not_about_strength_stays_a_plain_failure(self):
         reply = Response(401, {'code': 401, 'error_code': 'bad_jwt', 'msg': 'invalid audience'})
-        state = model_library_confirm.set_password(SESSION, 'FreshPassw0rd!', Transport(put_reply=reply))
+        state = model_library_confirm.set_password(SESSION, 'FreshPassw0rd!', transport=Transport(put_reply=reply))
         self.assertEqual(state, 'failed')
 
     def test_a_dead_service_is_offline_and_never_says_done(self):
         state = model_library_confirm.set_password(SESSION, 'FreshPassw0rd!',
-                                                   Transport(error=requests.ConnectionError()))
+                                                   transport=Transport(error=requests.ConnectionError()))
         self.assertEqual(state, 'offline')
+
+    def test_a_200_that_is_not_a_user_object_never_claims_the_password_changed(self):
+        for reply in (Response(200, {'session': {'access_token': SESSION}}),
+                      Response(200, '<html>proxy said hello</html>')):
+            with self.subTest(reply=str(reply.payload)[:20]):
+                self.assertEqual(model_library_confirm.set_password(
+                    SESSION, 'FreshPassw0rd!', transport=Transport(put_reply=reply)), 'failed')
+
+    def test_a_200_about_some_other_account_is_not_this_users_change(self):
+        other = Transport(put_reply=updated('someone.else@example.com'))
+        self.assertEqual(model_library_confirm.set_password(
+            SESSION, 'FreshPassw0rd!', 'tester@example.com', other), 'failed')
+        same = Transport(put_reply=updated('Tester@example.com'))
+        self.assertEqual(model_library_confirm.set_password(
+            SESSION, 'FreshPassw0rd!', 'tester@example.com', same), 'done')
 
 
 class Slots(unittest.TestCase):
@@ -423,11 +451,12 @@ class Slots(unittest.TestCase):
         self.addCleanup(model_library_confirm._pending.clear)
 
     def test_a_slot_hands_back_its_session_exactly_once(self):
-        identifier = model_library_confirm.hold(SESSION)
-        session, until = model_library_confirm.take(identifier)
+        identifier = model_library_confirm.hold(SESSION, 'tester@example.com')
+        session, until, email = model_library_confirm.take(identifier)
         self.assertEqual(session, SESSION)
+        self.assertEqual(email, 'tester@example.com')
         self.assertGreater(until, time.time())
-        self.assertEqual(model_library_confirm.take(identifier), ('', 0))
+        self.assertEqual(model_library_confirm.take(identifier), ('', 0, ''))
 
     def test_the_id_on_the_page_is_not_the_session(self):
         identifier = model_library_confirm.hold(SESSION)
@@ -436,19 +465,35 @@ class Slots(unittest.TestCase):
 
     def test_an_expired_slot_is_retired_on_the_next_touch(self):
         identifier = model_library_confirm.hold(SESSION)
-        model_library_confirm._pending[identifier] = (SESSION, time.time() - 1)
-        self.assertEqual(model_library_confirm.take(identifier), ('', 0))
+        model_library_confirm._pending[identifier] = (SESSION, time.time() - 1, '')
+        self.assertEqual(model_library_confirm.take(identifier), ('', 0, ''))
 
     def test_give_back_refuses_to_revive_an_expired_slot(self):
         identifier = model_library_confirm.hold(SESSION)
-        model_library_confirm._pending[identifier] = (SESSION, time.time() - 1)
+        model_library_confirm._pending[identifier] = (SESSION, time.time() - 1, '')
         model_library_confirm.give_back(identifier, SESSION, time.time() - 1)
-        self.assertEqual(model_library_confirm.take(identifier), ('', 0))
+        self.assertEqual(model_library_confirm.take(identifier), ('', 0, ''))
 
     def test_a_storm_of_links_cannot_grow_the_table_past_its_cap(self):
         for _ in range(model_library_confirm.MAX_PENDING + 4):
             model_library_confirm.hold(SESSION)
         self.assertEqual(len(model_library_confirm._pending), model_library_confirm.MAX_PENDING)
+
+    def test_an_open_link_is_reported_for_that_address_only(self):
+        identifier = model_library_confirm.hold(SESSION, 'tester@example.com')
+        self.assertTrue(model_library_confirm.reset_pending('TESTER@example.com'))
+        self.assertFalse(model_library_confirm.reset_pending('someone.else@example.com'))
+        self.assertFalse(model_library_confirm.reset_pending(''))
+        model_library_confirm.take(identifier)
+        self.assertFalse(model_library_confirm.reset_pending('tester@example.com'),
+                         'A finished link must stop nagging the next sign-in.')
+
+    def test_a_typo_that_returns_the_slot_keeps_explaining_the_next_sign_in(self):
+        identifier = model_library_confirm.hold(SESSION, 'tester@example.com')
+        session, until, email = model_library_confirm.take(identifier)
+        self.assertFalse(model_library_confirm.reset_pending('tester@example.com'))
+        model_library_confirm.give_back(identifier, session, until, email)
+        self.assertTrue(model_library_confirm.reset_pending('tester@example.com'))
 
 
 class Wiring(unittest.TestCase):
