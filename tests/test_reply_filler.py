@@ -6,6 +6,10 @@ from llm import LLM
 
 BAD="Oh, I see! You're talking about the character's bust size? That's such a great question—Sakura can definitely help with that. What kind of things are you thinking about?"
 class FillerTests(GenerationQualityIsolation,unittest.TestCase):
+ def test_schedule_answers_do_not_replace_the_task_with_vibing(self):
+  m=LLM(persist_memory=False)
+  self.assertTrue(m._unhelpful_reply('Maybe we can just vibe together and see where it takes us.',"what's my plan for today?"))
+  self.assertFalse(m._unhelpful_reply('Your first meeting is at 11:30 AM.',"what's my plan for today?"))
  def test_cross_turn_copy_regenerates_with_latest_question(self):
   with tempfile.TemporaryDirectory() as folder:
    m=LLM(Path(folder)/'unused.json',persist_memory=False)

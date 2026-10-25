@@ -4,6 +4,13 @@ Published: [Windows + Android Beta](https://github.com/soulofswords/Sakura-Downl
 
 Verification: 689 Python tests and 57 subtests passed; the expanded browser gate, both extracted product smoke checks, APK signature/archive checks and PDF render review passed. Independent EXE/APK read-back found no personal character/RVC/local-LLM files, credentials or source backups. Protected renderer benchmarking retained the GPU cursor performance fix.
 
+## Next stable release: Companion calendar agenda
+
+- Route daily-plan, schedule and agenda questions directly to the connected Google Calendar, including today, tomorrow, weekly and explicit-date reads.
+- Format actual event times in the local timezone; report an empty primary calendar or connection failure truthfully. Reading cannot approve an existing event draft.
+- Avoid substituting unrelated "vibe together" filler for practical scheduling help.
+- Source and installed development editions updated; the published 25 October beta installers are unchanged. Include this patch in the next stable release.
+
 The notes below are historical planning records, not the current release checklist.
 
 ---

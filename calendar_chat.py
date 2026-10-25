@@ -21,10 +21,14 @@ class CalendarChat:
     def command(self,text):
         with self.lock:return self._command(text.strip())
     def _command(self,text):
-        now=self.now();lower=text.lower().strip(' .!?\\')
+        now=self.now();lower=text.lower().replace('’',"'").strip(' .!?\\')
         lower=re.sub(r'\btomm?or+ow\b','tomorrow',lower)
         lower=re.sub(r'\bcalender\b','calendar',lower)
         if self.pending and time.monotonic()-self.pending['created']>600:self.pending=None
+        if self._agenda_request(lower):
+            # Reading is not consent to a previously drafted calendar write.
+            if self.pending and self.pending.get('stage')=='confirm':self.pending['stage']='review'
+            return self._read_agenda(lower,now)
         if self.pending and lower in ('cancel','no','never mind','nevermind'):
             self.pending=None;return 'Cancelled. Nothing was added to Calendar.'
         if self.pending and lower in ('yes','yes please','confirm','add it','save it','go ahead'):
@@ -85,11 +89,75 @@ class CalendarChat:
                 item.pop('end');item['stage']='end';return 'The end must be later than the start on that date. What time does it end?'
             item['stage']='confirm' if 'end' in item else 'end'
         return self._question(item)
+
+    @staticmethod
+    def _agenda_request(text):
+        if re.search(r'\b(?:add|create|book|reschedule|move|delete|remove|cancel|remind|save)\b|\b(?:set|make) (?:a |my )?(?:reminder|meeting|schedule)\b',text):return False
+        if re.search(r'\b(?:how to|should i|help me) (?:plan|schedule)\b',text):return False
+        subject=bool(re.search(r'\b(?:plans?|schedule|agenda|calendar|events?|appointments?|meetings?)\b',text))
+        reading=bool(re.search(r"\b(?:what(?:'s| is| are)?|show|tell|read|check|list|view|see|any|do i have|am i free)\b",text))
+        personal=bool(re.search(r'\b(?:my|me|i|today|tomorrow|this week|next week|next 7 days)\b',text))
+        shorthand=bool(re.fullmatch(r"(?:(?:my|today's|tomorrow's) )?(?:schedule|agenda|plans?|calendar)(?: for)?(?: today| tomorrow| this week| next week)?",text))
+        activity=bool(re.search(r"\b(?:what (?:do i have|am i doing)|am i free|do i have anything)\b",text) and re.search(r'\b(?:today|tomorrow|this week)\b',text))
+        return (subject and reading and personal) or shorthand or activity
+
+    def _read_agenda(self,text,now):
+        try:
+            if not self.calendar.status().get('connected'):
+                return 'Google Calendar is not connected with Calendar access. Open Agent mode > Google sign-in to connect it, then ask me again.'
+            start=now.replace(hour=0,minute=0,second=0,microsecond=0)
+            label='today'
+            explicit=re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+('+'|'.join(MONTHS)+r')(?:\s+(20\d{2}))?\b',text)
+            if explicit:
+                day,month,year=explicit.groups()
+                try:start=start.replace(year=int(year) if year else now.year,month=MONTHS[month],day=int(day))
+                except ValueError:return 'That date is invalid. Please give a valid day, month and year.'
+                label=start.strftime('%d %B %Y')
+            elif 'tomorrow' in text:
+                start+=timedelta(days=1);label='tomorrow'
+            elif 'next week' in text:
+                start+=timedelta(days=7-start.weekday());label='next week'
+            elif 'this week' in text:
+                start-=timedelta(days=start.weekday());label='this week'
+            days=7 if label in ('this week','next week') or 'next 7 days' in text else 1
+            if 'next 7 days' in text:label='the next 7 days'
+            end=start+timedelta(days=days)
+            result=self.calendar.list_events(time_min=start.isoformat(),time_max=end.isoformat(),max_results=50)
+            if result.get('ok') is not True:raise ValueError('Calendar read was not confirmed')
+        except Exception:
+            return 'I could not read Google Calendar just now. Check your connection and Google sign-in in Agent mode, then try again. I have not changed any events.'
+        events=[event for event in result.get('events',[]) if event.get('status')!='cancelled']
+        if not events:return f'You have no events on your connected Google Calendar for {label}. That only covers this calendar, not plans saved elsewhere.'
+        offset=now.strftime('%z');zone='UTC'+offset[:3]+':'+offset[3:]
+        lines=[f'Your Google Calendar schedule for {label} ({zone}):']
+        for event in events[:12]:
+            title=re.sub(r'\s+',' ',str(event.get('summary') or 'Untitled event')).strip()[:160]
+            begins=event.get('start') or {};ends=event.get('end') or {}
+            if begins.get('date'):
+                when='All day'
+                if days>1:when=begins['date']+' - '+when
+            else:
+                try:
+                    stamp=datetime.fromisoformat(begins['dateTime'].replace('Z','+00:00'))
+                    if stamp.tzinfo is None:raise ValueError('Missing event timezone')
+                    stamp=stamp.astimezone(now.tzinfo)
+                    when=stamp.strftime('%I:%M %p').lstrip('0')
+                    if days>1 or stamp.date()!=start.date():when=stamp.strftime('%d %b')+' '+when
+                    if ends.get('dateTime'):
+                        finish=datetime.fromisoformat(ends['dateTime'].replace('Z','+00:00'))
+                        if finish.tzinfo is not None:
+                            finish=finish.astimezone(now.tzinfo)
+                            when+=' - '+(finish.strftime('%d %b ') if finish.date()!=stamp.date() else '')+finish.strftime('%I:%M %p').lstrip('0')
+                except (KeyError,ValueError,TypeError):when='Time unavailable'
+            lines.append(f'{when}: {title}')
+        if len(events)>12:lines.append('More events are on your calendar; open Google Calendar for the full list.')
+        return '\n'.join(lines)
     def _details(self,item):
         return f"{item['title']} on {item['start']:%d %B %Y}, {item['start']:%I:%M %p}–{item['end']:%I:%M %p} ({item['start']:%Z}, UTC{item['start']:%z})"
     def _question(self,item):
         if item['stage']=='start':return f"What time on {item['date']:%d %B %Y} should I remind you? Give a time such as 9 am; I cannot detect when you personally wake up."
         if item['stage']=='end':return 'What time does the meeting or appointment end?'
+        if item['stage']=='review':item['stage']='confirm'
         return 'Add '+self._details(item)+' to Google Calendar with a notification at the start? Say yes to save, or cancel.'
 
 _instance=None

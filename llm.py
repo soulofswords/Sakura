@@ -742,6 +742,9 @@ class LLM:
     def _unhelpful_reply(self, reply, question):
         from factual_grounding import unsupported_tool_claim
         if unsupported_tool_claim(reply, question):return True
+        if (re.search(r'\b(?:calendar|schedule|agenda|plan(?:s)? for (?:today|tomorrow)|meeting|appointment)\b',question,re.I)
+                and re.search(r'\b(?:just vibe|vibe together|see where (?:it|this) takes us)\b',reply,re.I)):
+            return True
         # A wellbeing answer is unrelated to a specific question about an object.
         wellbeing = re.fullmatch(r"(?:i['’]m|i am) (?:good|fine|okay|ok|well)[.! ]*",reply.strip(),re.I)
         wellbeing_question = re.fullmatch(r"(?:hey[, ]+)?(?:how (?:are|r) (?:you|u)|how['’]s it going|are (?:you|u) (?:okay|ok|well))[^\w]*",question.strip(),re.I)
