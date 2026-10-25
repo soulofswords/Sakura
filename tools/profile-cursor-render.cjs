@@ -5,6 +5,7 @@ const fs=require('node:fs/promises'),path=require('node:path');
  const base='http://127.0.0.1:8798';
  const modelRoot='F:/AI/assistant/Sakura VTuber/Sakura/models';
  const selected=process.argv[2]||'vrm/1439626354518702295.vrm';
+ const protectedRoot=process.argv[3]?path.resolve(process.argv[3]):null;
  const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',args:['--use-angle=d3d11']});
  try{
  const page=await browser.newPage({viewport:{width:1920,height:1080}});
@@ -14,9 +15,10 @@ const fs=require('node:fs/promises'),path=require('node:path');
   if(name==='/__cursor_profile')return r.fulfill({contentType:'text/html',body:`<!doctype html><title>Sakura VTuber profile</title><style>body{margin:0}#stage{width:100vw;height:100vh}</style><script type="importmap">{"imports":{"three":"/static/vendor/three/build/three.module.js","three/addons/":"/static/vendor/three/examples/jsm/"}}</script><div id="stage"></div>`});
   if(name==='/api/models')return r.fulfill({json:{models:[{path:selected}]}});
   if(name.startsWith('/api/'))return r.fulfill({json:{ok:true,missing:[],optional_missing:[]}});
-  const root=name.startsWith('/static/')?path.resolve('static'):name.startsWith('/models/')?path.resolve(modelRoot):null;
+  const protectedJS=protectedRoot&&name.startsWith('/static/js/');
+  const root=protectedJS?protectedRoot:name.startsWith('/static/')?path.resolve('static'):name.startsWith('/models/')?path.resolve(modelRoot):null;
   if(!root)return r.abort();
-  const file=path.resolve(root,name.replace(/^\/(static|models)\//,''));
+  const file=path.resolve(root,name.replace(protectedJS?/^\/static\/js\//:/^\/(static|models)\//,''));
   if(!file.startsWith(root+path.sep))return r.abort();
   try{
    const body=await fs.readFile(file),ext=path.extname(file);

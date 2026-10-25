@@ -1,3 +1,13 @@
+# Current published release - 25 October 2026
+
+Published: [Windows + Android Beta](https://github.com/soulofswords/Sakura-Downloads/releases/tag/windows-beta-2026-10-25). Both protected Windows installers, Sakura Mobile 0.3.29, separate updated PDF/HTML guides and SHA-256 checksums are available. See [25 October release notes](UPDATE-2026-10-25.md).
+
+Verification: 689 Python tests and 57 subtests passed; the expanded browser gate, both extracted product smoke checks, APK signature/archive checks and PDF render review passed. Independent EXE/APK read-back found no personal character/RVC/local-LLM files, credentials or source backups. Protected renderer benchmarking retained the GPU cursor performance fix.
+
+The notes below are historical planning records, not the current release checklist.
+
+---
+
 # Published GitHub release — 22 October 2026
 
 Published as `windows-beta-2026-10-22` in the public Sakura-Downloads repository. Source changes were pushed to the private Sakura repository. See [UPDATE-2026-10-22.md](UPDATE-2026-10-22.md) for the release summary.

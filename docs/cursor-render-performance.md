@@ -16,3 +16,5 @@ These are benchmark results, not a native window FPS guarantee. The fix keeps th
 Deployed surgically to source, installed Companion, and installed VTuber. Renderer cache key: cursor-gpu6.
 
 Verification: `node tests/cursor-gpu-picking.cjs`, `node tests/model-drag-hit.cjs`, `node tests/eye-tracking.cjs`, `node tests/cursor-stream.cjs`, `node tests/vrm-gloss.cjs`. Reproduce GPU profiling with `node tools/profile-cursor-render.cjs` or pass a model path relative to the installed model root.
+
+Release verification on 25 October: the obfuscated renderer modules extracted from the actual Companion EXE were benchmarked separately. The same VRM sustained 180 FPS with cursor movement; GPU hover picking averaged 2.95 ms, and sample silhouette hits matched the CPU reference.
