@@ -2635,6 +2635,8 @@ def _agent_local_model_names(settings):
     return sorted(names,key=str.casefold)
 
 app.include_router(agent_router(_agent_model_for,lambda:EDITION!='vtuber' and not getattr(app.state,'tracking_only',False),_agent_provider_status))
+from model_library_confirm import router as model_library_confirm_router
+app.include_router(model_library_confirm_router(_served_locally))
 
 if __name__ == "__main__":
     print()
