@@ -21,7 +21,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     from agent_local_ai import local_ai
     from agent_library_owner import owner_library
     owner_library.enabled=enabled
-    automations=AgentAutomations(runtime,enabled)
+    automations=AgentAutomations(runtime,enabled,model_getter)
     runtime.chat_automations=automations
     from telegram_bot import gateway as telegram
     def telegram_reply(text):
@@ -110,6 +110,10 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
                 'skills':describe(await call(runtime.skills.list)),'learning':await call(runtime.learning.status),
                 'runs':await call(runtime.states),'command_permissions':runtime.permissions.list(),
                 'linkedin':await call(linkedin.status),'calendar':await call(google_calendar.status)}
+
+    @router.get('/api/agent/metrics',dependencies=guard)
+    async def agent_metrics(window:int=900):
+        return await call(runtime.metrics,window)
 
     @router.get('/api/agent/telegram',dependencies=guard)
     async def telegram_state():return await call(telegram.status)
@@ -223,6 +227,9 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     @router.get('/api/agent/history/{identifier}',dependencies=guard)
     async def history_read(identifier:str):return await call(runtime.history.read,identifier)
 
+    @router.delete('/api/agent/history/{identifier}',dependencies=guard)
+    async def history_forget(identifier:str):return await call(runtime.history.forget,identifier)
+
     @router.post('/api/agent/tasks/{identifier}/plan',dependencies=guard)
     async def plan(identifier:str,payload:dict):
         choice=payload.get('provider','current')
@@ -242,7 +249,11 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
 
     @router.post('/api/agent/automations',dependencies=guard)
     async def automation_create(payload:dict):
-        return await call(automations.create,payload.get('run_id'),payload.get('name'),payload.get('minutes'),payload.get('approved',False))
+        if set(payload)-{'run_id','name','minutes','approved','mode','planner','event'}:raise HTTPException(400,'Unexpected automation fields.')
+        event=payload.get('event')
+        if event is not None and (not isinstance(event,dict) or set(event)-{'path','min_seconds'}):raise HTTPException(400,'Event trigger accepts only path and min_seconds.')
+        return await call(automations.create,payload.get('run_id'),payload.get('name'),payload.get('minutes'),payload.get('approved',False),
+                          payload.get('mode','steps'),payload.get('planner','current'),event)
 
     @router.get('/api/agent/library-sync',dependencies=guard)
     async def library_sync_state():return await call(owner_library.status)
@@ -349,6 +360,20 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
 
     @router.post('/api/agent/tasks/{identifier}/cancel',dependencies=guard)
     async def cancel(identifier:str):return await call(runtime.cancel,identifier)
+
+    @router.post('/api/agent/tasks/{identifier}/pause',dependencies=guard)
+    async def pause(identifier:str):return await call(runtime.pause,identifier)
+
+    @router.post('/api/agent/tasks/{identifier}/resume',dependencies=guard)
+    async def resume(identifier:str,payload:dict):
+        choice=payload.get('provider','current')
+        if choice not in ('current','ollama','gemini','sakura-native') and not (isinstance(choice,str) and choice.startswith('ollama:')):
+            raise HTTPException(400,'Choose an installed local model or Google Gemini.')
+        extra=payload.get('additional_steps',0)
+        if type(extra) is not int or not 0<=extra<=500:raise HTTPException(400,'additional_steps must be a whole number from 0 to 500.')
+        try:model=local_ai if choice=='sakura-native' else await call(model_getter,choice)
+        except ValueError as error:raise HTTPException(400,str(error)) from None
+        return await call(runtime.resume,identifier,model,payload.get('skill',''),extra)
 
     @router.post('/api/agent/linkedin/configure',dependencies=guard)
     async def linkedin_config(payload:dict,request:Request):

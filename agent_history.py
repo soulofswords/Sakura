@@ -100,6 +100,13 @@ class AgentHistory:
         record=json.loads(row[0]);record['archived']=True
         return record
 
+    def forget(self,identifier):
+        if not isinstance(identifier,str) or not 1<=len(identifier)<=128:raise ValueError('A stored session id is required.')
+        with self.lock,closing(self._connect()) as db,db:
+            removed=db.execute('DELETE FROM sessions WHERE id=?',(identifier,)).rowcount
+            db.execute('DELETE FROM session_search WHERE id=?',(identifier,))
+        return {'ok':bool(removed),'id':identifier}
+
     def clear(self):
         with self.lock,closing(self._connect()) as db:
             with db:

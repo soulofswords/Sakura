@@ -654,7 +654,9 @@ class LLM:
             request_payload['think'] = False
             # Reserve context for the image and a concise direct answer.
             request_payload['options']['num_ctx'] = max(context, 4096)
-            request_payload['options']['num_predict'] = 320 if getattr(self,'reply_language','English') in ('Hindi','Hinglish') else 160
+            # A spoken reply must begin quickly, but an analysis call has room to
+            # transcribe what the image actually shows.
+            request_payload['options']['num_predict'] = 512 if summarizing else (320 if getattr(self,'reply_language','English') in ('Hindi','Hinglish') else 160)
             request_payload['options']['temperature'] = 0.2
         if planning:
             # Chat replies stay short so a spoken answer begins quickly, but a plan

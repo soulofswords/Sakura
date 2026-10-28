@@ -5,6 +5,7 @@ import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=2';
 import {installBoneSettings} from './model-bones.js?v=persistent5';
 import {installTextureDiagnostics} from './texture-diagnostics.js?v=1';
 import {tintEdit,opacityEdit} from './part-appearance.js?v=1';
+import {installMaterialExpressions} from './material-expressions.js?v=1';
 
 export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,reloadModel) {
     const zoom=document.getElementById('model-settings-zoom');
@@ -88,7 +89,7 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
             if(generation!==revision)return;
             for(const [id,config]of Object.entries(colors))try{current.setColor(id,config);}catch(error){status.textContent=error.message;}
         }
-        fill(part,controller.colorTargets());fill(texture,controller.remapTargets());updateColor();
+        fill(part,controller.colorTargets());fill(texture,controller.remapTargets());updateColor();materialExpressions.refresh();
         updateLightingTarget();
         document.getElementById('model-color-hint').textContent=viewer.live2d
             ? 'Choose a Live2D ArtMesh to tint. Names come from the imported rig. Tint preserves its masks and transparency.'
@@ -142,5 +143,8 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
     window.addEventListener('pointerdown',event=>{if(!picking||event.target.closest?.('#expression-modal .modal-card'))return;event.preventDefault();event.stopImmediatePropagation();const id=controller.pick(event.clientX,event.clientY);if(!id)return;const entry=controller.entry(id);part.value=id;updateColor();const name=entry.name;if(pickMode==='lighting'){if(!entry.material){status.textContent='Gloss and bloom targeting is available for 3D model materials.';return;}lightingTargetId=id;getViewer()?.setCharacterLightingTarget(entry.material);updateLightingTarget();}stopPicking();status.textContent='Selected: '+name;},true);
     window.addEventListener('keydown',event=>{if(picking&&event.code==='Escape'){event.preventDefault();stopPicking();}},true);
     const close=document.getElementById('close-expression-modal'),closeOriginal=close.onclick;close.onclick=()=>{stopPicking();bones.stop();textureDiagnostics.stop();faceMapping.stop();closeOriginal?.();};
+    const materialExpressions=installMaterialExpressions({controller:()=>controller,key:()=>modelKey,part:()=>part.value,
+        edit:()=>transparencyMode()?{channel:'opacity',value:1-Number(opacity.value)/100}:{channel:'color',value:{color:picker.value,strength:Number(strength.value)/100}},
+        save:saveColors,changed:updateColor});
     tab(activeTab);return {refresh,stopMicrophone:mouth.stop};
 }

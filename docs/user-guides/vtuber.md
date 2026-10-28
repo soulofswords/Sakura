@@ -184,3 +184,4 @@ Check your version and tune rendering cost before increasing tracking complexity
 4. Test your model, scenery and recording together. Use fewer props or lower quality if GPU memory usage is high.
 Check: Settings shows the correct edition/version and the rendering quality follows your selection.
 Note: Rendering quality changes resolution/detail budget; it does not guarantee 60 FPS tracking. Camera inference, hardware and phone network conditions also affect smoothness.
+Note: To toggle a material change like an expression, pick the part in Texture coloring, choose color or transparency, set its values, name the preset and click Save selected part as expression. Use Expressions > Part color & transparency expressions to switch it on/off. Off restores the previous value for that channel while preserving the other channel. Presets stay separate for each model.

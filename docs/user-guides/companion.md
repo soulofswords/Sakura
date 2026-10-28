@@ -196,6 +196,10 @@ Optional Agent services require their own setup and permissions.
 6. Review delegated goals, workspaces, tools and models before parallel work. Docker/SSH backends need existing configuration. SSH uses the remote account's actual access.
 7. Browser tools need an installed supported browser. Review navigation, click and type proposals. Treat external pages as untrusted and inspect resulting file/account actions.
 8. Configure messaging gateways with your own credentials and permitted users/channels. Telegram voice messages need enabled transcription. Keep secrets out of chat and skills.
+9. For workspace text edits, inspect the proposed diff before approval. Sakura checks the file's original hash again; if another app changed it, request a fresh proposal. Binary files are not general text-edit targets.
+10. A completion claim can enter a verification/recovery loop. Review its evidence, task step budget and actual outputs. Paused or budget-limited tasks can be resumed explicitly; failed verification is not a successful task.
+11. Goal/event automations need their trigger and planner configured. Check their status and pending reviews. Agent metrics show recorded task/step outcomes and timings, not a guarantee that an AI answer is correct.
+12. For images/documents, use a compatible vision model and approve the analysis step. The review identifies the reader/provider; local and cloud readers have different data destinations. Learned episodic pointers link back to source sessions, and forgetting an archived source removes its recall pointers.
 Check: Actions show actual results, jobs appear in Automations, and unconfigured services report setup requirements.
 Note: Messaging providers, MCP servers, sandboxes, browser engines and AI models are separate dependencies. Imported Agent files and slash commands do not bypass approvals.
 
@@ -203,6 +207,7 @@ Note: Messaging providers, MCP servers, sandboxes, browser engines and AI models
 Shared avatar tools work in Companion and optional VTuber mode.
 1. Open Model Settings (pencil). Texture remapping replaces files; Texture coloring changes tint; Expressions uses authored expressions; Bones controls individual motion; Mouth selects lip-sync input.
 2. Pick a model part before editing it. Tint and transparency apply independently. Transparency-only edits retain original textures/colors. Restore the selected material to undo an edit.
+3. To reuse an appearance change, choose Change color or Change transparency, set the values, enter a preset name and click Save selected part as expression. Under Expressions > Part color & transparency expressions, switch it On or Off. Off restores that channel's previous setting; the other channel stays intact. Presets are saved separately for each model. Delete preset removes it and restores the previous value if active.
 3. Tune character lighting and physics. Scope lighting to a selected material where supported; otherwise it affects the full character. Calibrate tracking after moving the camera or changing seating.
 4. Open Streaming & output. Enable Sakura Virtual Camera or Spout, then select Sakura in the receiving app. Route microphone audio separately.
 5. Memory & privacy contains conversation controls, screen/game controls and Background & stage items. Image/Live2D items have above/below layers, position locks and optional attachment to model movement.

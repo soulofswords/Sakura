@@ -47,6 +47,54 @@ class AgentTests(unittest.TestCase):
         self.assertIn('Candidate',text);self.assertIn('Improved service reliability.',text)
         with self.assertRaisesRegex(ValueError,'already exists'):
             self.runtime.propose(self.run['id'],'files.write',{'path':output.name,'content':'overwrite'})
+    def test_text_edit_shows_diff_and_applies_after_approval(self):
+        path=self.root/'notes.txt';path.write_text('one\ntwo\nthree\n',encoding='utf-8')
+        action=self.action('files.text.edit',{'path':'notes.txt','replacements':[{'old':'two','new':'TWO','count':1}]})
+        self.assertEqual(action['status'],'pending')
+        self.assertIn('-two\n+TWO',action['preview']['diff'])
+        self.assertNotIn('-one',action['preview']['diff'])
+        result=self.runtime.decide(action['id'],True)
+        self.assertEqual(result['action']['status'],'completed')
+        self.assertEqual(path.read_text(encoding='utf-8'),'one\nTWO\nthree\n')
+    def test_text_edit_stale_after_late_file_change_and_never_writes(self):
+        path=self.root/'notes.txt';path.write_text('one\ntwo\n',encoding='utf-8')
+        action=self.action('files.text.edit',{'path':'notes.txt','replacements':[{'old':'two','new':'TWO','count':1}]})
+        path.write_text('one\ntwo changed\n',encoding='utf-8')
+        result=self.runtime.decide(action['id'],True)
+        self.assertEqual(result['action']['status'],'failed')
+        self.assertIn('no longer current',result['action']['result']['error'])
+        self.assertEqual(path.read_text(encoding='utf-8'),'one\ntwo changed\n')
+    def test_text_create_refuses_existing_paths_and_docx_suffix(self):
+        (self.root/'exists.txt').write_text('keep',encoding='utf-8')
+        with self.assertRaises(ValueError):self.action('files.text.create',{'path':'exists.txt','content':'new'})
+        with self.assertRaisesRegex(ValueError,'files.write'):self.action('files.text.create',{'path':'bad.docx','content':'new'})
+        action=self.action('files.text.create',{'path':'new.md','content':'# Created\n'})
+        result=self.runtime.decide(action['id'],True)
+        self.assertEqual(result['action']['status'],'completed')
+    def test_text_patch_applies_reviewed_hunk(self):
+        path=self.root/'notes.txt';path.write_text('a\nb\nc\n',encoding='utf-8')
+        patch='--- a/notes.txt\n+++ b/notes.txt\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n'
+        action=self.action('files.text.patch',{'path':'notes.txt','patch_text':patch})
+        self.assertIn('+B',action['preview']['diff'])
+        self.assertEqual(self.runtime.decide(action['id'],True)['action']['status'],'completed')
+        self.assertEqual(path.read_text(encoding='utf-8'),'a\nB\nc\n')
+    def test_text_edit_ui_mutation_of_arguments_is_blocked(self):
+        path=self.root/'notes.txt';path.write_text('one\ntwo\n',encoding='utf-8')
+        action=self.action('files.text.edit',{'path':'notes.txt','replacements':[{'old':'two','new':'TWO','count':1}]})
+        with self.runtime.lock:stored=self.runtime.actions.get(action['id'])
+        if stored:stored['arguments']['replacements'][0]['new']='EVIL'
+        else:action['arguments']['replacements'][0]['new']='EVIL'
+        result=self.runtime.decide(action['id'],True)
+        self.assertEqual(result['action']['status'],'failed')
+        self.assertEqual(path.read_text(encoding='utf-8'),'one\ntwo\n')
+    def test_auto_continue_never_approves_a_text_edit(self):
+        path=self.root/'notes.txt';path.write_text('one\n',encoding='utf-8')
+        model=Mock();model._request_raw.return_value=json.dumps(
+            {'tool':'files.text.edit','arguments':{'path':'notes.txt','replacements':[{'old':'one','new':'two','count':1}]},'reason':'Rename a line'})
+        with patch.object(self.runtime,'_execute') as execute:
+            result=self.runtime.plan(self.run['id'],model)
+        execute.assert_not_called();self.assertEqual(result['status'],'awaiting_approval')
+        self.assertEqual(path.read_text(encoding='utf-8'),'one\n')
     def test_rejected_command_is_never_executed(self):
         action=self.action('shell.run',{'command':'Write-Output hello'})
         with patch('agent_runtime.run_process') as execute:
@@ -89,6 +137,42 @@ class AgentTests(unittest.TestCase):
         self.runtime.cancel(self.run['id'])
         with patch('agent_runtime.run_process') as execute,self.assertRaises(ValueError):self.runtime.decide(action['id'],True)
         execute.assert_not_called()
+    def test_pause_stops_planning_and_resume_grants_more_steps(self):
+        from agent_runtime import MAX_RUN_STEPS
+        self.assertEqual(self.runtime.pause(self.run['id'])['status'],'paused')
+        model=Mock()
+        with self.assertRaisesRegex(ValueError,'Resume this task'):self.runtime.plan(self.run['id'],model)
+        with patch.object(self.runtime,'plan',return_value={'status':'ready'}) as plan:
+            self.runtime.resume(self.run['id'],model,'',10)
+        plan.assert_called_once()
+        self.assertEqual(self.runtime.runs[self.run['id']]['max_steps'],MAX_RUN_STEPS+10)
+        self.assertEqual(self.runtime.state(self.run['id'])['status'],'ready')
+    def test_pausing_or_resuming_around_an_approval_respects_the_pending_click(self):
+        run=self.runtime.new_run('Approve first',str(self.root))
+        pending=self.runtime.propose(run['id'],'files.list',{'path':'.'})['steps'][-1]
+        self.runtime.runs[run['id']]['status']='awaiting_approval'
+        with self.assertRaisesRegex(ValueError,'pending step'):self.runtime.pause(run['id'])
+        with self.assertRaisesRegex(ValueError,'approval'):self.runtime.resume(run['id'],Mock())
+        self.runtime.decide(pending['id'],False)
+    def test_step_budget_stops_new_steps_until_resumed_with_more(self):
+        with self.runtime.lock:self.runtime.runs[self.run['id']]['max_steps']=2
+        for _ in range(2):
+            step=self.action('files.list',{'path':'.'})
+            self.runtime.decide(step['id'],False)
+        with self.assertRaisesRegex(ValueError,'step budget'):self.action('files.list',{'path':'.'})
+        with patch.object(self.runtime,'plan',return_value={'status':'ready'}):
+            self.runtime.resume(self.run['id'],Mock(),'',3)
+        self.action('files.list',{'path':'.'})
+    def test_paused_task_survives_a_restart(self):
+        store=self.root/'pause-history.json'
+        runtime=AgentRuntime(Connections(self.root/'pause-connections.json'),store_path=store)
+        run=runtime.new_run('Long task',str(self.root))
+        runtime.pause(run['id'])
+        restored=AgentRuntime(Connections(self.root/'pause-connections.json'),store_path=store)
+        self.assertEqual(restored.state(run['id'])['status'],'paused')
+        with patch.object(restored,'plan',return_value={'status':'ready'}):
+            restored.resume(run['id'],Mock(),'',0)
+        self.assertEqual(restored.state(run['id'])['status'],'ready')
     def test_planner_proposes_a_write_and_stops_before_action(self):
         model=Mock();model._request_raw.return_value=json.dumps(
             {'tool':'files.write','arguments':{'path':'draft.md','content':'# Plan\n\nApproved wording.'},'reason':'Save the draft'})
@@ -141,6 +225,38 @@ class AgentTests(unittest.TestCase):
         result=self.runtime.plan(self.run['id'],model)
         self.assertEqual(result['status'],'ready')
         self.assertIn('did not choose a supported action',result['summary'])
+    def test_done_claim_needs_an_independent_reviewer_verdict(self):
+        model=Mock();model._request_raw.side_effect=[
+            json.dumps({'done':True,'summary':'The draft is saved.'}),
+            json.dumps({'verified':True,'reason':'The approved write result shows the file was created.'})]
+        result=self.runtime.plan(self.run['id'],model)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['verification'],'verified')
+    def test_reviewer_rejection_keeps_the_task_open_and_blocks_after_three_claims(self):
+        model=Mock()
+        for cycle in range(3):
+            model._request_raw.side_effect=[
+                json.dumps({'done':True,'summary':'All set.'}),
+                json.dumps({'verified':False,'reason':'The requested file was never read in the steps.'})]
+            result=self.runtime.plan(self.run['id'],model)
+            if cycle<2:
+                self.assertEqual(result['status'],'ready')
+                self.assertIn('never read',result['verification_feedback'])
+            else:
+                self.assertEqual(result['status'],'blocked')
+                self.assertIn('three finish claims',result['summary'])
+        second=model._request_raw.call_args_list[2].args[0][1]['content']
+        self.assertIn('reviewer_feedback',json.loads(second))
+    def test_unusable_reviewer_reply_completes_with_an_honest_note(self):
+        model=Mock();model._request_raw.side_effect=[
+            json.dumps({'done':True,'summary':'Done.'}),'not json at all']
+        result=self.runtime.plan(self.run['id'],model)
+        self.assertEqual(result['status'],'completed')
+        self.assertIn('not independently checked',result['verification'])
+    def test_reviewer_is_not_called_for_future_work_claims(self):
+        model=Mock();model._request_raw.return_value=json.dumps({'done':True,'summary':'Next step will generate it.'})
+        self.runtime.plan(self.run['id'],model)
+        self.assertEqual(model._request_raw.call_count,1)
     def test_approved_harmless_script_really_runs_and_captures_output(self):
         script=self.root/'hello.py';script.write_text('print("approved test output")',encoding='utf-8')
         action=self.action('files.run',{'path':'hello.py'})

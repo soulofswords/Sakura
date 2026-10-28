@@ -46,16 +46,16 @@ def prepare(args,run,cwd):
     return bindings,warning
 
 
-def execute(args,run,bindings,run_process):
+def execute(args,run,bindings,run_process,cancel_event=None):
     backend=args.get('backend','local');cwd=Path(args['cwd']);runner=bindings['runner']
-    if backend=='local':return run_process([runner,'-NoProfile','-NonInteractive','-Command',args['command']],cwd)
+    if backend=='local':return run_process([runner,'-NoProfile','-NonInteractive','-Command',args['command']],cwd,cancel_event=cancel_event)
     if backend=='ssh':
         known=bindings['known_hosts'].replace('\\','/')
         argv=[runner,'-F',os.devnull,'-T','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','UpdateHostKeys=no',
               '-o','ConnectTimeout=10','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no',
               '-o','UserKnownHostsFile="'+known+'"','-p',str(args.get('port',22)),args['user']+'@'+args['host'],
               'cd -- '+shlex.quote(args['remote_cwd'])+' && sh -s']
-        return run_process(argv,cwd,input_text=args['command']+'\n')
+        return run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event)
     name='sakura-agent-'+uuid.uuid4().hex
     mount='type=bind,src='+run['workspace']+',dst=/workspace'+('' if args.get('writable') else ',readonly')
     relative=cwd.relative_to(Path(run['workspace'])).as_posix()
@@ -66,7 +66,7 @@ def execute(args,run,bindings,run_process):
                  '--entrypoint','/bin/sh','-i',args['image'],'-s']
     result=None
     try:
-        result=run_process(argv,cwd,input_text=args['command']+'\n')
+        result=run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event)
         return result
     finally:
         try:

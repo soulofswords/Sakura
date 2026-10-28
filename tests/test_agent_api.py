@@ -65,6 +65,31 @@ class AgentAPITests(unittest.TestCase):
         from agent_local_ai import local_ai
         self.assertEqual(response.status_code,200)
         self.assertIs(plan.call_args.args[1],local_ai)
+    def test_pause_and_resume_routes_drive_the_runtime(self):
+        run=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Long task','workspace':self.folder.name}).json()
+        self.assertEqual(self.client.post('/api/agent/tasks/'+run['id']+'/pause',headers=self.headers).status_code,200)
+        self.assertEqual(self.client.get('/api/agent/tasks/'+run['id'],headers=self.headers).json()['status'],'paused')
+        with patch('agent_api.runtime.resume',return_value={'ok':True}) as resume:
+            response=self.client.post('/api/agent/tasks/'+run['id']+'/resume',headers=self.headers,json={'provider':'sakura-native','additional_steps':25})
+        self.assertEqual(response.status_code,200);resume.assert_called_once()
+        self.assertEqual(resume.call_args.args[3],25)
+        self.assertEqual(self.client.post('/api/agent/tasks/'+run['id']+'/resume',headers=self.headers,json={'provider':'sakura-native','additional_steps':5000}).status_code,400)
+    def test_history_forget_route_requires_panel_token(self):
+        with patch('agent_api.runtime.history.forget',return_value={'ok':True,'id':'x'}) as forget:
+            self.assertEqual(self.client.delete('/api/agent/history/x').status_code,403)
+            response=self.client.delete('/api/agent/history/x',headers=self.headers)
+        self.assertEqual(response.status_code,200);forget.assert_called_once_with('x')
+    def test_metrics_route_is_local_only_and_reports_the_summary(self):
+        self.assertEqual(self.client.get('/api/agent/metrics').status_code,403)
+        self.assertEqual(self.client.get('/api/agent/metrics',headers={**self.headers,'Origin':'https://outside.example'}).status_code,403)
+        self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Count the files','workspace':self.folder.name})
+        response=self.client.get('/api/agent/metrics',headers=self.headers)
+        self.assertEqual(response.status_code,200)
+        payload=response.json()
+        self.assertEqual(payload['summary']['tasks']['total'],1)
+        self.assertEqual(payload['open_tasks'],1)
+        self.assertIn('recent',payload)
+        self.assertTrue(payload['trace_file'].endswith('agent-trace.jsonl'))
     def test_approval_decision_has_no_mutable_argument_override(self):
         run=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Hello test','workspace':self.folder.name}).json()
         proposal=self.client.post('/api/agent/tasks/'+run['id']+'/propose',headers=self.headers,json={'tool':'shell.run','arguments':{'command':'Write-Output original'}}).json()

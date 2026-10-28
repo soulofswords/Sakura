@@ -8,10 +8,13 @@ Choose **Sakura Companion** for conversation, local/cloud AI, Agent workflows an
 
 - **Settings > Theme > About Sakura** shows installed edition/version and release history.
 - **Graphics** in Theme exposes Low, Balanced and High rendering quality, synchronized with the toolbar and saved automatically.
+- **Part appearance expressions** save an individual material's tint or transparency as a named On/Off preset. Save from Texture coloring, then toggle in Expressions. Color and opacity stay independent and presets are model-specific.
 - **PMX backgrounds and props** share the character's 3D scene. In VTuber open Background; in Companion open Memory & privacy > Background & stage items. Tick the enable checkbox, import a complete PMX folder with textures, add the asset and arrange up to four static objects with position, scale and rotation. Unticking unloads scenery while retaining the character. Scenery uses the same 3D camera/depth/output capture and is intended for PMX/VRM characters, not the separate Live2D renderer.
 - Separate **Companion and VTuber guides** include current UI screenshots and step-by-step instructions. Download the PDFs or offline HTML guide ZIP. Screenshots use demonstration data without personal models/accounts.
 
 ## Fixes included
+
+The refreshed Companion Agent also includes reviewed text-edit diffs with stale-file protection, bounded task execution/recovery, source-linked episodic recall, goal/event automation modes, approved image/document analysis, and task metrics. These additions are covered by the updated tests and offline Agent evaluations. Their usefulness still depends on the selected model and configured tools.
 
 - Library previews include the required PMX/VRM preview page.
 - Telegram configuration waits for the previous polling loop to stop.

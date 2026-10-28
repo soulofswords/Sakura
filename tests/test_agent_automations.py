@@ -1,7 +1,7 @@
 import json
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock,patch
 
 import pytest
 from agent_automations import AgentAutomations
@@ -98,3 +98,68 @@ def test_changed_workspace_identity_is_paused_on_restore_and_before_execution(tm
 def test_web_fetch_never_is_an_unattended_read():
     from agent_automations import READ_TOOLS
     assert 'web.fetch' not in READ_TOOLS
+
+
+def goal_setup(tmp_path):
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'))
+    run=runtime.new_run('Tidy my notes folder',str(tmp_path))
+    return runtime,run,AgentAutomations(runtime)
+
+
+def test_goal_automation_replans_and_never_runs_a_change_unattended(tmp_path):
+    runtime,run,scheduler=goal_setup(tmp_path)
+    (tmp_path/'notes.txt').write_text('a\n',encoding='utf-8')
+    item=scheduler.create(run['id'],'Goal pass',5,True,mode='goal')
+    assert item['mode']=='goal' and item['steps']==0
+    model=Mock();model._request_raw.return_value=json.dumps(
+        {'tool':'files.text.edit','arguments':{'path':'notes.txt','replacements':[{'old':'a','new':'b','count':1}]},'reason':'Rename a line'})
+    scheduler.planner_getter=lambda choice:model
+    result=scheduler.execute(item['id'])
+    assert result['run']['status']=='awaiting_approval'
+    assert (tmp_path/'notes.txt').read_text(encoding='utf-8')=='a\n'
+    assert scheduler.list()[0]['status']=='needs_approval'
+    assert scheduler.execute(item['id'])['skipped']
+
+
+def test_goal_automation_without_planner_source_fails_honestly(tmp_path):
+    runtime,run,scheduler=goal_setup(tmp_path)
+    item=scheduler.create(run['id'],'Goal pass',5,True,mode='goal')
+    with pytest.raises(ValueError):scheduler.execute(item['id'])
+    assert scheduler.list()[0]['paused'] and 'planner' in scheduler.list()[0]['last_error'].lower()
+
+
+def test_watch_event_fires_the_approved_replay_once_after_debounce(tmp_path):
+    runtime,run,scheduler=setup(tmp_path)
+    (tmp_path/'inbox').mkdir()
+    item=scheduler.create(run['id'],'Watch',1440,True,event={'path':'inbox','min_seconds':60})
+    t=time.time()
+    assert scheduler.check_events(now=t)==[]
+    (tmp_path/'inbox'/'a.txt').write_text('x')
+    assert scheduler.check_events(now=t+1)==[item['id']]
+    (tmp_path/'inbox'/'b.txt').write_text('y')
+    assert scheduler.check_events(now=t+2)==[]
+    assert scheduler.check_events(now=t+70)==[item['id']]
+    assert scheduler.check_events(now=t+80)==[]
+
+
+def test_watch_and_mode_arguments_cannot_escape_validation(tmp_path):
+    runtime,run,scheduler=setup(tmp_path)
+    for kwargs in ({'event':{'path':'../outside','min_seconds':60}},{'event':{'path':'inbox','min_seconds':5}},
+                  {'event':{'path':'C:/Windows','min_seconds':60}},{'mode':'everything'},{'mode':'goal','approved':False}):
+        approved=kwargs.pop('approved',True)
+        with pytest.raises(ValueError):scheduler.create(run['id'],'Bad',5,approved,**kwargs)
+    assert scheduler.list()==[]
+
+
+def test_goal_and_event_items_survive_a_restart_and_bad_items_are_dropped(tmp_path):
+    runtime,run,scheduler=goal_setup(tmp_path)
+    scheduler.create(run['id'],'Goal',5,True,mode='goal')
+    (tmp_path/'inbox').mkdir()
+    restored=AgentAutomations(runtime)
+    assert [x['mode'] for x in restored.list()]==['goal']
+    broken=json.loads(restored.path.read_text(encoding='utf-8'))
+    broken['junk']={'mode':'steps','minutes':5,'next_run':1,'workspace':str(tmp_path),'goal':'g','name':'n'}
+    broken['goal-no-template']={'mode':'goal','minutes':5,'next_run':1,'workspace':str(tmp_path),'goal':'g','name':'n','event':{'path':'..','min_seconds':60}}
+    restored.path.write_text(json.dumps(broken))
+    reloaded=AgentAutomations(runtime)
+    assert len(reloaded.list())==1 and reloaded.list()[0]['mode']=='goal'

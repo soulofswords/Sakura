@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import Mock,patch
 
 import pytest
 
@@ -96,3 +96,27 @@ def test_archive_is_bounded_and_search_index_tracks_updates(runtime,tmp_path):
     with patch('agent_history.MAX_RECORDS',2):
         for number in range(3):runtime.new_run('limited '+str(number),str(tmp_path))
     assert len(runtime.history.search('limited')['results'])==2
+
+
+def test_forget_removes_exactly_one_session_from_both_tables(tmp_path):
+    history=AgentHistory(tmp_path/'sessions.sqlite')
+    for identifier in ('keep-me','drop-me'):
+        history.save([{'id':identifier,'goal':'Quarterly report work','workspace':str(tmp_path),'status':'completed','steps':[]}])
+    assert history.forget('drop-me')=={'ok':True,'id':'drop-me'}
+    assert {row['id'] for row in history.search('quarterly')['results']}=={'keep-me'}
+    with pytest.raises(ValueError):history.read('drop-me')
+    assert history.forget('drop-me')['ok'] is False
+
+
+def test_planner_context_gets_source_links_without_archived_bodies(tmp_path):
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'))
+    run=runtime.new_run('Summarize the quarterly report',str(tmp_path))
+    with patch.object(runtime.history,'search',return_value={'results':[
+        {'id':run['id'],'goal':'current task','status':'ready','created_at':3},
+        {'id':'old-1','goal':'Earlier quarterly report work','status':'completed','created_at':2,'snippet':'full archived body'}]}) as search:
+        model=Mock();model._request_raw.return_value=json.dumps({'done':True,'summary':'Ready.'})
+        runtime.plan(run['id'],model)
+        context=json.loads(model._request_raw.call_args_list[0].args[0][1]['content'])
+        search.assert_called_once_with('Summarize the quarterly report',run['workspace'])
+        assert [item['id'] for item in context['related_sessions']]==['old-1']
+        assert 'full archived body' not in json.dumps(context['related_sessions'])
