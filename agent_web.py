@@ -3,12 +3,17 @@ import html
 import ipaddress
 import re
 import socket
+import threading
 import time
 from contextlib import contextmanager
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 
+
+_PIN_ORIGIN = [socket.getaddrinfo]
+_PIN_LOCK = threading.Lock()
+_PIN_DEPTH = {}
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sakura-Agent/1.0'
 SEARCH_ENDPOINT = 'https://lite.duckduckgo.com/lite/'
@@ -80,27 +85,41 @@ def _is_public(text):
         return False
 
 
+def _filter_pinned(name, *args, **kwargs):
+    infos = _PIN_ORIGIN[0](name, *args, **kwargs)
+    host = str(name).strip('.').casefold()
+    with _PIN_LOCK:
+        guarded = host in _PIN_DEPTH
+    if not guarded:
+        return infos
+    kept = [item for item in infos if _is_public(item[4][0])]
+    if not kept:
+        raise socket.gaierror(f'{host} resolves only to addresses the agent may not reach.')
+    return kept
+
+
 @contextmanager
 def _pinned(host):
     """Every later lookup for this host is filtered to public answers, otherwise a
     second resolution during connect can return a private address (DNS rebinding).
-    Answers are filtered, never replayed, so the connect port and family stay intact."""
-    original = socket.getaddrinfo
-
-    def pinned(name, *args, **kwargs):
-        infos = original(name, *args, **kwargs)
-        if str(name).strip('.').casefold() != host:
-            return infos
-        kept = [item for item in infos if _is_public(item[4][0])]
-        if not kept:
-            raise socket.gaierror(f'{host} resolves only to addresses the agent may not reach.')
-        return kept
-
-    socket.getaddrinfo = pinned
+    Answers are filtered, never replayed, so the connect port and family stay intact.
+    The guard is refcounted because chat and agent threads fetch concurrently and the
+    resolver is process-global: a plain swap lets one thread restore the unfiltered
+    resolver while another is still mid-request."""
+    with _PIN_LOCK:
+        if not _PIN_DEPTH:
+            _PIN_ORIGIN[0] = socket.getaddrinfo
+            socket.getaddrinfo = _filter_pinned
+        _PIN_DEPTH[host] = _PIN_DEPTH.get(host, 0) + 1
     try:
         yield
     finally:
-        socket.getaddrinfo = original
+        with _PIN_LOCK:
+            _PIN_DEPTH[host] -= 1
+            if not _PIN_DEPTH[host]:
+                del _PIN_DEPTH[host]
+            if not _PIN_DEPTH:
+                socket.getaddrinfo = _PIN_ORIGIN[0]
 
 
 def _body(response, deadline):

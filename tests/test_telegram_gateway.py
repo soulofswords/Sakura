@@ -20,7 +20,8 @@ def make(tmp_path,handler=None):
     return TelegramGateway(store_path=tmp_path/'telegram.json',handler=handler or (lambda text:'local: '+text))
 
 
-def test_reconfiguration_retires_a_slow_worker(tmp_path):
+def test_reconfiguration_waits_for_a_slow_worker_instead_of_running_two(tmp_path):
+    """Two pollers would acknowledge updates the retired one never answers."""
     bot=make(tmp_path);bot.STOP_TIMEOUT=0.02
     entered=threading.Event();release=threading.Event()
     old_event=bot.stop_event
@@ -29,12 +30,14 @@ def test_reconfiguration_retires_a_slow_worker(tmp_path):
     bot.thread=threading.Thread(target=delayed,daemon=True);old=bot.thread;old.start()
     assert entered.wait(1)
     try:
-        with patch('credentials.get_cloud_key',return_value=TEST_TOKEN),patch('credentials.set_cloud_key'):
-            result=bot.configure(False,'42',token=TEST_TOKEN)
-        assert not result['enabled']
-        assert old_event.is_set() and bot.thread is None
+        with patch('credentials.get_cloud_key',return_value=TEST_TOKEN),patch('credentials.set_cloud_key') as saved:
+            with pytest.raises(ValueError,match='still stopping'):
+                bot.configure(False,'42',token=TEST_TOKEN)
+        assert not bot.store_path.exists() and not saved.called
+        assert old_event.is_set() and bot.thread is old
     finally:
-        release.set();old.join(2);bot.stop()
+        release.set();old.join(2)
+        assert bot.configure(False,'42',token=TEST_TOKEN)['enabled'] is False
 
 
 def update(chat_id=42,text='hello'):
@@ -143,14 +146,17 @@ def test_invalid_token_types_and_syntax_are_rejected(tmp_path,value):
     save.assert_not_called()
 
 
-def test_reconfigure_retires_a_live_polling_thread_before_removing_credentials(tmp_path):
+def test_reconfigure_keeps_credentials_while_a_poller_is_still_live(tmp_path):
+    """Clearing the token beside a live loop would leave it polling with a stale
+    offset while the new configuration starts a second poller beside it."""
     bot=make(tmp_path);bot.token=TEST_TOKEN;bot.chat_ids={42}
     worker=Mock();worker.is_alive.return_value=True;bot.thread=worker
     with patch('credentials.get_cloud_key',return_value=TEST_TOKEN),patch('credentials.set_cloud_key') as save:
-        bot.configure(False,'99',clear_token=True)
-    assert bot.thread is None and bot.token=='' and bot.chat_ids=={99}
-    assert bot.stop_event.is_set() and bot.store_path.exists()
-    save.assert_called_once_with('telegram','')
+        with pytest.raises(ValueError,match='still stopping'):
+            bot.configure(False,'99',clear_token=True)
+    assert not save.called and not bot.store_path.exists()
+    assert bot.token==TEST_TOKEN and bot.chat_ids=={42} and bot.thread is worker
+    assert bot.stop_event.is_set()
 
 
 def test_stopped_long_poll_does_not_dispatch_or_send(tmp_path):

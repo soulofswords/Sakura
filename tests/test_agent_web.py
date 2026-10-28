@@ -211,6 +211,21 @@ class WebToolTests(unittest.TestCase):
             with agent_web._pinned('example.com'):
                 self.assertEqual(socket.getaddrinfo('example.org', 443), unrelated)
 
+    def test_a_fetch_that_finishes_first_leaves_a_concurrent_fetch_guarded(self):
+        """The resolver is process-global, so out-of-order exits must not hand the
+        still-running fetch back the unfiltered resolver."""
+        mixed = [(2, 1, 0, '', ('127.0.0.1', 443)), (2, 1, 0, '', ('93.184.216.34', 443))]
+        first = agent_web._pinned('a.test')
+        second = agent_web._pinned('b.test')
+        with patch.object(agent_web.socket, 'getaddrinfo', return_value=list(mixed)):
+            first.__enter__()
+            second.__enter__()
+            first.__exit__(None, None, None)
+            self.assertEqual([item[4] for item in socket.getaddrinfo('b.test', 443)],
+                             [('93.184.216.34', 443)])
+            second.__exit__(None, None, None)
+            self.assertEqual(socket.getaddrinfo('b.test', 443), mixed)
+
     def test_a_host_that_flips_to_loopback_between_checks_is_not_fetched(self):
         """Integration: the guard is installed around the call that actually connects."""
 

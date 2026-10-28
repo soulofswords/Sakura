@@ -205,7 +205,9 @@ class MobileLink:
         if not re.fullmatch(r'[0-9a-f]{64}',nonce) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',device_id):
             return JSONResponse({'error':'Invalid identity challenge.'},400)
         with self.lock:device=self.devices.get(device_id)
-        if not device:return JSONResponse({'error':'Pair this phone first.'},401)
+        # The guard above exempts this path, so expiry is checked here too: an
+        # expired pairing must stop being a PC-identity oracle, not stay valid forever.
+        if not device or device.get('expires_at',0)<=time.time():return JSONResponse({'error':'Pairing expired. Pair this phone again.'},401)
         key=bytes.fromhex(device['token_hash'])
         proof=hmac.new(key,(self.pc_id+'\n'+endpoint+'\n'+nonce).encode(),hashlib.sha256).hexdigest()
         return {'pc_id':self.pc_id,'endpoint':endpoint,'nonce':nonce,'proof':proof}
@@ -213,11 +215,16 @@ class MobileLink:
     def start(self,pc_port):
         self.pc_port=pc_port
         if not self.enabled:
+            # Replacing the listener while the previous one still holds the port makes
+            # a link that looks enabled but answers nothing: the beacon and pairing code
+            # stay up while uvicorn dies on "address already in use".
+            if self.thread and self.thread.is_alive():
+                self.thread.join(timeout=2)
+                if self.thread.is_alive():raise ValueError('The previous phone link is still closing. Wait a moment and turn it on again.')
             self.enabled=True;self.code=f'{secrets.randbelow(1000000):06d}';self.code_expires=time.time()+300
             identity=self.tls
             self.server=uvicorn.Server(uvicorn.Config(self.api,host='0.0.0.0',port=self.port,
                 ssl_certfile=identity['cert'],ssl_keyfile=identity['key'],log_level='warning',access_log=False))
-            if self.thread and self.thread.is_alive():self.thread.join(timeout=2)
             self.thread=threading.Thread(target=self.server.run,daemon=True);self.thread.start()
             self.start_beacon()
         return self.info()
@@ -272,8 +279,12 @@ class MobileLink:
         token=secrets.token_urlsafe(32)
         device_id=str(body.get('device_id') or secrets.token_hex(16))[:64]
         if not re.fullmatch(r'[A-Za-z0-9_-]+',device_id):return JSONResponse({'error':'Invalid device identifier'},400)
-        if device_id not in self.devices and len(self.devices)>=32:return JSONResponse({'error':'Forget an old device before adding another.'},409)
         with self.lock:
+            # Expired pairings are refused by the guard, so they can only ever occupy
+            # a slot; dropping them keeps 32 stale phones from blocking a new one.
+            for stale in [key for key,item in self.devices.items() if item.get('expires_at',0)<=now]:
+                del self.devices[stale]
+            if device_id not in self.devices and len(self.devices)>=32:return JSONResponse({'error':'Forget an old device before adding another.'},409)
             self.devices[device_id]={'name':str(body.get('device_name') or 'Android device')[:80],
                 'token_hash':hashlib.sha256(token.encode()).hexdigest(),'last_seen':now,'expires_at':now+30*86400}
             self.save_devices()

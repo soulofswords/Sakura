@@ -50,7 +50,10 @@ class TelegramGateway:
         with self.control_lock:
             secret='' if clear_token else candidate or get_cloud_key('telegram')
             if enabled and not secret:raise ValueError('Save a Telegram bot token before enabling the gateway.')
-            self.stop()
+            # An orphan loop still owns the update offset and would acknowledge
+            # messages it never replies to, so nothing is rewritten until it is gone.
+            if not self.stop():
+                raise ValueError('The previous Telegram loop is still stopping. Retry in a moment.')
             if clear_token:set_cloud_key('telegram','')
             elif candidate:set_cloud_key('telegram',candidate)
             self.store_path.parent.mkdir(parents=True,exist_ok=True)
@@ -95,9 +98,10 @@ class TelegramGateway:
             if thread and thread.is_alive():
                 if thread is not threading.current_thread():thread.join(timeout=self.STOP_TIMEOUT)
             stopped=not thread or not thread.is_alive()
-            # The old loop keeps its own set event, so it cannot send a late
-            # reply after a new configuration starts a replacement loop.
-            self.thread=None
+            # A loop that outlived the join keeps its own set event, so it cannot send
+            # a late reply; it is still tracked so a retry cannot start a second poller
+            # beside it while it owns the update offset.
+            if stopped:self.thread=None
             return stopped
 
     def status(self):

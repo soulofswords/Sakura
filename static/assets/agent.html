@@ -106,9 +106,14 @@ async function api(path,body,method){
 }
 function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
 function button(text,fn,cls){const el=node('button',text,cls);el.onclick=()=>perform(fn);return el;}
-async function perform(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('status').textContent='Working…';try{await fn();$('status').textContent='Ready. Review the current step before approving.';}catch(error){$('status').textContent=error.message;announce('I hit a problem. '+error.message);}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+async function perform(fn){if(busy)return;busy=true;const reenable=[...document.querySelectorAll('button')].filter(item=>!item.disabled);reenable.forEach(item=>{item.disabled=true;});$('status').textContent='Working…';try{await fn();$('status').textContent='Ready. Review the current step before approving.';}catch(error){$('status').textContent=error.message;announce('I hit a problem. '+error.message);}finally{busy=false;reenable.forEach(item=>{item.disabled=false;});}}
 function runAnnouncement(run){const pending=run?.steps?.findLast(step=>step.status==='pending');if(pending)return 'I have a step ready. '+(pending.reason||'Please review it before I run anything.');if(run?.status==='completed'&&run.summary)return 'That is finished. '+run.summary;if(run?.summary)return run.summary;return 'I could not prepare a step yet. Please check the task and available tools.';}
 function renderReview(action){
+ // The 15s poll re-renders the same pending action; rebuilding it would un-tick the
+ // remembered-command checkbox the reviewer just ticked and re-scroll the dock.
+ const signature=action?action.id+':'+action.status+':'+JSON.stringify([action.arguments,action.preview]):'';
+ if($('review').dataset.signature===signature)return;
+ $('review').dataset.signature=signature;
  const box=$('review');box.replaceChildren();box.hidden=!action;box.classList.toggle('action',action?.status==='pending');if(!action)return;
  box.append(node('h2','Review action'),node('span',action.status,'badge'),node('h3',action.tool),node('p',action.reason||'You requested this action.'),node('pre',JSON.stringify(action.arguments,null,2)));
  if(action.preview)box.append(node('pre',JSON.stringify(action.preview,null,2)));
@@ -119,7 +124,12 @@ function renderReview(action){
   if(action.tool==='shell.run'){const scope=({'docker':'inside that container','ssh':'on that remote host'})[action.arguments&&action.arguments.backend]||'in this folder';const label=node('label');label.append(remember,document.createTextNode(' Allow this exact command '+scope+' for this app session. Future runs may read changed scripts or inputs.'));box.append(label);}
   const row=node('div',undefined,'row');
   for(const [title,approve,cls]of [['Approve & run',true,'approve'],['Reject',false,'reject']])row.append(button(title,async()=>{
-   const result=await api('actions/'+action.id+'/decision',{approve,remember:approve&&remember.checked});renderReview(result.action);
+   let result;
+   try{result=await api('actions/'+action.id+'/decision',{approve,remember:approve&&remember.checked});}
+   // An expired or already-decided action is gone server-side; leaving a live-looking
+   // card up would only re-error on every further click.
+   catch(error){$('status').textContent=error.message;renderReview(null);return;}
+   renderReview(result.action);
    if(result.run){selected=result.run.id;current=result.run;renderRun(current);}await refresh();
    if(!approve)announce('No problem. I will leave that step alone.');
    else if(result.action.status==='completed')announce(result.action.tool==='files.write'?'The new draft is ready. I left your original untouched.':'That step finished successfully.');

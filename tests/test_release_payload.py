@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 BASE=Path(__file__).resolve().parents[1]
@@ -25,3 +26,12 @@ class ReleasePayloadTests(unittest.TestCase):
         selected=[p for p in (BASE/'static').rglob('*') if p.is_file() and builder.release_asset_allowed(p)]
         self.assertTrue(any(p.name=='model-viewer.js' for p in selected))
         self.assertFalse(any('.bak' in p.name for p in selected))
+
+    def test_pages_loaded_by_shipped_scripts_are_packaged(self):
+        builder=load('packaged_pages_builder','tools/build-installers.py')
+        packaged={name for _,name in builder.app_files()}
+        referenced={'Sakura'+match
+                    for script in (BASE/'static/js').glob('*.js')
+                    for match in re.findall(r'/static/[\w./-]+\.html',script.read_text(encoding='utf-8'))}
+        self.assertIn('Sakura/static/model-library-preview.html',referenced)
+        self.assertEqual(sorted(referenced-packaged),[])

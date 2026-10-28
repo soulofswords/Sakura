@@ -14,7 +14,7 @@ from mobile_link import MobileLink
 class IdentityTests(unittest.IsolatedAsyncioTestCase):
  async def asyncSetUp(self):
   self.temp=tempfile.TemporaryDirectory();self.link=MobileLink(Path(self.temp.name)/'devices.json');self.link.enabled=True
-  self.link.lan_addresses=lambda:['192.168.1.3'];self.secret='test-paired-secret';self.link.devices['phone']={'token_hash':hashlib.sha256(self.secret.encode()).hexdigest()}
+  self.link.lan_addresses=lambda:['192.168.1.3'];self.secret='test-paired-secret';self.link.devices['phone']={'token_hash':hashlib.sha256(self.secret.encode()).hexdigest(),'expires_at':time.time()+86400}
   self.client=httpx.AsyncClient(transport=httpx.ASGITransport(app=self.link.api,client=('192.168.1.8',1234)),base_url='https://192.168.1.3:8771')
  async def asyncTearDown(self):
   await self.client.aclose();self.link.stop();self.temp.cleanup()
@@ -38,6 +38,11 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
   payload={'endpoint':'https://192.168.1.99:8771','device_id':'phone','nonce':'ab'*32}
   self.assertEqual((await self.client.post('/identity-proof',json=payload)).status_code,400)
   self.assertEqual((await self.client.post('/identity-proof',json=payload,headers={'host':'192.168.1.99:8771'})).status_code,400)
+ async def test_an_expired_pairing_stops_being_an_identity_oracle(self):
+  """guard() refuses expired devices everywhere else and exempts this path, so the
+  endpoint needs the same expiry or a stale device_id proves PC identity forever."""
+  self.link.devices['phone']['expires_at']=time.time()-1
+  self.assertEqual((await self.client.post('/identity-proof',json={'endpoint':'https://192.168.1.3:8771','device_id':'phone','nonce':'ab'*32})).status_code,401)
 
 class BeaconRecoveryTests(unittest.TestCase):
  def test_rebinds_new_address_and_recovers_when_network_returns(self):

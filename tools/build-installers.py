@@ -73,6 +73,7 @@ def app_files():
     for name in ('companion.ico','companion-vtuber.ico','vtuber.ico','model-upload.ico'):
         yield BASE/'launcher'/name,'Sakura/launcher/'+name
     yield BASE/'static/index.html','Sakura/static/index.html'
+    yield BASE/'static/model-library-preview.html','Sakura/static/model-library-preview.html'
     camera=BASE/'native'/'sakura-camera'
     for name in ('bin/x64/sakura-camera64.dll','bin/x64/sakura-camera-bridge64.dll','install-camera.ps1','README.md','COPYING','source.zip'):
         path=camera/name
