@@ -15,7 +15,7 @@ const fs=require('fs'),path=require('path'),{chromium}=require('playwright');
    const note=document.createElement('p');note.textContent='Sakura 1.0.1 · UI demonstration · Import your own character';note.style.cssText='position:fixed;left:110px;top:140px;color:#94a3b8;font:18px system-ui;max-width:360px';document.body.append(note);
   },edition);
   for(const script of ['appearance.js','vtuber-studio.js','companion-studio.js'])await page.addScriptTag({content:'{\n'+fs.readFileSync('static/js/'+script,'utf8').replace('export function','function')+'\n}'});
-  await page.addScriptTag({content:fs.readFileSync('static/js/pmx-stage.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export class','class')+';window.scenery=new PmxStage(viewer);'});
+  await page.addScriptTag({content:fs.readFileSync('static/js/pmx-stage.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export class','class').replace('export function','function')+';window.scenery=new PmxStage(viewer);'});
   if(edition==='vtuber')await page.evaluate(()=>document.body.classList.add('tracking-only'));
   await page.waitForTimeout(200);
   const prefix=edition==='vtuber'?'data-studio-pane':'data-companion-pane';
