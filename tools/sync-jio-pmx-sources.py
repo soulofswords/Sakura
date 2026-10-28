@@ -32,9 +32,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prepare',action='store_true')
     parser.add_argument('--additions-only',action='store_true',help='Prepare new source PMX files while keeping already-published packages; does not detect edits or deletions.')
+    parser.add_argument('--asset-kind',choices=['character','stage','prop'],default='character')
     args=parser.parse_args();sys.stdout.reconfigure(encoding='utf-8')
     root=Path(__file__).resolve().parents[1]
-    out=private_directory('pmx')
+    os.environ['SAKURA_LIBRARY_ASSET_KIND']=args.asset_kind
+    out=private_directory('pmx' if args.asset_kind=='character' else args.asset_kind)
     mirror=out/'jio-source';mirror.mkdir(parents=True,exist_ok=True)
     owner=JioConnection();owner.resume()
     region=REGIONS[owner.session['dcGroupCode']];api=f'https://{region}-api.jioaicloud.com'
@@ -48,10 +50,17 @@ def main():
             if not link:return result
             url=api+link if isinstance(link,str) and link.startswith('/') and not link.startswith('//') else link
         raise ValueError('Folder listing exceeded supported size.')
-    matches=[x for x in listing(owner.session['rootFolderKey']) if x.get('objectName')=='PMX' and x.get('objectType')=='FR']
+    source_names={'character':('PMX',),'stage':('Stage','Stages'),'prop':('Tools & Props',)}[args.asset_kind]
+    top_folders=listing(owner.session['rootFolderKey'])
+    matches=[x for x in top_folders if str(x.get('objectName','')).casefold() in {name.casefold() for name in source_names} and x.get('objectType')=='FR']
+    if not matches and args.asset_kind!='character':
+        pmx_roots=[x for x in top_folders if str(x.get('objectName','')).casefold()=='pmx' and x.get('objectType')=='FR']
+        if len(pmx_roots)==1:matches=[x for x in listing(pmx_roots[0]['objectKey']) if str(x.get('objectName','')).casefold() in {name.casefold() for name in source_names} and x.get('objectType')=='FR']
+    if not matches and args.asset_kind!='character':
+        print('No '+source_names[0]+' folder in this storage account yet. Existing scenery was kept.',flush=True);return
     if len(matches)!=1:raise ValueError('PMX source folder is missing or ambiguous.')
     top=listing(matches[0]['objectKey']);queue=[]
-    categories=[x for x in top if x.get('objectType')=='FR' and str(x.get('objectName','')).casefold()!='sakura library packages']
+    categories=[x for x in top if x.get('objectType')=='FR' and str(x.get('objectName','')).casefold() not in ('sakura library packages','stage','stages','tools & props')] if args.asset_kind=='character' else [{'objectName':'Stages' if args.asset_kind=='stage' else 'Tools & Props','objectKey':matches[0]['objectKey']}]
     for item in categories:
         name=item.get('objectName','');checked_relative(name)
         queue.append((item['objectKey'],name))
@@ -66,13 +75,18 @@ def main():
                 for item in future.result():
                     name=item.get('objectName','');checked_relative(name)
                     path=prefix+'/'+name
-                    if item.get('objectType')=='FR':queue.append((item['objectKey'],path))
+                    if item.get('objectType')=='FR':
+                        if name.casefold()!='sakura library packages':queue.append((item['objectKey'],path))
                     elif path in files:raise ValueError('Duplicate source path: '+path)
                     else:files[path]=item
             print(f'Inventoried {folders} folders, {len(files)} files.',flush=True)
-    (out/'jio-source-inventory.json').write_text(json.dumps({'files':files,'folders':folders,'categories':[x['objectName'] for x in categories]},ensure_ascii=False,indent=2),encoding='utf-8')
+    remote_root=matches[0]['objectName']
+    if args.asset_kind!='character' and matches[0].get('parentObjectKey')!=owner.session['rootFolderKey']:remote_root='PMX/'+remote_root
+    (out/'jio-source-inventory.json').write_text(json.dumps({'files':files,'folders':folders,'categories':[x['objectName'] for x in categories],'source_root':remote_root},ensure_ascii=False,indent=2),encoding='utf-8')
     if not args.prepare:
         print('Inventory saved. Run with --prepare to build new packages. No model files changed.');return
+    if args.asset_kind!='character' and not any(path.lower().endswith('.pmx') for path in files):
+        print('The dedicated scenery folder is empty. Add complete PMX asset folders; no packages were published.',flush=True);return
     checkpoint=out/'prepared-models.json'
     previous=json.loads(checkpoint.read_text(encoding='utf-8')) if checkpoint.exists() else {}
     pending=None
@@ -196,7 +210,7 @@ def main():
             candidate=selected
             if candidate is None:
                 for file in sorted(folder.rglob('*.pmx')):
-                    try:builder.validate_humanoid_names(builder.pmx_bone_names(file.read_bytes()),file.name)
+                    try:builder.validate_model(file)
                     except ValueError:continue
                     candidate=file;break
             if candidate is None or candidate.relative_to(mirror).as_posix() not in pending:continue

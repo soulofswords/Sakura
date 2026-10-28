@@ -25,7 +25,7 @@ def test_nested_variants_are_individually_discovered_and_props_excluded(tmp_path
 def test_selected_variant_package_retains_textures_and_only_selected_model(tmp_path,monkeypatch):
     monkeypatch.setattr(builder,'pmx_bone_names',lambda data:[])
     monkeypatch.setattr(builder,'validate_humanoid_names',lambda *args:None)
-    monkeypatch.setattr(builder,'import_package',lambda *args:None)
+    monkeypatch.setattr(builder,'import_package',lambda *args,**kwargs:None)
     root=tmp_path/'models';folder=root/'game/Kafka';selected=folder/'dress/normal.pmx'
     selected.parent.mkdir(parents=True);selected.write_bytes(b'avatar1')
     (selected.parent/'glasses.pmx').write_bytes(b'avatar2')
@@ -53,7 +53,7 @@ def test_any_new_category_is_discovered_but_generated_packages_are_not(tmp_path,
 def test_large_package_split_keeps_every_original_folder_in_title(tmp_path,monkeypatch):
     monkeypatch.setattr(builder,'pmx_bone_names',lambda data:[])
     monkeypatch.setattr(builder,'validate_humanoid_names',lambda *args:None)
-    monkeypatch.setattr(builder,'import_package',lambda *args:None)
+    monkeypatch.setattr(builder,'import_package',lambda *args,**kwargs:None)
     root=tmp_path/'models';folder=root/'Miku universe/Haku/Office'
     folder.mkdir(parents=True);(folder/'Haku.pmx').write_bytes(b'avatar')
     out=tmp_path/'out';out.mkdir()
@@ -64,7 +64,7 @@ def test_large_package_split_keeps_every_original_folder_in_title(tmp_path,monke
 def test_single_model_nested_wrappers_and_cached_packages_keep_paths(tmp_path,monkeypatch):
     monkeypatch.setattr(builder,'pmx_bone_names',lambda data:[])
     monkeypatch.setattr(builder,'validate_humanoid_names',lambda *args:None)
-    monkeypatch.setattr(builder,'import_package',lambda *args:None)
+    monkeypatch.setattr(builder,'import_package',lambda *args,**kwargs:None)
     root=tmp_path/'models';folder=root/'anime/Series';model=folder/'Character/Outfit/hero.pmx'
     model.parent.mkdir(parents=True);model.write_bytes(b'avatar')
     out=tmp_path/'out';out.mkdir()

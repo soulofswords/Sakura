@@ -15,10 +15,13 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def main():
+    bundled=Path.home()/'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'
+    if bundled.is_dir() and not os.environ.get('NODE_PATH'):os.environ['NODE_PATH']=str(bundled)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inventory-only',action='store_true')
     parser.add_argument('--additions-only',action='store_true',help='Publish additions without recreating existing packages. Full sync remains the default for source edits/deletions.')
     parser.add_argument('--all-accounts',action='store_true',help='Sync each configured storage account; one failed account does not skip another.')
+    parser.add_argument('--asset-kind',choices=['character','stage','prop'],default='character')
     parser.add_argument('--require-lock',action='store_true',help='Fail rather than report success when another owner workflow holds the lock.')
     args=parser.parse_args()
     if args.all_accounts:
@@ -26,13 +29,13 @@ def main():
         for account in ('primary','account2'):
             folder=ROOT.parent/('private-model-library'+('' if account=='primary' else '-account2'))
             if account!='primary' and not (folder/'server-enabled.json').is_file():continue
-            flags=[flag for flag,enabled in (('--inventory-only',args.inventory_only),('--additions-only',args.additions_only),('--require-lock',args.require_lock)) if enabled]
+            flags=[flag for flag,enabled in (('--inventory-only',args.inventory_only),('--additions-only',args.additions_only),('--require-lock',args.require_lock)) if enabled]+['--asset-kind',args.asset_kind]
             result=subprocess.run([sys.executable,str(Path(__file__).resolve()),*flags],cwd=ROOT,env={**os.environ,'SAKURA_JIO_ACCOUNT':account})
             if result.returncode:failed.append(account)
         if failed:raise ValueError('Sync needs attention for: '+', '.join(failed)+'. Other configured accounts were still checked.')
         return
     if account_id()!='primary' and not (private_directory()/'server-enabled.json').is_file():raise ValueError('Second-account server routing must be deployed and verified before publication.')
-    directory=private_directory('pmx');directory.mkdir(exist_ok=True)
+    directory=private_directory('pmx' if args.asset_kind=='character' else args.asset_kind);directory.mkdir(exist_ok=True)
     if sys.platform=='win32':
         import msvcrt
         sync_lock=(directory/'jio-sync.lock').open('a+b');sync_lock.seek(0);sync_lock.write(b'1');sync_lock.flush();sync_lock.seek(0)
@@ -44,11 +47,12 @@ def main():
         result=subprocess.run(arguments,cwd=ROOT,env=env)
         if result.returncode:raise ValueError('Owner library sync stopped. Review the preceding error; existing models were kept.')
     python=sys.executable
-    command=[python,'tools/sync-jio-pmx-sources.py']
+    command=[python,'tools/sync-jio-pmx-sources.py','--asset-kind',args.asset_kind]
     if not args.inventory_only:command.append('--prepare')
     if args.additions_only:command.append('--additions-only')
     run(command)
     if args.inventory_only:return
+    if args.asset_kind!='character' and not (directory/'prepared-models.json').is_file():return
     environment=os.environ.copy();environment['SAKURA_LIBRARY_PREVIEW_PMX_ROOT']=str(directory/'jio-source')
     # Use a dedicated child process and close it after preview generation.
     try:
@@ -71,8 +75,14 @@ def main():
         run(['node','tools/render-pmx-library-previews.cjs',str(directory)],env=environment)
     finally:
         server.terminate();server.wait(timeout=10)
-    run([python,'tools/upload-library-jio.py','--directory',str(directory),'--remote-folder','PMX/Sakura library packages','--workers','3'])
+    remote='PMX'
+    if args.asset_kind!='character':
+        import json
+        inventory=json.loads((directory/'jio-source-inventory.json').read_text(encoding='utf-8'))
+        remote=inventory.get('source_root','Stages' if args.asset_kind=='stage' else 'Tools & Props')
+    run([python,'tools/upload-library-jio.py','--directory',str(directory),'--remote-folder',remote+'/Sakura library packages','--workers','3'])
     run([python,'tools/publish-library-jio.py','--directory',str(directory),'--configure'])
+    if args.asset_kind!='character':return
     if account_id()!='primary' and JioConnection().store.load().get('folder_name')=='PMX':
         print('PMX-only storage account synced.',flush=True);return
     run([python,'tools/sync-jio-live2d-sources.py'])

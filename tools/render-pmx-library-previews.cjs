@@ -34,13 +34,23 @@ const {spawnSync}=require('node:child_process');
     page=await browser.newPage({viewport:{width:256,height:256},deviceScaleFactor:1});
     await page.goto('http://127.0.0.1:8796/static/library-audit.html?no-capture');
     await page.waitForFunction(()=>window.auditReady,{polling:100,timeout:60000});
-    const loaded=await page.evaluate(async model=>{
+    const loaded=await page.evaluate(async ({model,kind})=>{
      const v=window.auditViewer;cancelAnimationFrame(v.animationFrame);v.animate=()=>{};
-     await v.loadModel('/models/'+model.split('/').map(encodeURIComponent).join('/'));
+     const url='/models/'+model.split('/').map(encodeURIComponent).join('/');
+     if(kind&&kind!=='character'){
+      const THREE=await import('three'),{MMDLoader}=await import('three/addons/loaders/MMDLoader.js'),{TGALoader}=await import('three/addons/loaders/TGALoader.js'),{DDSLoader}=await import('three/addons/loaders/DDSLoader.js');
+      const manager=new THREE.LoadingManager();const texturesReady=new Promise(resolve=>{manager.onLoad=resolve;});manager.addHandler(/\.tga$/i,new TGALoader(manager));manager.addHandler(/\.dds$/i,new DDSLoader(manager));
+      v.model=await new MMDLoader(manager).loadAsync(url);await texturesReady;v.scene.add(v.model);
+      v.model.traverse(object=>{for(const [name,targets] of Object.entries(object.geometry?.morphAttributes||{}))if(Array.isArray(targets)&&targets.length===0)delete object.geometry.morphAttributes[name];});
+      // Props can be authored far from (0,0,0). Rotate around their visible
+      // center, otherwise the object orbits out of the thumbnail camera.
+      const object=v.model;object.updateMatrixWorld(true);const center=new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
+      object.position.sub(center);object.removeFromParent();const pivot=new THREE.Group();pivot.add(object);pivot.rotation.y=Math.PI/4;v.scene.add(pivot);v.model=pivot;
+     }else await v.loadModel(url);
      if(!v.model)return false;
      v.model.skeleton?.pose?.();v.model.updateMatrixWorld(true);v.desktopMode=true;v._autoFrame(v.model);
      v.controls.enabled=false;v._previewStart=v.model.rotation.y;return true;
-    },entry.preview_model);
+    },{model:entry.preview_model,kind:entry.asset_kind});
     if(!loaded)throw Error('Model did not render');
     for(let i=0;i<16;i++){
      await page.evaluate(angle=>{const v=window.auditViewer;v.model.rotation.y=v._previewStart+angle;v.model.updateMatrixWorld(true);v.renderer.render(v.scene,v.camera);},i*Math.PI*2/16);

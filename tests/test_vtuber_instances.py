@@ -11,6 +11,15 @@ import gui_server
 
 
 class VTuberInstanceTests(unittest.TestCase):
+    def test_secondary_instances_start_with_unique_empty_profiles(self):
+        with tempfile.TemporaryDirectory() as root:
+            first=vtuber_instances.instance_profile(root,1)
+            self.assertEqual(first,Path(root)/'desktop-profile')
+            second=vtuber_instances.instance_profile(root,2)
+            (second/'old-scene.json').write_text('old scene')
+            reopened=vtuber_instances.instance_profile(root,2)
+            self.assertNotEqual(second,reopened)
+            self.assertFalse((reopened/'old-scene.json').exists())
     @unittest.skipUnless(sys.platform == 'win32', 'Windows instance lease')
     def test_three_live_slots_limit_and_crash_release(self):
         with tempfile.TemporaryDirectory() as root:

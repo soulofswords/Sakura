@@ -16,6 +16,13 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from model_import import import_package, MAX_BYTES
 from model_rig_validation import pmx_bone_names,validate_humanoid_names
 from model_library_paths import pmx_library_name
+import os
+
+def asset_kind():return os.environ.get('SAKURA_LIBRARY_ASSET_KIND','character')
+
+def validate_model(model):
+    names=pmx_bone_names(model.read_bytes())
+    if asset_kind()=='character':validate_humanoid_names(names,model.name)
 
 CATEGORIES=('genshin impact','honkai impact 3rd','Honkai star rail','snowbreak','zenless zone zero')
 ASSETS={'.pmx','.png','.jpg','.jpeg','.bmp','.tga','.dds','.sph','.spa','.gif','.webp','.txt','.md','.pdf','.json'}
@@ -44,7 +51,7 @@ def variants(root):
     for category,folder in groups(root):
         good=[]
         for model in sorted(folder.rglob('*.pmx')):
-            try:validate_humanoid_names(pmx_bone_names(model.read_bytes()),model.name);good.append(model)
+            try:validate_model(model);good.append(model)
             except ValueError:continue
         if len(good)<=1:
             yield category,folder,None
@@ -61,7 +68,7 @@ def prepare(root,category,folder,output,previous,selected_model=None):
     if any(x.is_symlink() or not x.resolve().is_relative_to(root.resolve()) for x in files):raise ValueError('Linked assets are not allowed.')
     good,bad=[],[]
     for model in [x for x in files if x.suffix.lower()=='.pmx']:
-        try:validate_humanoid_names(pmx_bone_names(model.read_bytes()),model.name);good.append(model)
+        try:validate_model(model);good.append(model)
         except ValueError:bad.append(model)
     if not good:raise ValueError('No importable humanoid PMX model in this folder.')
     if selected_model:
@@ -84,14 +91,14 @@ def prepare(root,category,folder,output,previous,selected_model=None):
     # Validate exactly the package users receive. Restores .tga names naturally
     # because packaging reads unchanged local originals, not inferred Jio names.
     with tempfile.TemporaryDirectory(prefix='sakura-pmx-publish-') as stage:
-        import_package(stage,[(target.name,temporary.read_bytes())],'pmx')
+        import_package(stage,[(target.name,temporary.read_bytes())],'pmx',asset_kind=asset_kind())
     temporary.replace(target)
     with target.open('rb') as stream:sha=hashlib.file_digest(stream,'sha256').hexdigest()
     return identifier,{'id':identifier,'name':title,'format':'pmx','bytes':target.stat().st_size,
         'sha256':sha,'version':sha[:12],'preview':False,'mobile_compatible':False,
         'source_folder':relative,'preview_model':'pmx/'+primary.relative_to(root).as_posix(),
         'source_fingerprint':fingerprint,'models':len(good),'excluded_non_avatar_models':len(bad),
-        'variant_model':selected_model.relative_to(root).as_posix() if selected_model else None}
+        'variant_model':selected_model.relative_to(root).as_posix() if selected_model else None,'asset_kind':asset_kind()}
 
 
 def main():

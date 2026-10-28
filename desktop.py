@@ -19,7 +19,8 @@ if EDITION=='vtuber' or os.environ.get('SAKURA_VTUBER_INSTANCE')=='1':
             import ctypes
             ctypes.windll.user32.MessageBoxW(0,str(error),'Sakura VTuber',0x40)
         raise SystemExit(0)
-PROFILE_DIR=Path(__file__).parent/('desktop-profile' if INSTANCE_INDEX==1 else f'desktop-profile-{INSTANCE_INDEX}')
+from vtuber_instances import instance_profile
+PROFILE_DIR=instance_profile(Path(__file__).parent,INSTANCE_INDEX)
 APP_DISPLAY_NAME = DISPLAY_NAME + (f' · {INSTANCE_INDEX}' if INSTANCE_INDEX>1 else '')
 APP_USER_MODEL_ID = 'Sakura.VTuber' if EDITION=='vtuber' else 'Sakura.DesktopCompanion'
 from app_branding import icon_path
@@ -628,6 +629,7 @@ def main():
         native.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         profile = native.webview.page().profile()
         profile.setCachePath(str(PROFILE_DIR / 'http-cache'))
+        if INSTANCE_INDEX>1:profile.setPersistentStoragePath(str(PROFILE_DIR/'browser-storage'))
         if sys.platform == 'win32':
             from window_identity import set_taskbar_identity
             set_taskbar_identity(int(native.winId()), APP_USER_MODEL_ID,

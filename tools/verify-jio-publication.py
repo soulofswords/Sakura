@@ -23,7 +23,9 @@ def verify(root=None):
     counts={};sample_verified=False
     with tempfile.TemporaryDirectory(prefix='owner-library-check-',dir=root.parent/'private-model-library-pmx') as stage:
         library=ModelLibrary(stage,lambda:config);found={x['id']:x for x in library.catalogue()['models']}
-        for kind,directory in [('pmx',root.parent/'private-model-library-pmx'),('live2d',root.parent/'private-model-library'),('pmx',root.parent/'private-model-library-account2-pmx'),('live2d',root.parent/'private-model-library-account2')]:
+        locations=[('pmx',root.parent/'private-model-library-pmx'),('live2d',root.parent/'private-model-library'),('pmx',root.parent/'private-model-library-account2-pmx'),('live2d',root.parent/'private-model-library-account2')]
+        locations.extend((kind,root.parent/('private-model-library'+account+'-'+kind)) for account in ('','-account2') for kind in ('stage','prop'))
+        for kind,directory in locations:
             path=directory/'prepared-models.json'
             if not path.is_file():continue
             prepared=json.loads(path.read_text(encoding='utf-8'));counts[kind+'_looks']=counts.get(kind+'_looks',0)+len(prepared)
@@ -35,7 +37,7 @@ def verify(root=None):
             if not result.get('models'):raise ValueError('The hosted model did not install.')
             if sample.get('preview'):
                 picture=Image.open(io.BytesIO(library.preview(sample['id'])))
-                if kind=='pmx' and picture.n_frames<12:raise ValueError('The published PMX preview does not rotate.')
+                if kind in ('pmx','stage','prop') and picture.n_frames<12:raise ValueError('The published PMX preview does not rotate.')
             sample_verified=True
     return {'pmx_looks':counts.get('pmx_looks',0),'live2d_models':counts.get('live2d_looks',0),'sample_install_verified':sample_verified}
 

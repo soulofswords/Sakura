@@ -6,8 +6,22 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 MAX_INSTANCES = 3
+
+def instance_profile(root,index):
+    if index==1:return Path(root)/'desktop-profile'
+    # A slot is reused after a window closes; its previous browser scene must not
+    # be reused. Unique temporary profiles also isolate IndexedDB stage items.
+    import shutil
+    profile=Path(tempfile.mkdtemp(prefix=f'sakura-vtuber-{index}-'))
+    os.environ['SAKURA_INSTANCE_PROFILE']=str(profile)
+    def cleanup():
+        try:shutil.rmtree(profile)
+        except OSError:pass # Locked crash remnants are never loaded next launch.
+    atexit.register(cleanup)
+    return profile
 
 def instance_index():
     try:

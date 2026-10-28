@@ -118,8 +118,12 @@ class ModelLibrary:
             if not isinstance(size, int) or isinstance(size, bool) or not 0 < size <= MAX_BYTES:
                 raise ValueError('Model packages must be under 512 MB.')
             record = installed.get(entry['id']) or packages.get((entry['format'],entry['sha256']))
+            from scenery_assets import asset_kind
+            if record and asset_kind(record.get('name'))!=asset_kind(entry.get('name')):record=None
+            from scenery_assets import asset_kind
             models.append({key: entry.get(key) for key in ('id', 'name', 'format', 'bytes', 'sha256', 'version', 'mobile_compatible')}
                           | {'preview': entry.get('preview') is True,
+                             'asset_kind':asset_kind(entry.get('name')) if entry['format']=='pmx' else 'character',
                              'installed': bool(record)})
         return {'models': models}
 
@@ -151,7 +155,8 @@ class ModelLibrary:
         for path in (self.root / '.library').glob('*.json'):
             if not ID.fullmatch(path.stem):continue
             record=self._installed(path.stem)
-            if record and record.get('format')==entry['format'] and record.get('sha256')==entry['sha256']:
+            from scenery_assets import asset_kind
+            if record and record.get('format')==entry['format'] and record.get('sha256')==entry['sha256'] and asset_kind(record.get('name'))==asset_kind(entry.get('name')):
                 return record
         return None
 
@@ -178,7 +183,9 @@ class ModelLibrary:
                         raise ValueError('The download exceeded its declared size.')
             if len(content) != entry['bytes'] or digest.hexdigest() != entry['sha256']:
                 raise ValueError('The model download failed its integrity check. Nothing was installed.')
-            result = import_package(self.root, [('library.zip', content)], entry['format'], entry['name'], identifier)
+            from scenery_assets import asset_kind
+            kind=asset_kind(entry['name']) if entry['format']=='pmx' else 'character'
+            result = import_package(self.root, [('library.zip', content)], entry['format'], entry['name'], identifier,kind)
             record = {**entry, 'models': result['models']}
             folder = self.root / '.library'
             folder.mkdir(exist_ok=True)

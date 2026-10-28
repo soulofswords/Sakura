@@ -11,7 +11,7 @@ from model_rig_validation import pmx_bone_names, validate_humanoid_names, valida
 MAX_BYTES = 512 * 1024 * 1024
 
 
-def existing_package(root, stage, models, kind):
+def existing_package(root, stage, models, kind, bucket=None):
     """Reuse a byte-identical local import, including its referenced asset tree."""
     first=models[0];relative=first.relative_to(stage)
     def digest(path):
@@ -20,12 +20,13 @@ def existing_package(root, stage, models, kind):
     assets=[p for p in stage.rglob('*') if p.is_file() and
             (p.suffix.lower() not in ('.pmx','.vrm') or p.suffix.lower()=='.'+kind)]
     hashes={first:expected}
-    for candidate in (root/kind).rglob('*'+('model3.json' if kind=='live2d' else '.'+kind)):
+    for candidate in (root/(bucket or kind)).rglob('*'+('model3.json' if kind=='live2d' else '.'+kind)):
         if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):continue
+        if kind=='pmx' and (bucket or kind)=='pmx' and candidate.relative_to(root/'pmx').parts[0] in ('Stages','Tools & Props'):continue
         if candidate.stat().st_size!=first.stat().st_size or digest(candidate)!=expected:continue
         base=candidate
         for _ in relative.parts:base=base.parent
-        if not base.resolve().is_relative_to((root/kind).resolve()):continue
+        if not base.resolve().is_relative_to((root/(bucket or kind)).resolve()):continue
         match=True
         for source in assets:
             target=base/source.relative_to(stage)
@@ -54,7 +55,10 @@ def model_folder_name(root, kind, label, identifier=''):
     return name
 
 
-def import_package(root, files, model_format="auto", display_name='', identifier=''):
+def import_package(root, files, model_format="auto", display_name='', identifier='', asset_kind='character'):
+    from scenery_assets import FOLDERS
+    if asset_kind not in ('character',*FOLDERS):raise ValueError('Unsupported asset kind.')
+    if asset_kind!='character' and model_format!='pmx':raise ValueError('3D scenery requires a PMX package.')
     if model_format not in {"auto", "pmx", "vrm", "live2d"}:
         raise ValueError("Choose PMX, VRM, or Live2D.")
     root = Path(root)
@@ -127,11 +131,13 @@ def import_package(root, files, model_format="auto", display_name='', identifier
             elif len(header) < 9 or header[:4] != b'PMX ':
                 raise ValueError(f'{model.name} is not a valid PMX file.')
             else:
-                validate_humanoid_names(pmx_bone_names(model.read_bytes()), model.name)
+                names=pmx_bone_names(model.read_bytes())
+                if asset_kind=='character':validate_humanoid_names(names, model.name)
         published = []
         reused=True
         for kind in sorted({model.suffix.lower().lstrip('.') for model in models}):
-            existing=existing_package(root,stage,[model for model in models if model.suffix.lower()=='.'+kind],kind)
+            bucket=kind if asset_kind=='character' else kind+'/'+FOLDERS[asset_kind]
+            existing=existing_package(root,stage,[model for model in models if model.suffix.lower()=='.'+kind],kind,bucket)
             if existing:
                 published.extend(existing);continue
             reused=False
@@ -139,12 +145,12 @@ def import_package(root, files, model_format="auto", display_name='', identifier
             inferred=first.stem
             if inferred.lower() in ('model','avatar','character') and first.parent!=stage:inferred=first.parent.name
             label=str(display_name).replace('\\','/').split('/')[-1].strip() or inferred
-            name=model_folder_name(root,kind,label,identifier)
-            destination = root / kind / name
+            name=model_folder_name(root,bucket,label,identifier)
+            destination = root / bucket / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             def ignore_other_models(directory, names):
                 return [entry for entry in names if Path(entry).suffix.lower() in {'.pmx', '.vrm'} and Path(entry).suffix.lower() != '.' + kind]
             shutil.copytree(stage, destination, ignore=ignore_other_models)
-            published.extend(f'{kind}/{name}/{model.relative_to(stage).as_posix()}' for model in models if model.suffix.lower() == '.' + kind)
+            published.extend(f'{bucket}/{name}/{model.relative_to(stage).as_posix()}' for model in models if model.suffix.lower() == '.' + kind)
         return {'models': published,'already_installed':reused,
                 'message': 'Imported into its format folder with textures and folder structure preserved.'}

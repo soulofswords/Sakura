@@ -1,5 +1,5 @@
 import {installCompactCompanionControls} from './compact-companion-controls.js?v=155';
-import {installStageItems} from './stage-items.js?v=release101';
+import {installStageItems} from './stage-items.js?v=scenery1028';
 import { appendEvidence } from './response-evidence.js?v=medium103';
 import {installChatAttachments} from './chat-attachments.js?v=files105';
 import {installSystemTools} from './system-tools.js?v=metrics93';
@@ -1962,7 +1962,7 @@ async function loadModelsList() {
         syncModelSelectors();
 
         // Auto-load first model if none selected
-        if (!selectedPmxPath && (allPmxModels.length > 0 || live2d.length > 0)) {
+        if (!currentSettings.fresh_instance && !selectedPmxPath && (allPmxModels.length > 0 || live2d.length > 0)) {
             const available = [...allPmxModels.filter(m => !m.error), ...live2d.filter(m=>m.path)];
             const savedName = (currentSettings.selected_model || '').split('/').pop();
             const relocated = available.filter(m => m.filename === savedName);

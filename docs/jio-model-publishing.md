@@ -131,6 +131,27 @@ object references are namespaced, while names retain the game/character folder
 hierarchy. Authenticated clients browse both through the same Sakura library.
 No credentials or underlying download URLs are sent to clients.
 
+## Dedicated stages and Tools & Props
+
+Upload complete PMX stage folders under **Stage** (or **Stages**) in My Files, or
+under PMX/Stage. Matching is case-insensitive. The owner's existing **Tools & Props**
+tree is separate. Do not upload stages into character folders. The hourly owner
+Agent checks characters, stages and props in both accounts. Empty stage folders
+remain empty until an installable PMX package is uploaded.
+
+Sakura's Background → 3D backgrounds & props offers **Stages** and **Tools & Props**.
+Each has its own local folder browser, search and cloud button. Cloud sign-in is
+checked only when its button is clicked. Downloads go to `models/pmx/Stages` or
+`models/pmx/Tools & Props`; these assets are excluded from character selectors.
+Choose one asset, then Add selected asset to stage. The whole library is never
+placed at once. The current character remains selected. PMX scenery is validated
+as a PMX file without requiring humanoid bones; character imports still require
+a valid humanoid rig. PNG and Live2D overlay items remain in their own controls.
+
+Additional VTuber instances start with a fresh temporary browser profile and
+fresh settings, including an empty scene. The first instance retains its normal
+saved scene/settings. All instances share installed model and scenery files.
+
 Launch tools/jio_library_owner.py --account account2 --folder PMX to configure
 the second account. The owner Agent includes it only after server routing has
 been deployed and the account verified. Original upload folders are read only.

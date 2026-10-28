@@ -170,7 +170,7 @@ Note: Users do not need Jio accounts, owner OTPs or publishing credentials. Clou
 Place a PMX environment or accessory beside your 3D character.
 1. Open Background on the left toolbar. Scroll to 3D backgrounds & props.
 2. Tick Enable PMX backgrounds and props alongside my character. With this off, saved scenery is not loaded.
-3. Import the complete PMX scenery/prop folder including textures. Select the imported asset, then click Add selected asset to stage. The same picker can use already imported Tools & Props assets.
+3. Choose Stages or Tools & Props and browse its local folder tree. Or open its cloud button, sign in when needed, and download one asset. Import accepts one complete PMX scenery/prop package with textures. Select the asset, then Add selected asset to stage. These libraries exclude characters.
 4. Select a stage object and set Position X/Y/Z, Scale and Rotation Y. Move distant scenery along Z and adjust its size to fit the camera. Up to four static PMX objects can share the scene.
 5. Untick the checkbox to unload scenery. Use Remove selected object to forget one placement; it does not delete the imported asset.
 Check: Background and tools render with the PMX/VRM character and appear in the same scene captured by Spout or Virtual Camera.

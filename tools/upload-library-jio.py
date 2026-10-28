@@ -57,14 +57,15 @@ class JioUploader:
             # may be created; existing source character folders are never moved.
             key=self.connection.session['rootFolderKey']
             parts=remote_folder.strip('/').split('/')
-            if parts!=['PMX','Sakura library packages']:
+            allowed=(len(parts)==2 and parts[0].casefold() in ('pmx','stage','stages','tools & props')) or (len(parts)==3 and parts[0].casefold()=='pmx' and parts[1].casefold() in ('stage','stages','tools & props'))
+            if not allowed or parts[-1]!='Sakura library packages':
                 raise UploadError('Choose the PMX / Sakura library packages destination.')
             for index,name in enumerate(parts):
                 url=self.api+'/nms/metadata?'+urlencode({'limit':2000,'folderKey':key,'sort':'+objectName'})
                 _,listing=self.request('GET',url)
                 if listing.get('nextLink'):raise UploadError('Destination needs a complete folder listing.')
                 matches=[x for x in listing.get('objects',[]) if x.get('objectName')==name and x.get('objectType')=='FR']
-                if not matches and index==1:
+                if not matches and index==len(parts)-1:
                     _,created=self.request('POST',self.api+'/nms/folders',json_body={'objectName':name,'parentObjectKey':key,'sourceName':'DRIVE'})
                     if created.get('objectName')!=name or created.get('parentObjectKey')!=key:raise UploadError('Could not verify the package folder.')
                     matches=[created]
@@ -353,7 +354,7 @@ def main():
     parser.add_argument('--workers', type=int, choices=range(1, 5), default=3)
     parser.add_argument('--test-only', action='store_true')
     parser.add_argument('--ready-only',action='store_true',help='Transfer only packages with completed rotating previews.')
-    parser.add_argument('--remote-folder',choices=['PMX/Sakura library packages'])
+    parser.add_argument('--remote-folder',help='Existing PMX, Stage(s), or Tools & Props source root followed by /Sakura library packages.')
     args = parser.parse_args()
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')

@@ -181,7 +181,7 @@ Arrange a background or prop beside your character without replacing it.
 1. Open Settings > Theme. About Sakura displays the installed version, currently 1.0.1. Release history opens the download page; it does not install an update automatically.
 2. Click Graphics. Choose Low, Balanced or High rendering quality. The selection uses the same quality control as the model toolbar and saves automatically.
 3. Open Memory & privacy on the left toolbar, then Background & stage items. Scroll to 3D backgrounds & props and tick Enable PMX backgrounds and props alongside my character.
-4. Choose a complete PMX background/prop folder including textures, then click Add selected asset to stage. Or select a PMX asset already imported into the local library, including assets from Tools & Props.
+4. Choose Stages or Tools & Props. Browse its local folders, or click the matching cloud button to sign in and browse/download from that library. Import accepts one complete asset package with textures. Choose one PMX asset, then Add selected asset to stage. Character models are excluded from these lists.
 5. Select a stage object. Adjust Position X/Y/Z, Scale and Rotation Y. Four static PMX objects can share the 3D scene. Your avatar stays selected for tracking.
 6. Untick the checkbox to unload all scenery and props. Remove selected object forgets one stage placement; it keeps the imported file.
 Check: Your character and the selected scenery appear together. Turning the checkbox off removes scenery while leaving the character visible.

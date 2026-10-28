@@ -48,10 +48,11 @@ SETTINGS_FILE = BASE_DIR / "settings.json"
 if EDITION=='vtuber' or os.environ.get('SAKURA_VTUBER_INSTANCE')=='1':
     from vtuber_instances import instance_index
     if instance_index()>1:
-        import shutil
-        instance_settings=BASE_DIR/f'desktop-profile-{instance_index()}'/'settings.json'
+        import tempfile
+        instance_root=Path(os.environ.get('SAKURA_INSTANCE_PROFILE') or tempfile.mkdtemp(prefix='sakura-vtuber-settings-'))
+        instance_settings=instance_root/'settings.json'
         instance_settings.parent.mkdir(parents=True,exist_ok=True)
-        if not instance_settings.exists() and SETTINGS_FILE.exists():shutil.copy2(SETTINGS_FILE,instance_settings)
+        if not instance_settings.exists():instance_settings.write_text('{"selected_model":"","fresh_instance":true,"vtuber_tracking_only":true}',encoding='utf-8')
         SETTINGS_FILE=instance_settings
 
 MODELS_DIR.mkdir(exist_ok=True)
@@ -1448,6 +1449,8 @@ async def list_models():
             if f.lower().endswith((".pmx", ".vrm")):
                 rel = os.path.relpath(os.path.join(root, f), str(MODELS_DIR))
                 norm_rel = rel.replace("\\", "/")
+                from scenery_assets import FOLDERS
+                if any(norm_rel.startswith('pmx/'+folder+'/') for folder in FOLDERS.values()):continue
 
                 # Extract character name
                 parts = norm_rel.split("/")
@@ -2807,6 +2810,8 @@ if EDITION!='vtuber':
     app.include_router(agent_router(_agent_model_for,lambda:not getattr(app.state,'tracking_only',False),_agent_provider_status,_agent_voice_transcribe))
 from model_library import router as model_library_router
 app.include_router(model_library_router(MODELS_DIR, _started_locally))
+from scenery_assets import router as scenery_router
+app.include_router(scenery_router(MODELS_DIR,_started_locally))
 from model_library_confirm import router as model_library_confirm_router
 app.include_router(model_library_confirm_router(_served_locally, _started_locally))
 from local_model_library import router as local_model_library_router

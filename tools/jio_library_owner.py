@@ -31,7 +31,7 @@ def account_id():
     return value
 
 def private_directory(kind='live2d',root=None):
-    suffix='-pmx' if kind=='pmx' else ''
+    suffix='-'+kind if kind in ('pmx','stage','prop') else ''
     account='' if account_id()=='primary' else '-'+account_id()
     return (Path(root).parent if root is not None else Path(__file__).resolve().parents[2])/('private-model-library'+account+suffix)
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import Live2DViewer from './live2d-viewer.js?v=stage-items151';
-import {PmxStage} from './pmx-stage.js?v=101';
+import {PmxStage} from './pmx-stage.js?v=scenery1028';
 
 const modelUrl=path=>'/models/'+path.split('/').map(encodeURIComponent).join('/');
 export function installStageItems(viewer){

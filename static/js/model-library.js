@@ -36,7 +36,7 @@ async function api(path, body) {
     return data;
 }
 
-function installCard(host) {
+function installCard(host,assetKind='character') {
     if (host.querySelector('[data-cloud-library]')) return;
     const section = document.createElement('section');
     section.className = 'studio-card';
@@ -76,11 +76,11 @@ function installCard(host) {
     const buttons = document.createElement('div');
     buttons.className = 'studio-actions';
     buttons.style.marginTop = '10px';
-    buttons.setAttribute('aria-label', 'Import a character from the cloud');
-    for (const format of ['pmx', 'vrm', 'live2d']) {
+    buttons.setAttribute('aria-label', assetKind==='character'?'Import a character from the cloud':'Import scenery from the cloud');
+    for (const format of (assetKind==='character'?['pmx', 'vrm', 'live2d']:['pmx'])) {
         const button = document.createElement('button'); button.type = 'button';
         button.dataset.libraryFormat = format;
-        button.textContent = 'Cloud import ' + (format === 'live2d' ? 'Live2D' : format.toUpperCase());
+        button.textContent = assetKind==='stage'?'Cloud stages':assetKind==='prop'?'Cloud tools & props':'Cloud import ' + (format === 'live2d' ? 'Live2D' : format.toUpperCase());
         button.setAttribute('aria-expanded', 'false');
         buttons.append(button);
     }
@@ -127,7 +127,8 @@ function installCard(host) {
         const navigation=get('folders');navigation.replaceChildren();
         // Retain old combined package IDs for already-installed users, but hide
         // their card once the authored outfit/variant children are published.
-        const all=models.filter(m=>m.format===selectedFormat).filter((model,_,formatModels)=>
+        const kindOf=m=>m.asset_kind||(/^(?:Stages?|Tools & Props) \/ /i.test(m.name||'')?(/^Stages? \/ /i.test(m.name)?'stage':'prop'):'character');
+        const all=models.filter(m=>m.format===selectedFormat&&kindOf(m)===assetKind).filter((model,_,formatModels)=>
             model.format!=='pmx'||!formatModels.some(other=>String(other.name||'').startsWith(String(model.name||'')+' / ')));
         const hierarchical=selectedFormat==='pmx'&&all.some(m=>String(m.name||'').includes(' / '));
         const currentPath=selectedGame?selectedGame.split(' / '):[];
@@ -136,7 +137,7 @@ function installCard(host) {
             return currentPath.every((part,index)=>path[index]===part);
         };
         if(hierarchical){
-            const home=document.createElement('button');home.type='button';home.textContent='All games';home.onclick=()=>{selectedGame='';get('search').value='';render();};navigation.append(home);
+            const home=document.createElement('button');home.type='button';home.textContent=assetKind==='stage'?'All stages':assetKind==='prop'?'All tools & props':'All games';home.onclick=()=>{selectedGame='';get('search').value='';render();};navigation.append(home);
             for(let index=0;index<currentPath.length;index++){
                 const crumb=document.createElement('button');crumb.type='button';crumb.textContent=currentPath[index];
                 crumb.onclick=()=>{selectedGame=currentPath.slice(0,index+1).join(' / ');get('search').value='';render();};navigation.append(crumb);
@@ -187,9 +188,10 @@ function installCard(host) {
                 const progress=document.createElement('progress');progress.className='cloud-download-progress';progress.setAttribute('aria-label','Downloading '+displayName);row.append(progress);
                 status('Downloading and checking ' + model.name + '. You can keep using Sakura.');
                 try {
-                    await api('/models/' + encodeURIComponent(model.id) + '/install', {});
+                    const result=await api('/models/' + encodeURIComponent(model.id) + '/install', {});
                     model.installed = true; button.textContent = 'Installed';
-                    document.getElementById('refresh-models')?.click();
+                    if(assetKind==='character')document.getElementById('refresh-models')?.click();
+                    else window.dispatchEvent(new CustomEvent('sakura-scenery-installed',{detail:{kind:assetKind,models:result.models||[]}}));
                     status(model.name + ' is installed. Select it from the ' + model.format.toUpperCase() + ' selector.');
                 } catch (error) { status(error.message); button.disabled = false; button.textContent = 'Retry download'; }
                 finally { downloads--;row.removeAttribute('aria-busy');progress.remove(); }
@@ -204,7 +206,7 @@ function installCard(host) {
     }
     async function refresh() {
         get('refresh').disabled = true; status('Loading model library…');
-        try { models = (await api('/models')).models; render(); status(models.filter(m => m.format === selectedFormat).length + ' ' + selectedFormat.toUpperCase() + ' cloud characters available.'); }
+        try { models = (await api('/models')).models; render(); status(assetKind==='character'?models.filter(m => m.format === selectedFormat&&(m.asset_kind||'character')==='character').length + ' ' + selectedFormat.toUpperCase() + ' cloud characters available.':'Browse published '+(assetKind==='stage'?'Stages':'Tools & Props')+' folders. If empty, no assets have been published in this library yet.'); }
         catch (error) { models = []; render(); status(error.message); }
         finally { get('refresh').disabled = false; }
     }
@@ -219,7 +221,7 @@ function installCard(host) {
         selectedGame='';
         get('browse').hidden = true;
         get('title').textContent = button.textContent;
-        get('destination').textContent = `Downloaded models install into models/${format}/ and appear in the ${format === 'live2d' ? 'Live2D' : format.toUpperCase()} selector. Your existing models are kept.`;
+        get('destination').textContent = assetKind==='character'?`Downloaded models install into models/${format}/ and appear in the ${format === 'live2d' ? 'Live2D' : format.toUpperCase()} selector. Your existing models are kept.`:`Downloads install into models/pmx/${assetKind==='stage'?'Stages':'Tools & Props'}/. They are separate from characters; select an asset locally to place it.`;
         get('search').value = ''; render();
         status('Sign in to browse ' + format.toUpperCase() + ' cloud characters.');
         try {
@@ -304,7 +306,8 @@ function installCard(host) {
 }
 
 function attach() {
-    document.querySelectorAll('[data-studio-content="models"], [data-companion-content="character"]').forEach(installCard);
+    document.querySelectorAll('[data-studio-content="models"], [data-companion-content="character"]').forEach(host=>installCard(host));
+    document.querySelectorAll('[data-scenery-cloud]').forEach(host=>installCard(host,host.dataset.sceneryCloud));
 }
 attach();
 new MutationObserver(attach).observe(document.body, {childList: true, subtree: true});
