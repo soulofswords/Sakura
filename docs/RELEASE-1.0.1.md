@@ -1,6 +1,6 @@
 # Sakura 1.0.1 — Windows fix release
 
-Sakura 1.0.1 replaces the 1.0.0 Windows installers. It changes no features, no界面 and no file
+Sakura 1.0.1 replaces the 1.0.0 Windows installers. It changes no features, no interface and no file
 locations: it is the same product with the defects found by the post-release audit corrected. Install
 over 1.0.0 or into a fresh folder; your characters, voices, settings and AI models are untouched.
 
