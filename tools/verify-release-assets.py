@@ -18,7 +18,7 @@ def inspect(archive,windows):
         assert sorted(root_py)==['Sakura/desktop.py','Sakura/sitecustomize.py']
         viewer=archive.read('Sakura/static/js/model-viewer.js').decode()
         assert '_hitModelPixelAt' in viewer and '_0x' in viewer,'Missing GPU picking/protected JavaScript'
-        assert 'cursor-gpu6' in archive.read('Sakura/static/index.html').decode()
+        assert 'eye-tracking.js?v=cursor-gpu6' in archive.read('Sakura/static/js/app.js').decode(),'Shipped app.js pins a stale eye-tracking cache'
     else:
         assert 'classes.dex' in names and 'assets/mobile.js' in names
         assert '_0x' in archive.read('assets/mobile.js').decode()
