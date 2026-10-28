@@ -21,6 +21,7 @@ const assert=require('node:assert/strict');
    }
    if(url.pathname==='/api/inspect')state={...state,folderCount:1,folder:'live2d',message:'Confirm the destination.'};
    if(url.pathname==='/api/confirm')state={...state,connected:true,message:'Connection saved. No files uploaded yet.'};
+   if(url.pathname==='/api/reset-login')state={message:'Request a fresh OTP.',otpAccepted:false,otpRequested:false,canInspect:false,needsPassphrase:false,account:{},folderCount:0,connected:false};
    return route.fulfill({contentType:'application/json',body:JSON.stringify(state)});
   });
   await page.goto('http://owner.test/#test-capability');
@@ -49,6 +50,9 @@ const assert=require('node:assert/strict');
   await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Connection saved'));
   assert.equal(calls.filter(c=>c.path==='/api/confirm').length,1);
   assert.equal(calls.some(c=>/upload|publish/.test(c.path)),false);
+  await page.getByRole('button',{name:'Sign in again',exact:true}).click();
+  await page.locator('#send').waitFor({state:'visible'});
+  assert.equal(await page.locator('#account').isVisible(),false);
   assert.deepEqual(errors,[]);
   console.log('PASS: owner login, private OTP entry, account/folder confirmation, no upload actions.');
  }finally{await browser.close();}

@@ -6,7 +6,7 @@ const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playw
   window.loadedAssets=[];
   window.Live2DViewer={createStageItem:async url=>{loadedAssets.push(url);const canvas=document.createElement('canvas');canvas.width=canvas.height=64;canvas.getContext('2d').fillRect(0,0,64,64);return{app:{view:canvas,stage:{},renderer:{render(){}},destroy(){}},avatar:{update(){}}};}};
   window.viewer={container:document.getElementById('viewer'),renderer:{domElement:document.getElementById('main')},captureSpoutFrame:()=>{const p=new Uint8Array(400*400*4);for(let y=190;y<210;y++)for(let x=190;x<210;x++){p[(y*400+x)*4+2]=255;p[(y*400+x)*4+3]=255;}return{width:400,height:400,pixels:p};}};
- });await page.addScriptTag({content:fs.readFileSync('static/js/stage-items.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function','function')+';window.items=installStageItems(viewer);'});await page.evaluate(()=>items.ready);}
+ });await page.addScriptTag({content:fs.readFileSync('static/js/pmx-stage.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export class','class')+'\n'+fs.readFileSync('static/js/stage-items.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function','function')+';window.items=installStageItems(viewer);'});await page.evaluate(()=>items.ready);}
  await setup();
  assert.equal(await page.locator('#studio-model-lock + #studio-item-lock').count(),1,'Small item lock sits directly below model lock');
  assert.equal(await page.locator('#studio-item-lock').isDisabled(),true);

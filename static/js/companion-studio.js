@@ -32,6 +32,9 @@ export function installCompanionStudio(){
  const toolsContent=root.querySelector('[data-companion-content="tools"]');
  const memoryContent=root.querySelector('[data-companion-content="memory"]');
  memoryContent.append(...toolsContent.children);toolsContent.remove();
+ const backgroundContent=document.createElement('div');backgroundContent.dataset.companionContent='background';backgroundContent.hidden=true;
+ panelRoot(root).append(backgroundContent);
+ const backgroundButton=document.createElement('button');backgroundButton.type='button';backgroundButton.dataset.companionPane='background';backgroundButton.textContent='Background & stage items';memoryContent.append(backgroundButton);
  const panel=byId('companion-panel'),portals=[];let active=false,currentPane='';
  const nativeModals=['settings-modal','expression-modal','tracking-modal'];
  // Resize the model editor independently of the app window and chat panel.
@@ -222,4 +225,5 @@ export function installCompanionStudio(){
  syncMode();
  return {openPane,closePanel,isActive:()=>active};
 }
+function panelRoot(root){return root.querySelector('.studio-panel-body');}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>installCompanionStudio(),{once:true});else installCompanionStudio();

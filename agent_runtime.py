@@ -56,12 +56,15 @@ def run_process(argv,cwd,timeout=45,input_text=None):
     def pump():
         # Keep reading past the cap so a blocked pipe can never wedge the child, but
         # never hold more than the cap in memory or on disk the way a spool file could.
-        while not drained.is_set():
-            try:chunk=process.stdout.read(OUTPUT_CAP+1)
-            except (OSError,ValueError):break
-            if not chunk:break
-            with pumped:
-                if len(collected)<=OUTPUT_CAP:collected.extend(chunk)
+        try:
+            while not drained.is_set():
+                try:chunk=process.stdout.read(OUTPUT_CAP+1)
+                except (OSError,ValueError):break
+                if not chunk:break
+                with pumped:
+                    if len(collected)<=OUTPUT_CAP:collected.extend(chunk)
+        finally:
+            process.stdout.close()
 
     def feed():
         try:process.stdin.write(input_text.encode('utf-8'))

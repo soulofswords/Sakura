@@ -1,5 +1,5 @@
 import {installCompactCompanionControls} from './compact-companion-controls.js?v=155';
-import {installStageItems} from './stage-items.js?v=151';
+import {installStageItems} from './stage-items.js?v=release101';
 import { appendEvidence } from './response-evidence.js?v=medium103';
 import {installChatAttachments} from './chat-attachments.js?v=files105';
 import {installSystemTools} from './system-tools.js?v=metrics93';
@@ -2219,6 +2219,7 @@ async function refreshAudioDevices({ requestPermission = false } = {}) {
 }
 
 function updateQualityUI(mode) {
+    const graphics=document.getElementById('graphics-quality');if(graphics)graphics.value=mode;
     const names = { low: 'Low', balanced: 'Balanced', high: 'High' };
     document.getElementById('quality-btn').textContent = names[mode];
     document.querySelectorAll('[data-quality]').forEach(button => {
@@ -2233,6 +2234,7 @@ function applyModelQuality(mode) {
     updateQualityUI(viewer.quality);
     save_setting_silent({model_quality:viewer.quality});
 }
+window.addEventListener('sakura-graphics-quality',event=>{if(['low','balanced','high'].includes(event.detail))applyModelQuality(event.detail);});
 
 function applyPhysicsMode(mode, persist = true) {
     const value = ['off', 'subtle', 'normal', 'lively'].includes(mode) ? mode : 'normal';

@@ -1,5 +1,5 @@
 # Sakura Companion
-Step-by-step user guide | Windows desktop | 25 October 2026
+Step-by-step user guide | Sakura 1.0.1 | Windows desktop | 28 October 2026
 
 ## 1. Start Companion and load a character
 Use Companion for AI conversation, speech and approved Agent work.
@@ -165,3 +165,47 @@ Use precise requests and verify the actual tool outcome.
 Check: The requested timer/tool reports a real result, or the app explicitly explains missing access/information instead of claiming success.
 Note: Keep the PC/app available for local timers and alarms. Do not assume a local reminder can wake a powered-off PC or send a mobile notification.
 Note: Calendar notifications depend on the connected calendar account, event reminder settings and the phone's notification permissions.
+
+## 14. Download characters from Sakura Cloud
+Use your Sakura account; Jio storage credentials belong only to the library owner.
+1. Open Models, then Cloud import PMX, Cloud import VRM or Cloud import Live2D. Sign-in appears only when you use cloud import.
+2. Create a Sakura account or sign in with your email and password. Follow email verification if requested. Password reset uses the email link sent to your account.
+3. Open a category, search for a character, and select its card. PMX/VRM previews rotate; Live2D uses a portrait or folder-name fallback.
+4. Click Download and wait for completion. Load the character from its separate PMX, VRM or Live2D selector afterward.
+Check: The downloaded character appears in the corresponding local selector and loads with its textures.
+Note: You never need the owner's Jio login, OTP, passphrase or publishing scripts. Unpublished owner uploads do not automatically appear until library sync validates and publishes them.
+
+## 15. Version, graphics and 3D scenery
+Arrange a background or prop beside your character without replacing it.
+1. Open Settings > Theme. About Sakura displays the installed version, currently 1.0.1. Release history opens the download page; it does not install an update automatically.
+2. Click Graphics. Choose Low, Balanced or High rendering quality. The selection uses the same quality control as the model toolbar and saves automatically.
+3. Open Memory & privacy on the left toolbar, then Background & stage items. Scroll to 3D backgrounds & props and tick Enable PMX backgrounds and props alongside my character.
+4. Choose a complete PMX background/prop folder including textures, then click Add selected asset to stage. Or select a PMX asset already imported into the local library, including assets from Tools & Props.
+5. Select a stage object. Adjust Position X/Y/Z, Scale and Rotation Y. Four static PMX objects can share the 3D scene. Your avatar stays selected for tracking.
+6. Untick the checkbox to unload all scenery and props. Remove selected object forgets one stage placement; it keeps the imported file.
+Check: Your character and the selected scenery appear together. Turning the checkbox off removes scenery while leaving the character visible.
+Note: Scenery is for 3D PMX/VRM characters and uses the same camera, depth and capture scene. It is static: character tracking and humanoid physics are not applied to props. Large stages require more GPU memory; lower Graphics or use fewer objects if needed.
+
+## 16. Agent skills, schedules, history and messaging
+Optional Agent services require their own setup and permissions.
+1. In Agent mode, open Skills. Select a starter procedure or save your own instructions. Skills guide the selected AI; they do not download a larger model or configure external services.
+2. After a successful task, use learning controls to save a reusable procedure. Review recorded instructions before reusing them. Inspect/remove learned material in memory/profile controls.
+3. Use Task history and search to find archived sessions. Archived records are read-only. Clear task history removes saved local records.
+4. Schedule an exact completed workflow in Automations. Read actions can repeat; changed bindings or modifying actions pause for review. Sakura must be running for local schedules.
+5. For repeated shell commands, review the command before ticking Allow this exact command for this app session. Revoke command permissions when finished.
+6. Review delegated goals, workspaces, tools and models before parallel work. Docker/SSH backends need existing configuration. SSH uses the remote account's actual access.
+7. Browser tools need an installed supported browser. Review navigation, click and type proposals. Treat external pages as untrusted and inspect resulting file/account actions.
+8. Configure messaging gateways with your own credentials and permitted users/channels. Telegram voice messages need enabled transcription. Keep secrets out of chat and skills.
+Check: Actions show actual results, jobs appear in Automations, and unconfigured services report setup requirements.
+Note: Messaging providers, MCP servers, sandboxes, browser engines and AI models are separate dependencies. Imported Agent files and slash commands do not bypass approvals.
+
+## 17. Character customization, outputs and privacy
+Shared avatar tools work in Companion and optional VTuber mode.
+1. Open Model Settings (pencil). Texture remapping replaces files; Texture coloring changes tint; Expressions uses authored expressions; Bones controls individual motion; Mouth selects lip-sync input.
+2. Pick a model part before editing it. Tint and transparency apply independently. Transparency-only edits retain original textures/colors. Restore the selected material to undo an edit.
+3. Tune character lighting and physics. Scope lighting to a selected material where supported; otherwise it affects the full character. Calibrate tracking after moving the camera or changing seating.
+4. Open Streaming & output. Enable Sakura Virtual Camera or Spout, then select Sakura in the receiving app. Route microphone audio separately.
+5. Memory & privacy contains conversation controls, screen/game controls and Background & stage items. Image/Live2D items have above/below layers, position locks and optional attachment to model movement.
+6. Settings > Theme contains computer-access permission and Run Sakura when Windows starts. Startup applies at your next Windows sign-in.
+Check: Selected material edits remain independent and the receiving video app displays Sakura. Turning capture/microphone off stops its respective input.
+Note: Transparent stage/window output is separate from model-part transparency. Video output does not carry voice audio automatically.

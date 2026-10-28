@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('static/assets/agent.html','utf8');
+const start=source.indexOf('function renderRun(run)'),end=source.indexOf('function renderTools()',start);
+assert(start>=0&&end>start);
+const calls=[],element={replaceChildren(){},append(){}};
+const context={current:null,state:{runs:[]},$:()=>element,node:()=>({append(){}}),button(){},renderReview:value=>calls.push(value)};
+vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+const run={id:'r',goal:'Write draft',workspace:'test',steps:[{id:'a',tool:'files.write',arguments:{},status:'pending'}]};
+context.renderRun(run);assert.equal(calls.at(-1).id,'a');
+context.renderRun({...run,steps:[{...run.steps[0],status:'cancelled'}]});assert.equal(calls.at(-1),null);
+context.renderRun({...run,steps:[{...run.steps[0],status:'completed'}]});assert.equal(calls.at(-1),null);
+context.renderRun(run);context.renderRun(null);assert.equal(calls.at(-1),null);
+console.log('PASS: pending Agent review clears on external cancellation, completion and empty selection.');

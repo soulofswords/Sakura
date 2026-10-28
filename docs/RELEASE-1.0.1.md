@@ -1,67 +1,35 @@
-# Sakura 1.0.1 — Windows fix release
+# Sakura 1.0.1 — updated Windows release and illustrated guides
 
-Sakura 1.0.1 replaces the 1.0.0 Windows installers. It changes no features, no interface and no file
-locations: it is the same product with the defects found by the post-release audit corrected. Install
-over 1.0.0 or into a fresh folder; your characters, voices, settings and AI models are untouched.
+The Windows installers were refreshed on 28 October 2026. If you downloaded the earlier 1.0.1 installers, download the updated copies for these additions. The version remains 1.0.1 as requested; SHA256SUMS.txt identifies the refreshed binaries.
 
-Choose Sakura Companion for conversation, local/cloud AI, Agent workflows and optional VTuber tracking.
-Choose Sakura VTuber for standalone tracking and streaming, without the companion language model.
-Keep them in separate folders.
+Choose **Sakura Companion** for conversation, local/cloud AI, Agent workflows and optional tracking. Choose **Sakura VTuber** for standalone tracking, Chat Reader, voice conversion and streaming. Install in separate folders. Updating preserves imported characters, settings, voices and AI weights.
 
-## What 1.0.1 fixes
+## Added in this refresh
 
-- **Character thumbnails now render.** In 1.0.0 the installer left a preview page out of its own payload.
-  The local character library renders every PMX and VRM thumbnail through that page, so with it missing the
-  library silently kept showing each character's name as plain text, and hovering did nothing even though
-  the panel promised "Hover a 3D preview to rotate it". Live2D thumbnails were unaffected because they come
-  from the server. The page now ships, and the build fails if any page a shipped script loads is missing
-  from the payload, so this cannot quietly come back.
-- **Telegram reconfiguration no longer drops messages.** Saving a new bot token or new chat IDs while the
-  previous poller was still shutting down could start a second loop, and the retiring loop had already
-  acknowledged messages neither one answered. Reconfiguration now waits for the old loop to stop and, if
-  it has not, refuses and tells you to retry a moment later instead of running two pollers.
-- **Agent web fetches keep their address filter.** Two lookups finishing out of order could restore the
-  system resolver while another fetch was still in flight, which let a public address be redirected back
-  to this PC's own loopback. The filter is now reference-counted, so it stays until every fetch is done.
-- **Expired phone pairings stop working.** A pairing you had let lapse could still prove a phone's
-  identity to the PC. Expired pairings are now refused, and they are cleared out before they can fill the
-  32-device list and block a new phone from pairing.
-- **The phone link no longer stacks listeners.** Turning the link off and straight back on could leave
-  the closing listener holding the port while a second one started. It now waits, and tells you to try
-  again if the previous listener has not finished closing.
-- **The Agent review panel stops interrupting you.** While an approval was pending, the 15-second refresh
-  could re-draw the panel, wiping your tick in the "remember this" box and scrolling back to the top
-  mid-read; approving an expired step also left a dead Approve button on screen. The panel now re-draws only
-  when the action actually changes, and an expired approval clears the card instead of leaving a button that
-  can never work. **One part of that is not in these installers:** the card clears, but the status line still
-  reads "Ready. Review the current step before approving." instead of telling you the approval expired. The
-  fix is committed and lands in the next build.
+- **Settings > Theme > About Sakura** shows installed edition/version and release history.
+- **Graphics** in Theme exposes Low, Balanced and High rendering quality, synchronized with the toolbar and saved automatically.
+- **PMX backgrounds and props** share the character's 3D scene. In VTuber open Background; in Companion open Memory & privacy > Background & stage items. Tick the enable checkbox, import a complete PMX folder with textures, add the asset and arrange up to four static objects with position, scale and rotation. Unticking unloads scenery while retaining the character. Scenery uses the same 3D camera/depth/output capture and is intended for PMX/VRM characters, not the separate Live2D renderer.
+- Separate **Companion and VTuber guides** include current UI screenshots and step-by-step instructions. Download the PDFs or offline HTML guide ZIP. Screenshots use demonstration data without personal models/accounts.
 
-## What did not change
+## Fixes included
 
-Sakura Mobile **0.3.31** is the same APK 1.0.0 shipped, byte for byte — the same SHA-256 as the published
-1.0.0 asset. No file inside it was affected by the fixes above, so it is included in this release for
-completeness rather than renumbered. If the phone's character preview was blank, that was the PC's missing
-page, and updating Sakura on the PC fixes it.
+- Library previews include the required PMX/VRM preview page.
+- Telegram configuration waits for the previous polling loop to stop.
+- Concurrent Agent web fetches retain public-address filtering.
+- Expired phone pairings are rejected and no longer exhaust device slots. Listener restarts wait for the previous listener to finish.
+- Agent review preserves approval-checkbox state through refresh, clears stale cards when action state changes elsewhere, and displays approval errors correctly.
+- Command execution closes output pipes after success or timeout.
+- Owner-only Jio setup recovers from expired sessions with Sign in again. **App users do not sign in to Jio:** cloud model downloads use their Sakura account. Owner publishing credentials are excluded from installers.
 
-## Verification
+## Downloads and platform status
 
-Every fix above has an automated test, including two regression tests written against the pre-fix code and
-confirmed to fail before the change. The full Python suite, the installer clean-install checks, payload
-integrity inspection and the release browser gate all run as part of producing these installers.
+- Protected Windows x64 Companion and VTuber installers.
+- Sakura Mobile **0.3.31** is the same APK as before. These Windows changes do not rebuild Android; desktop PMX scenery controls are not a phone-local scene editor.
+- Separate illustrated PDF guides and an offline HTML guide bundle.
+- **No refreshed macOS installer is attached.** A protected native Mac build needs a Mac host, unavailable in this Windows environment. Existing experimental source/bootstrap Mac support is documented in the repository and is not presented as a verified installer.
 
-Two honest limits: the Agent review-panel behaviour is covered by no automated test in the suite, so it was
-driven in a real browser against the panel file these installers actually ship — a pending approval keeps
-your tick through a refresh, a genuinely new action still re-draws, and an expired approval clears its card.
-And the Windows executables are still unsigned, with the same SmartScreen prompt as before.
+## Accounts, optional services and privacy
 
-## Privacy and known limits
+Cloud imports prompt for Sakura sign-in when selected. Google/LinkedIn/MCP and messaging services need user consent and supported integration setup. AI weights, optional hardware, keys and browser/sandbox dependencies are separate downloads/configuration. Skills guide a model but do not increase its parameters or configure missing services.
 
-No personal character models, RVC weights, language-model weights, account sessions, MCP connections, API
-keys or conversation history are bundled in either installer. Protected/obfuscated code is a deterrent, not
-a guarantee against reverse engineering.
-
-The messaging gateways (Telegram, Discord, Slack, WhatsApp) need your own credentials and, for WhatsApp's
-webhook, a reverse proxy that rewrites the Host header, because Sakura deliberately accepts API calls only
-when the address names this machine. That host check is DNS-rebinding protection and was not relaxed in
-1.0.1.
+No personal character models, RVC weights, AI weights, owner/user sessions, MCP connections, API keys or conversation history are bundled. Windows executables remain unsigned. Code protection deters casual inspection but does not guarantee resistance to reverse engineering. Camera, phone and GPU behaviour depends on hardware; automated tests do not guarantee a fixed tracking frame rate.

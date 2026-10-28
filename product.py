@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
+VERSION='1.0.1'
 try:
     EDITION=json.loads((ROOT/'product.json').read_text(encoding='utf-8')).get('edition','combined')
 except (OSError,ValueError,AttributeError):

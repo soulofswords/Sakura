@@ -242,6 +242,16 @@ class JioConnection:
         self.attempts = 0
         self.message = 'OTP requested. Enter it here; do not send it in chat.'
 
+    def reset_login(self):
+        """Discard rejected in-memory credentials; preserve the encrypted recovery file."""
+        self.session = {}
+        self.identity = None
+        self.profile = {}
+        self.candidates = []
+        self.destination = None
+        self.last_error = {}
+        self.message = 'Enter your account and request a fresh OTP to reconnect.'
+
     def login(self, otp, user_agent=''):
         if self.session.get('twoFAValidated'):
             # An accepted OTP must not be submitted again just because the
@@ -398,7 +408,7 @@ PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewp
 body{background:#11161d;color:#e7edf5;font:16px system-ui;margin:0;padding:30px}main{max-width:590px;margin:30px auto;background:#202832;border:1px solid #475362;border-radius:18px;padding:28px}h1{font-size:25px}p{line-height:1.5}label{display:block;margin:18px 0 8px}input,button{box-sizing:border-box;font:inherit;border-radius:8px;padding:12px;border:1px solid #718397}input{width:100%;background:#11161d;color:white}button{background:#a9d8ff;color:#102333;cursor:pointer;margin:12px 8px 0 0}button:disabled{opacity:.5;cursor:wait}section{border-top:1px solid #475362;margin-top:22px;padding-top:14px}#message{background:#11161d;padding:14px;border-radius:9px;white-space:pre-wrap}small{color:#bcc9d8}[hidden]{display:none!important}</style>
 <main><small>SAKURA · OWNER SETUP · THIS PC ONLY</small><h1>Connect JioAICloud</h1>
 <p>Use the account containing your <strong>Live2d</strong> folder. This page checks the account and folder; it does not upload or publish models. Verified login is saved with Windows encryption so folder-check retries do not need another OTP.</p>
-<div id="message" role="status">Ready.</div>
+<div id="message" role="status">Ready.</div><button id="restart-login" type="button">Sign in again</button>
 <form id="send"><label for="identity">JioAICloud email or mobile number</label><input id="identity" autocomplete="username" required maxlength="250"><button>Send OTP</button></form>
 <form id="verify" hidden><label for="otp">OTP from Jio</label><input id="otp" autocomplete="one-time-code" inputmode="numeric" maxlength="6" minlength="6" required><button>Verify OTP</button></form>
 <form id="unlock" hidden><label for="passphrase">Jio account passphrase</label><input id="passphrase" type="password" autocomplete="current-password" maxlength="512" required><button>Unlock account</button><p><small>The passphrase is used for Jio's challenge and is not saved.</small></p></form>
@@ -415,6 +425,7 @@ el('send').onsubmit=e=>{e.preventDefault();call('send-otp',{identity:el('identit
 el('verify').onsubmit=e=>{e.preventDefault();const otp=el('otp').value;el('otp').value='';call('verify-otp',{otp});};
 el('unlock').onsubmit=e=>{e.preventDefault();const passphrase=el('passphrase').value;el('passphrase').value='';call('unlock',{passphrase});};
 el('refresh').onclick=()=>call('inspect');el('confirm').onclick=()=>call('confirm');call('status');
+el('restart-login').onclick=()=>call('reset-login');
 </script></html>'''
 
 
@@ -469,6 +480,8 @@ def make_server(connection, token=None):
                         connection.inspect()
                     elif self.path == '/api/confirm':
                         connection.confirm()
+                    elif self.path == '/api/reset-login':
+                        connection.reset_login()
                     elif self.path != '/api/status':
                         return self.respond(404, {'error': 'Not found.'})
                     value = connection.public()
@@ -476,12 +489,15 @@ def make_server(connection, token=None):
             except ConnectionError as exc:
                 # Make failures diagnosable without logging accounts or OTPs.
                 if connection.last_error:
+                    expired = connection.last_error.get('status') in (401,403)
                     diagnostic = Path(__file__).resolve().parents[1] / 'audit-results/jio-integration/last-error.json'
                     try:
                         diagnostic.parent.mkdir(parents=True, exist_ok=True)
                         diagnostic.write_text(json.dumps({**connection.last_error, 'at': int(time.time())}), encoding='utf-8')
                     except OSError:
                         pass
+                    if expired:
+                        connection.reset_login()
                 self.respond(400, {'error': str(exc), 'state': connection.public()})
             except Exception:
                 self.respond(400, {'error': 'Could not complete the connection check. Nothing was uploaded.'})
@@ -502,6 +518,8 @@ def main():
     try:
         connection.resume()
     except ConnectionError as exc:
+        if connection.last_error.get('status') in (401,403):
+            connection.reset_login()
         connection.message = str(exc)
     server, url = make_server(connection)
     print('Connecting '+args.account+' in its separate encrypted profile; expected folder: '+args.folder,flush=True)

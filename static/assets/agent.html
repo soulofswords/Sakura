@@ -145,7 +145,7 @@ function renderReview(action){
  if(action.result)box.append(node('h3','Actual result'),node('pre',JSON.stringify(action.result,null,2)));
 }
 function renderRun(run){
- current=run;const progress=$('progress');progress.replaceChildren();if(!run)return;
+ current=run;const progress=$('progress');progress.replaceChildren();if(!run){renderReview(null);return;}
  progress.append(node('h3',run.goal),node('p','Workspace: '+run.workspace),node('span',run.status,'badge'));
  if(run.summary)progress.append(node('p',run.summary));
  if(run.parent_id)progress.append(node('p','Child task · parent '+run.parent_id));
@@ -154,7 +154,7 @@ function renderRun(run){
   const detail=node('details');detail.append(node('summary',step.tool+' · '+(step.auto?'auto-approved · '+step.status:step.status)),node('pre',JSON.stringify(step.arguments,null,2)));
   if(step.result)detail.append(node('pre',JSON.stringify(step.result,null,2)));progress.append(detail);
  }
- const pending=run.steps.findLast(s=>s.status==='pending');if(pending)renderReview(pending);
+ const pending=run.steps.findLast(s=>s.status==='pending');renderReview(pending||null);
 }
 function renderTools(){
  const previous=$('tool').value;$('tool').replaceChildren();

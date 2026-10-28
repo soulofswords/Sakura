@@ -152,6 +152,17 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(result['timed_out']);self.assertFalse(result['ok'])
         result=run_process([sys.executable,'-c','print("x"*90000)'],self.root)
         self.assertTrue(result['output_truncated']);self.assertEqual(len(result['output']),65536)
+    def test_command_output_pipe_closes_on_success_and_timeout(self):
+        import subprocess
+        original=subprocess.Popen
+        processes=[]
+        def launch(*args,**kwargs):
+            process=original(*args,**kwargs);processes.append(process);return process
+        with patch('agent_runtime.subprocess.Popen',side_effect=launch):
+            result=run_process([sys.executable,'-c','print("pipe test")'],self.root)
+            self.assertIn('pipe test',result['output'])
+            run_process([sys.executable,'-c','import time;time.sleep(10)'],self.root,timeout=.15)
+        self.assertTrue(all(process.stdout is None or process.stdout.closed for process in processes))
     def test_task_history_survives_restart_but_pending_approval_does_not(self):
         store=self.root/'history.json'
         runtime=AgentRuntime(Connections(self.root/'persisted-connections.json'),store_path=store)

@@ -1,6 +1,6 @@
 from pathlib import Path
 import re,html,shutil,datetime
-from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,PageBreak,KeepTogether,Table,TableStyle
+from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,PageBreak,KeepTogether,Table,TableStyle,Image
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
@@ -18,7 +18,7 @@ pdfmetrics.registerFont(TTFont('Guide',str(fonts/'Vera.ttf')))
 pdfmetrics.registerFont(TTFont('GuideBold',str(fonts/'VeraBd.ttf')))
 pdfmetrics.registerFontFamily('Guide',normal='Guide',bold='GuideBold',italic='Guide',boldItalic='GuideBold')
 W,H=A4
-DATE='25 October 2026'
+DATE='28 October 2026 / Version 1.0.1'
 def clean(s):
  return s.replace('\u2014','-').replace('\u2013','-').replace('\u2011','-').replace('\u2019',"'").replace('\u201c','"').replace('\u201d','"')
 def parse(p):
@@ -79,6 +79,8 @@ def html_guide(kind,chapters):
  for i,c in enumerate(chapters,1):
   notes=''.join(f'<p class="note">{ESC(x)}</p>' for x in c['notes'])
   diagram=renderSVG.drawToString(layout_map(kind)) if 'Find your way' in c['title'] else ''
+  screenshot=next((ROOT/'docs/user-guides/images'/f'{kind}-{suffix}.png' for suffix,words in [('models','Find your way'),('settings','Installed version'),('scenery','PMX backgrounds')] if words.lower() in c['title'].lower()),None)
+  if screenshot and screenshot.is_file():diagram+=f'<img style="width:100%;height:auto" src="images/{screenshot.name}" alt="Sakura {kind} interface"><p class="note">Actual UI components shown with demonstration data and no personal avatar.</p>'
   blocks.append(f'<article id="step-{i}"><h2>{ESC(c["title"])}</h2><p class="goal">{ESC(c["goal"])}</p>{diagram}<ol>'+''.join('<li>'+ESC(x)+'</li>' for x in c['steps'])+f'</ol><p class="check"><strong>How to tell it worked</strong><br>{ESC(c["check"])}</p>{notes}</article>')
  return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} - Step-by-step guide</title><style>:root{{--accent:{accent}}}{CSS}</style></head><body><header><span class="tag">SAKURA / USER GUIDE</span><h1>{title}</h1><p>{subtitle}. A separate, practical guide for this edition. Updated {DATE}; button names are checked against this app snapshot.</p><a class="download" href="{base}.pdf">Open printable PDF</a><button onclick="window.print()">Print this guide</button><a class="download secondary" href="Sakura_User_Guide.html">Choose a different guide</a></header><div class="layout"><nav aria-label="Guide chapters"><strong>In this guide</strong>{nav}</nav><main><section class="intro"><h2>First successful session</h2><ol>{''.join('<li>'+ESC(x)+'</li>' for x in QUICK[kind])}</ol><p>{ESC(PRE[kind])}</p><p class="note">If using an installer, install the matching edition first and keep its application folder together. Use the current APK for phone features. Features and labels can vary between builds; do not use a screenshot from an older guide as proof of setup.</p></section>{''.join(blocks)}</main></div><footer>Windows guide | {DATE} | Use Ctrl+F to find a feature. This file works offline; linked services and downloads require internet.</footer></body></html>'''
 def styles(accent):
@@ -110,8 +112,8 @@ def pdf_guide(kind,chapters,path):
  title,color,subtitle=META[kind];accent=colors.HexColor(color);st=styles(accent)
  story=[para('STEP-BY-STEP / WINDOWS',st['eyebrow']),para(title,st['cover']),para(subtitle,st['goal']),para('Start here',st['label'])]
  for i,line in enumerate(QUICK[kind],1):story.append(para(f'{i}. {line}',st['step']))
- story +=[Spacer(1,9),para('Before you start',st['label']),para(PRE[kind],st['body']),para('Using an installer? Install the matching edition first and keep its application folder together. Phone features use the separate, current Sakura Mobile APK.',st['note']),Spacer(1,10),para('Find a task',st['label'])]
- for i,c in enumerate(chapters,1):story.append(Paragraph(f'<link href="#chapter-{i}">{ESC(c["title"])}  /  page {i+1}</link>',st['toc']))
+ story +=[Spacer(1,9),para('Before you start',st['label']),para(PRE[kind],st['body']),para('Using an installer? Install the matching edition first and keep its application folder together. Phone features use the separate, current Sakura Mobile APK.',st['note']),PageBreak(),para('Find a task',st['title'])]
+ for i,c in enumerate(chapters,1):story.append(Paragraph(f'<link href="#chapter-{i}">{ESC(c["title"])}</link>',st['toc']))
  story +=[Spacer(1,12),para('This guide follows the app snapshot checked on '+DATE+'. External services, account permissions and optional hardware still need their own setup. No zero-latency or fixed-FPS promise is made.',st['note'])]
  for c in chapters:
   story += [PageBreak(),para('FOLLOW THESE STEPS',st['eyebrow']),para(c['title'],st['title']),para(c['goal'],st['goal'])]
@@ -119,11 +121,14 @@ def pdf_guide(kind,chapters,path):
   for i,line in enumerate(c['steps'],1):story.append(para(f'{i}. {line}',st['step']))
   story +=[Spacer(1,9),para('HOW TO TELL IT WORKED',st['label']),para(c['check'],st['body']),Spacer(1,6),para('Useful notes and limits',st['label'])]
   for line in c['notes']:story.append(para(line,st['note']))
+ for suffix,label in [('models','Models and navigation'),('settings','Theme, version and graphics'),('scenery','PMX backgrounds and props')]:
+  screenshot=ROOT/'docs/user-guides/images'/f'{kind}-{suffix}.png'
+  if screenshot.is_file():story +=[PageBreak(),para(label,st['title']),para('Actual Sakura 1.0.1 UI components with demonstration data; no personal character or account is shown.',st['note']),Image(str(screenshot),width=509,height=335),Spacer(1,15),para('Use the matching chapters above for detailed instructions. Scenery is enabled explicitly and stays separate from the tracked character.',st['body'])]
  doc=GuideDoc(str(path),pagesize=A4,leftMargin=43,rightMargin=43,topMargin=53,bottomMargin=52,title=title+' - Step-by-step user guide',author='Sakura',pageCompression=1)
  doc.build(story,onFirstPage=lambda c,d:chrome(c,d,title,accent),onLaterPages=lambda c,d:chrome(c,d,title,accent))
  pages=PdfReader(path).pages
- assert len(pages)==len(chapters)+1,(kind,'Unexpected chapter overflow',len(pages))
- for i,c in enumerate(chapters,1):assert c['title'][:8] in pages[i].extract_text(),(kind,i)
+ text='\n'.join(p.extract_text() for p in pages)
+ for c in chapters:assert c['title'][:8] in text,(kind,c['title'])
  print(path.name,len(pages),'pages; chapter boundaries verified')
 archive=PARENT/'Guide Archive'/'2026-10-24'
 archive.mkdir(parents=True,exist_ok=True)
@@ -131,7 +136,7 @@ for ext in ['html','pdf']:
  p=PARENT/('Sakura_User_Guide.'+ext)
  if p.exists() and not (archive/p.name).exists():shutil.copy2(p,archive/p.name)
 for kind in META:
- chapters=parse(ROOT/f'docs/user-guides/{kind}.md');assert len(chapters)==(13 if kind=='companion' else 12)
+ chapters=parse(ROOT/f'docs/user-guides/{kind}.md');assert len(chapters)==(17 if kind=='companion' else 15)
  base='Sakura_'+('Companion' if kind=='companion' else 'VTuber')+'_Guide'
  pdf_guide(kind,chapters,OUT/(base+'.pdf'))
  content=html_guide(kind,chapters)

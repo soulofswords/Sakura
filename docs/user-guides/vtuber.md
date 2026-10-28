@@ -1,5 +1,5 @@
 # Sakura VTuber
-Step-by-step user guide | Windows desktop | 25 October 2026
+Step-by-step user guide | Sakura 1.0.1 | Windows desktop | 28 October 2026
 
 ## 1. Start VTuber and load an avatar
 Use standalone VTuber for performance without loading a chat LLM.
@@ -156,3 +156,31 @@ Optional microphone playback can drive the avatar's mouth without enabling AI ch
 Check: Your test phrase plays through the intended voice/output, and turning the feature off stops that microphone-conversion session.
 Note: Transcription followed by synthesized speech is not the same as direct RVC conversion and can have more delay. Neither path provides zero latency.
 Note: If the RVC service/model fails, test a built-in voice first. This feature is separate from Companion's chat mic and wake listener.
+
+## 13. Cloud character library and account access
+Download characters with your Sakura account, independently of the library owner's storage accounts.
+1. Open Models and choose Cloud import PMX, Cloud import VRM or Cloud import Live2D.
+2. Sign in or create a Sakura account, complete email verification when requested, then refresh the library. Use Forgot password if needed.
+3. Browse the category folders or search by character name. Select a character card to inspect the preview and download it.
+4. Wait for completion and load the character from its matching local PMX, VRM or Live2D selector.
+Check: The character loads locally with its textures and works with normal tracking.
+Note: Users do not need Jio accounts, owner OTPs or publishing credentials. Cloud library availability depends on published packages, internet access and the account service.
+
+## 14. PMX backgrounds, tools and props
+Place a PMX environment or accessory beside your 3D character.
+1. Open Background on the left toolbar. Scroll to 3D backgrounds & props.
+2. Tick Enable PMX backgrounds and props alongside my character. With this off, saved scenery is not loaded.
+3. Import the complete PMX scenery/prop folder including textures. Select the imported asset, then click Add selected asset to stage. The same picker can use already imported Tools & Props assets.
+4. Select a stage object and set Position X/Y/Z, Scale and Rotation Y. Move distant scenery along Z and adjust its size to fit the camera. Up to four static PMX objects can share the scene.
+5. Untick the checkbox to unload scenery. Use Remove selected object to forget one placement; it does not delete the imported asset.
+Check: Background and tools render with the PMX/VRM character and appear in the same scene captured by Spout or Virtual Camera.
+Note: The character remains the tracking target. These static objects do not receive face tracking, humanoid retargeting or character physics. PMX scenery is intended for 3D characters, not the separate Live2D renderer.
+
+## 15. Installed version and graphics
+Check your version and tune rendering cost before increasing tracking complexity.
+1. Open Settings > Theme. About Sakura shows the installed version, currently 1.0.1.
+2. Release history and downloads opens the official release page. Install the matching edition when updating.
+3. Click Graphics and select Low, Balanced or High. Changes save automatically and synchronize with the toolbar quality control.
+4. Test your model, scenery and recording together. Use fewer props or lower quality if GPU memory usage is high.
+Check: Settings shows the correct edition/version and the rendering quality follows your selection.
+Note: Rendering quality changes resolution/detail budget; it does not guarantee 60 FPS tracking. Camera inference, hardware and phone network conditions also affect smoothness.

@@ -63,6 +63,22 @@ def session(**kwargs):
             'authToken': {'accessToken': 'secret-access-token', 'refreshToken': 'secret-refresh-token'}, **kwargs}
 
 
+def test_rejected_login_can_restart_without_deleting_saved_recovery():
+    owner, transport=connection()
+    owner.session=session(twoFAValidated=True)
+    owner.store.save({'session':owner.session})
+    saved=owner.store.load()
+    owner.profile={'userId':'owner-123'}
+    owner.candidates=[{'id':'folder'}]
+    owner.destination={'folderKey':'folder'}
+    owner.last_error={'status':401}
+    owner.reset_login()
+    assert not owner.public()['otpAccepted']
+    assert not owner.public()['canInspect']
+    assert not owner.public()['connected']
+    assert owner.store.load()==saved
+
+
 def profile():
     return {'userId': 'owner-123', 'emailId': 'owner@example.com', 'rootFolderKey': 'root', 'dcGroupCode': 'JMNG2'}
 
@@ -297,6 +313,22 @@ def test_local_server_blocks_cross_origin_missing_capability_and_wrong_host():
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_profile_401_returns_a_fresh_login_state():
+    owner, transport=connection([Response({'code':'TEJGA0401'},401)])
+    owner.session=session(twoFAValidated=True)
+    server,url=jio.make_server(owner,token='test-capability')
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        response=requests.post(url.split('#')[0].rstrip('/')+'/api/inspect',json={},headers={'X-Sakura-Owner':'test-capability'})
+        assert response.status_code==400
+        assert 'TEJGA0401' in response.json()['error']
+        assert response.json()['state']['otpAccepted'] is False
+        assert response.json()['state']['canInspect'] is False
+        assert owner.session=={}
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)
 
 
 @pytest.mark.skipif(__import__('sys').platform != 'win32', reason='Windows DPAPI')

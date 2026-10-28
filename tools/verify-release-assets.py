@@ -19,6 +19,7 @@ def inspect(archive,windows):
         viewer=archive.read('Sakura/static/js/model-viewer.js').decode()
         assert '_hitModelPixelAt' in viewer and '_0x' in viewer,'Missing GPU picking/protected JavaScript'
         assert 'Sakura/static/model-library-preview.html' in names,'Character library preview page is not packaged'
+        assert 'Sakura/static/js/pmx-stage.js' in names,'PMX scenery controls are not packaged'
         assert 'eye-tracking.js?v=cursor-gpu6' in archive.read('Sakura/static/js/app.js').decode(),'Shipped app.js pins a stale eye-tracking cache'
     else:
         assert 'classes.dex' in names and 'assets/mobile.js' in names

@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import Live2DViewer from './live2d-viewer.js?v=stage-items151';
+import {PmxStage} from './pmx-stage.js?v=101';
 
 const modelUrl=path=>'/models/'+path.split('/').map(encodeURIComponent).join('/');
 export function installStageItems(viewer){
     if(viewer.stageItems)return viewer.stageItems;
+    viewer.pmxStage=new PmxStage(viewer);
     return viewer.stageItems=new StageItems(viewer);
 }
 class StageItems {
@@ -25,7 +27,7 @@ class StageItems {
         this.$('stage-item-follow').onchange=e=>{const i=this.selected;if(!i)return;const current=this.rect(i);i.x=current.x;i.y=current.y;i.width=current.width;i.follow=e.target.checked;this.attach(i);void this.save(i);};
         this.$('stage-item-remove').onclick=()=>void this.remove();
         const mount=()=>{
-            const destination=document.body.classList.contains('tracking-only')?document.querySelector('[data-studio-content="background"]'):document.querySelector('[data-companion-content="tools"]');
+            const destination=document.body.classList.contains('tracking-only')?document.querySelector('[data-studio-content="background"]'):document.querySelector('[data-companion-content="background"]');
             if(destination&&this.card.parentNode!==destination)destination.append(this.card);
             const big=document.getElementById('studio-model-lock');
             if(big&&!this.lock){this.lock=document.createElement('button');this.lock.type='button';this.lock.id='studio-item-lock';this.lock.className='studio-dock-button';this.lock.innerHTML=big.innerHTML;this.lock.style.cssText='width:34px;height:34px;flex-basis:34px;padding:8px;margin:-7px auto 0;--dock-tint:#fff0b8;--dock-ink:#9c7a16';this.lock.onclick=()=>{if(this.selected){this.selected.locked=!this.selected.locked;this.$('stage-item-locked').checked=this.selected.locked;void this.save(this.selected);this.syncLock();}};big.after(this.lock);this.syncLock();}

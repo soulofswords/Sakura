@@ -509,6 +509,11 @@ async def import_nvidia_sdk(request: Request, file: UploadFile = File(...)):
 
 LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1')
 
+@app.get('/api/version')
+def application_version():
+    from product import VERSION, DISPLAY_NAME
+    return {'version':VERSION,'product':DISPLAY_NAME}
+
 
 def _served_locally(request: Request):
     """The GUI server listens on loopback only, so Host must name this machine.

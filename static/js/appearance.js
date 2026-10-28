@@ -38,6 +38,23 @@ export function installAppearance() {
     const heading = document.querySelector('#theme-popover .popover-header span'); if (heading) heading.textContent = 'Appearance';
     const button = document.getElementById('theme-btn'); if (button) button.title = 'Appearance · Light, Dark or System';
     const themePanel=document.getElementById('tab-theme');
+    if(themePanel){
+        const about=document.createElement('section');about.className='setting-group';
+        const heading=document.createElement('h3');heading.textContent='About Sakura';
+        const version=document.createElement('p');version.id='sakura-version';version.textContent='Reading installed version…';
+        const releases=document.createElement('a');releases.href='https://github.com/soulofswords/Sakura-Downloads/releases';releases.target='_blank';releases.rel='noopener noreferrer';releases.textContent='Release history and downloads';
+        about.append(heading,version,releases);themePanel.append(about);
+        fetch('/api/version').then(r=>{if(!r.ok)throw Error();return r.json();}).then(data=>{version.textContent=data.product+' · Version '+data.version;}).catch(()=>{version.textContent='Version unavailable. Restart Sakura and try again.';});
+        const graphics=document.createElement('button');graphics.type='button';graphics.id='open-graphics-settings';graphics.textContent='Graphics';
+        const options=document.createElement('section');options.className='setting-group';options.hidden=true;options.id='graphics-settings';
+        const title=document.createElement('h3');title.textContent='Graphics';const select=document.createElement('select');select.id='graphics-quality';select.setAttribute('aria-label','Rendering quality');
+        for(const [value,label]of [['low','Low · lower GPU usage'],['balanced','Balanced'],['high','High · sharper output']])select.add(new Option(label,value));
+        select.value=localStorage.getItem('sakura_render_quality')||'balanced';
+        const note=document.createElement('p');note.className='modal-hint';note.textContent='Controls character and stage rendering quality. Higher quality uses more GPU memory. Changes save automatically.';
+        options.append(title,select,note);themePanel.append(graphics,options);
+        graphics.onclick=()=>{options.hidden=!options.hidden;graphics.setAttribute('aria-expanded',String(!options.hidden));};
+        select.onchange=()=>window.dispatchEvent(new CustomEvent('sakura-graphics-quality',{detail:select.value}));
+    }
     if(themePanel&&(window.SAKURA_EDITION||'companion')!=='vtuber'){
         const access=document.createElement('div');access.className='setting-group';access.id='computer-access-setting';
         const accessLabel=document.createElement('label'),accessToggle=document.createElement('input');
