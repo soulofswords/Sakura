@@ -141,7 +141,9 @@ for kind in META:
  pdf_guide(kind,chapters,OUT/(base+'.pdf'))
  content=html_guide(kind,chapters)
  (ROOT/'docs/user-guides'/(base+'.html')).write_text(content.replace('href="'+base+'.pdf"','href="../../output/pdf/'+base+'.pdf"'),encoding='utf-8')
- (PARENT/(base+'.html')).write_text(content,encoding='utf-8')
+ (PARENT/(base+'.html')).write_text(content.replace('src="images/','src="Sakura Guide Images/'),encoding='utf-8')
+ local_images=PARENT/'Sakura Guide Images';local_images.mkdir(exist_ok=True)
+ for image in (ROOT/'docs/user-guides/images').glob('*.png'):shutil.copy2(image,local_images/image.name)
  shutil.copy2(OUT/(base+'.pdf'),PARENT/(base+'.pdf'))
 hub=f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sakura - Choose your guide</title><style>:root{{--accent:#b83571}}{CSS}</style></head><body><header><span class="tag">SAKURA / GUIDES</span><h1>Choose your edition</h1><p>Two separate step-by-step guides, updated {DATE}. The older combined guide has been replaced.</p></header><div class="layout" style="display:block;max-width:900px"><article><h2>Sakura Companion</h2><p>Conversation, voice, local/cloud AI, model downloads, Game Mode, Google, Agent approvals and phone setup.</p><a class="download" href="Sakura_Companion_Guide.html">Read Companion guide</a><a class="download secondary" href="Sakura_Companion_Guide.pdf">Companion PDF</a></article><article><h2>Sakura VTuber</h2><p>Webcam/mobile tracking, hands, NVIDIA setup, expressions, materials, streaming output, Collab and Chat Reader.</p><a class="download" href="Sakura_VTuber_Guide.html">Read VTuber guide</a><a class="download secondary" href="Sakura_VTuber_Guide.pdf">VTuber PDF</a></article></div></body></html>'''
 (PARENT/'Sakura_User_Guide.html').write_text(hub,encoding='utf-8')
