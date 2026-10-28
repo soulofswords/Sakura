@@ -15,6 +15,12 @@ export function stageAssetUrl(requested,modelPath,origin=location.origin){
  if(url.origin!==origin||!url.pathname.startsWith(prefix)||!decoded.pathname.startsWith(prefix))throw Error('Texture path leaves this PMX package. Keep shared textures inside the imported asset folder.');
  return url.href;
 }
+export function prepareStageMesh(mesh){
+ mesh.traverse(object=>{
+  for(const [name,targets] of Object.entries(object.geometry?.morphAttributes||{}))if(Array.isArray(targets)&&targets.length===0)delete object.geometry.morphAttributes[name];
+ });
+ return mesh;
+}
 
 // Scenery uses the character's actual scene, camera and capture renderer.
 // No humanoid retargeting, idle pose or character physics are applied here.
@@ -43,7 +49,7 @@ export class PmxStage {
  async import(input){if(!this.enabled)return;input.disabled=true;try{const files=[...input.files];if(!files.length)return;if(!files.some(f=>/\.pmx$/i.test(f.name)))throw Error('Choose a PMX folder including textures.');const form=new FormData();form.append('model_format','pmx');for(const f of files)form.append('files',f,f.webkitRelativePath||f.name);const r=await fetch('/api/models/import',{method:'POST',body:form}),data=await r.json();if(!r.ok)throw Error(data.error||'Import failed.');await this.library();const path=data.models?.find(p=>/\.pmx$/i.test(p));if(path)this.$('pmx-stage-library').value=path;this.notice('Imported. Click Add selected asset to stage.');}catch(e){this.notice(e.message);}finally{input.disabled=false;input.value='';}}
  async sync(){this.$('pmx-stage-options').hidden=!this.enabled;const s=this.$('pmx-stage-selection');s.replaceChildren(new Option('Choose stage object',''));for(const r of this.records)s.add(new Option(r.name,r.id));this.selected||=this.records[0]?.id;s.value=this.selected||'';this.controls();if(!this.enabled){for(const id of [...this.meshes.keys()])this.release(id);return;}await this.library();await Promise.all(this.records.map(r=>this.load(r)));}
  async load(r){if(this.meshes.has(r.id)||this.loading.has(r.id))return;this.loading.add(r.id);this.notice('Loading '+r.name+'…');let mesh;try{if(typeof r.path!=='string'||!r.path.startsWith('pmx/')||r.path.split('/').some(p=>p==='..')||!r.path.toLowerCase().endsWith('.pmx')||!this.validPaths?.has(r.path))throw Error('PMX asset is missing or invalid. Refresh the library and import a complete valid package.');const manager=new THREE.LoadingManager();manager.addHandler(/\.tga$/i,new TGALoader(manager));manager.addHandler(/\.dds$/i,new DDSLoader(manager));manager.setURLModifier(u=>stageAssetUrl(u,r.path));const url='/models/'+r.path.split('/').map(encodeURIComponent).join('/');mesh=await new MMDLoader(manager).loadAsync(url);if(this.closed||!this.enabled||!this.records.some(x=>x.id===r.id)){this.dispose(mesh);return;}mesh.updateMatrixWorld(true);this.meshes.set(r.id,mesh);this.transform(r);this.viewer.scene.add(mesh);this.notice('Scenery loaded. Use position, scale and rotation to arrange it.');}catch(e){if(mesh)this.dispose(mesh);this.notice(r.name+': '+e.message);}finally{this.loading.delete(r.id);}}
- transform(r){const mesh=this.meshes.get(r.id);if(!mesh)return;mesh.position.set(r.x,r.y,r.z);mesh.scale.setScalar(r.scale);mesh.rotation.y=r.rotation*Math.PI/180;mesh.updateMatrixWorld(true);}
+ transform(r){const mesh=this.meshes.get(r.id);if(!mesh)return;prepareStageMesh(mesh);mesh.position.set(r.x,r.y,r.z);mesh.scale.setScalar(r.scale);mesh.rotation.y=r.rotation*Math.PI/180;mesh.updateMatrixWorld(true);}
  controls(){const r=this.records.find(r=>r.id===this.selected);this.$('pmx-stage-transform').hidden=!r;if(r)for(const k of ['x','y','z','scale','rotation'])this.$('pmx-stage-'+k).value=r[k];}
  dispose(mesh){mesh.removeFromParent();const resources=new Set();mesh.traverse(o=>{if(o.geometry)resources.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[]){resources.add(m);for(const v of Object.values(m))if(v?.isTexture)resources.add(v);}});for(const r of resources)r.dispose();}
  release(id){const mesh=this.meshes.get(id);if(mesh)this.dispose(mesh);this.meshes.delete(id);}
