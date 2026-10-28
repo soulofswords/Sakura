@@ -83,7 +83,7 @@ def request_stage(url):
     if path == '/security/users':
         return 'checking the account profile'
     if path.startswith('/nms/metadata'):
-        return 'finding the live2d folder'
+        return 'reading the Jio folders'
     if path == '/2fa/validation':
         return 'unlocking the passphrase'
     return 'loading the Jio connection'
@@ -162,6 +162,15 @@ class JioConnection:
         self.message = 'Enter the account that owns your '+self.folder_name+' folder.'
 
     def request(self, method, url, body=None, authenticated=False, extra=None):
+        # Retry only idempotent reads. OTP/login and other writes are never replayed.
+        for attempt in range(3):
+            try:
+                return self._request_once(method,url,body,authenticated,extra)
+            except ConnectionError as exc:
+                if method.upper()!='GET' or getattr(exc,'status',None) not in (429,500,502,503,504) or attempt==2:raise
+                time.sleep(2**attempt)
+
+    def _request_once(self, method, url, body=None, authenticated=False, extra=None):
         # Never follow provider nextLink/redirects to a host carrying owner tokens.
         parsed = urlsplit(url)
         allowed = {'api.jioaicloud.com', 'www.jioaicloud.com'} | {
@@ -199,9 +208,13 @@ class JioConnection:
                     # Provider prose can contain identities or request values.
                     # Only a bounded code and our own stage labels are displayed.
                     if response.status_code == 429:
-                        raise ConnectionError('Jio has rate-limited this request. Wait before retrying.')
+                        error=ConnectionError('Jio has rate-limited this request. Wait before retrying.')
+                        error.status=response.status_code
+                        raise error
                     suffix = f', code {code}' if code else ''
-                    raise ConnectionError(f'Jio rejected {request_stage(url)} (HTTP {response.status_code}{suffix}). No upload was attempted.')
+                    error=ConnectionError(f'Jio rejected {request_stage(url)} (HTTP {response.status_code}{suffix}). No upload was attempted.')
+                    error.status=response.status_code
+                    raise error
                 if not isinstance(data, dict):
                     raise ConnectionError('Jio returned an unsupported response format.')
                 if data.get('error') or data.get('errorCode'):
@@ -293,7 +306,7 @@ class JioConnection:
         self.session['twoFAValidated'] = True
         self.inspect()
 
-    def inspect(self):
+    def inspect(self, preserve_destination=False):
         if not self.session.get('twoFAValidated'):
             raise ConnectionError('Complete Jio login before checking the destination.')
         self.profile = {}
@@ -308,7 +321,8 @@ class JioConnection:
                 self.session[key] = profile[key]
         # Preserve the verified login across connector updates without granting
         # any upload destination. Confirmation is a separate explicit action.
-        self.store.save({'session': self.session, 'destination': None, 'folder_name':self.folder_name})
+        previous=self.store.load().get('destination') if preserve_destination else None
+        self.store.save({'session': self.session, 'destination': previous, 'folder_name':self.folder_name})
         code = self.session.get('dcGroupCode')
         root = self.session.get('rootFolderKey')
         if code not in REGIONS or not isinstance(root, str) or not root:
@@ -362,7 +376,7 @@ class JioConnection:
         self.session = session
         self.message = f'Restored the encrypted Jio login. Checking your account and {self.folder_name} folder.'
         try:
-            self.inspect()
+            self.inspect(preserve_destination=True)
         except ConnectionError:
             if self.last_error.get('status') not in (401,403) or not session.get('authToken',{}).get('refreshToken'):
                 raise
@@ -374,7 +388,7 @@ class JioConnection:
             if not isinstance(token.get('accessToken'),str) or not token['accessToken']:
                 raise ConnectionError('Jio needs a fresh owner sign-in.')
             session['authToken'].update({k:token[k] for k in ('accessToken','refreshToken','expiresIn') if k in token})
-            self.inspect()
+            self.inspect(preserve_destination=True)
         destination = saved.get('destination')
         if (isinstance(destination, dict) and len(self.candidates) == 1
                 and destination.get('userId') == self.profile.get('userId')
@@ -382,6 +396,8 @@ class JioConnection:
             self.destination = destination
             self.store.save({'session': self.session, 'destination': self.destination, 'folder_name':self.folder_name})
             self.message = f'Connected to the verified account and My Files / {self.folder_name}. No files uploaded yet.'
+        else:
+            self.store.save({'session':self.session,'destination':None,'folder_name':self.folder_name})
 
     def confirm(self):
         if not self.profile or len(self.candidates) != 1 or not self.session.get('twoFAValidated'):

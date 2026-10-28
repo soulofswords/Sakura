@@ -6,6 +6,7 @@ PyAudioWPatch==0.2.12.9; sys_platform == "win32"
 soundfile
 numpy
 requests
+psutil==7.2.2
 kokoro-onnx==0.6.1
 pygame
 rich

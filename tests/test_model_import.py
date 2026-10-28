@@ -68,7 +68,10 @@ class ModelImportTests(unittest.TestCase):
         files=[('Ringo.pmx',pmx_with_bones(['全ての親','センター','上半身','頭','左腕','右腕','左足','右足']))]
         with tempfile.TemporaryDirectory() as folder:
             first=import_package(folder,files,'pmx','Ananta / Ringo','cloud-first')
-            second=import_package(folder,files,'pmx','Ananta / Ringo','cloud-second')
+            same=import_package(folder,files,'pmx','Ananta / Ringo','cloud-second')
+            self.assertTrue(same['already_installed'])
+            self.assertEqual(first['models'],same['models'])
+            second=import_package(folder,[*files,('variant.txt',b'different outfit package')],'pmx','Ananta / Ringo','cloud-second')
             self.assertEqual(Path(first['models'][0]).parts[1],'Ringo')
             self.assertEqual(Path(second['models'][0]).parts[1],'Ringo cloud-second')
             self.assertTrue((Path(folder)/first['models'][0]).is_file())

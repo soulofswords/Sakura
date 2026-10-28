@@ -19,7 +19,7 @@ PINNED_FILES=('tools/agent-library-workflow.py','tools/verify-jio-publication.py
  'tools/sync-jio-pmx-sources.py','tools/sync-jio-live2d-sources.py','tools/prepare-jio-pmx-library.py',
  'tools/publish-model-library.py','tools/render-pmx-library-previews.cjs','tools/library-preview-server.py',
  'tools/upload-library-jio.py','tools/publish-library-jio.py','tools/jio_library_owner.py',
- 'model_import.py','model_rig_validation.py','model_library_previews.py')
+ 'model_import.py','model_rig_validation.py','model_library_previews.py','model_library_paths.py')
 
 
 class OwnerLibrary:

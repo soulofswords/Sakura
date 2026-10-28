@@ -107,6 +107,7 @@ def get_settings():
         "wake_word": "hey sakura",
         "wake_word_enabled": False,
         "computer_control_enabled": False,
+        "computer_access_level": "restricted",
         "selected_voice": "kokoro_af_heart",
         "tts_pitch": "+0Hz",
         "tts_rate": "+0%",
@@ -1702,6 +1703,8 @@ async def update_app_settings(request: Request, payload: dict):
         payload['news_area'] = payload['news_area'].strip()
     if 'conversation_mode' in payload and payload['conversation_mode'] not in ('friend','teacher'):
         return JSONResponse({'error':'Choose Friend or Teacher conversation mode.'},400)
+    if 'computer_access_level' in payload and payload['computer_access_level'] not in ('restricted','full'):
+        return JSONResponse({'error':'Choose Restricted or Full computer access.'},400)
     if 'game_play_mode' in payload and payload['game_play_mode'] not in ('singleplayer','multiplayer'):
         return JSONResponse({'error':'Choose Single-player or Multiplayer game mode.'},400)
     if 'user_address' in payload and payload['user_address'] not in ('sir','maam','none'):
@@ -2318,7 +2321,7 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
         avatar_motion='greeting_wave'
     if not avatar_motion and not command_reply and not payload.get('screen_reaction') and payload.get('avatar_can_chest_tap') is True and not getattr(app.state,'tracking_only',False):
         from avatar_gestures import conversational_gesture
-        avatar_motion=conversational_gesture(text,reply)
+        avatar_motion=conversational_gesture(text,reply,get_settings().get('conversation_mode','friend'))
     workflow_public = ({'id': workflow['id'], 'steps': workflow['steps']} if workflow else None)
     if payload.get('defer_audio'):
         from tts import polish_spoken_text
@@ -2431,6 +2434,15 @@ async def chat(payload: dict):
             reply=teacher_prompt()
             if llm:await run_in_threadpool(llm.remember_exchange,text,reply)
             return {'reply':reply,'speech_reply':reply,'audio':None,'mode_required':'teacher','mode_guide':'teacher'}
+    if not any(payload.get(k) for k in ('screen_reaction','camera_reaction','screen_observation','ai_vtuber')):
+        from hardware_details import answer
+        hardware_cfg=dict(cfg)
+        if not phone_command_allowed(cfg,payload):hardware_cfg['computer_control_enabled']=False
+        hardware_reply=await run_in_threadpool(answer,text,hardware_cfg)
+        if hardware_reply is not None:
+            hardware_reply['speech_reply']=hardware_reply['reply']
+            if llm:await run_in_threadpool(llm.remember_exchange,text,hardware_reply['reply'])
+            return hardware_reply
     from teacher_agent_chat import teacher_agent_chat
     task_reply=await run_in_threadpool(teacher_agent_chat.handle,text,cfg,llm,payload)
     if task_reply is not None:

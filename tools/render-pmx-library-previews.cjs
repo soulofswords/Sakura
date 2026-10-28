@@ -18,7 +18,7 @@ const {spawnSync}=require('node:child_process');
  function publishReady(){
   if(!streamPublish)return;
   for(const args of [ ['tools/upload-library-jio.py','--directory',directory,'--remote-folder','PMX/Sakura library packages','--workers','2','--ready-only'], ['tools/publish-library-jio.py','--directory',directory,'--configure'] ]){
-   const result=spawnSync('venv/Scripts/python.exe',args,{encoding:'utf8',timeout:600000});
+   const result=spawnSync('venv/Scripts/python.exe',args,{encoding:'utf8',timeout:3600000,maxBuffer:8*1024*1024});
    if(result.stdout)process.stdout.write(result.stdout);
    if(result.status!==0){console.log('Ready batch publication deferred; remaining previews will continue.');return;}
   }

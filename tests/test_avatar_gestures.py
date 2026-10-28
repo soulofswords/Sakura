@@ -23,6 +23,8 @@ class GestureTests(unittest.TestCase):
   for text in ['My heart hurts','You are not my heart','Explain the heart','She said you are my heart','tap the keyboard']:
    self.assertIsNone(conversational_gesture(text,'Your heartbeat matters.'))
   self.assertIsNone(conversational_gesture('You are my heart.',"I can't do that."))
+  self.assertIsNone(conversational_gesture('please tap your chest','Of course.','teacher'))
+  self.assertIsNone(conversational_gesture('You are my heart.',"You're my heartbeat too.",'teacher'))
  def test_eye_direction_becomes_metadata_without_spoken_narration(self):
   for prefix in ['eyes widen slightly ', '*eyes widen slightly* ', '(eyes widen slightly) ', 'eyes widen slightly. ']:
    raw=prefix+'Your PC is capable.'

@@ -5,9 +5,36 @@ import tempfile
 import uuid
 import re
 import zipfile
+import hashlib
 from model_rig_validation import pmx_bone_names, validate_humanoid_names, validate_vrm_glb
 
 MAX_BYTES = 512 * 1024 * 1024
+
+
+def existing_package(root, stage, models, kind):
+    """Reuse a byte-identical local import, including its referenced asset tree."""
+    first=models[0];relative=first.relative_to(stage)
+    def digest(path):
+        with path.open('rb') as source:return hashlib.file_digest(source,'sha256').digest()
+    expected=digest(first)
+    assets=[p for p in stage.rglob('*') if p.is_file() and
+            (p.suffix.lower() not in ('.pmx','.vrm') or p.suffix.lower()=='.'+kind)]
+    hashes={first:expected}
+    for candidate in (root/kind).rglob('*'+('model3.json' if kind=='live2d' else '.'+kind)):
+        if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):continue
+        if candidate.stat().st_size!=first.stat().st_size or digest(candidate)!=expected:continue
+        base=candidate
+        for _ in relative.parts:base=base.parent
+        if not base.resolve().is_relative_to((root/kind).resolve()):continue
+        match=True
+        for source in assets:
+            target=base/source.relative_to(stage)
+            if not target.is_file() or not target.resolve().is_relative_to(root.resolve()) or target.stat().st_size!=source.stat().st_size:
+                match=False;break
+            if source not in hashes:hashes[source]=digest(source)
+            if digest(target)!=hashes[source]:match=False;break
+        if match:return [(base/p.relative_to(stage)).relative_to(root).as_posix() for p in models]
+    return None
 
 
 def safe_path(name):
@@ -76,6 +103,8 @@ def import_package(root, files, model_format="auto", display_name='', identifier
                 if (descriptor.parent / safe_path(required[0])).read_bytes()[:4] != b'MOC3':
                     raise ValueError('Live2D MOC3 file is invalid.')
             descriptor=live2d[0]
+            existing=existing_package(root,stage,live2d,'live2d')
+            if existing:return {'models':existing,'already_installed':True,'renderable':True,'message':'Already installed. Existing files were kept.'}
             inferred=descriptor.name[:-len('.model3.json')]
             if inferred.lower() in ('model','avatar','character') and descriptor.parent!=stage:inferred=descriptor.parent.name
             label=str(display_name).replace('\\','/').split('/')[-1].strip() or inferred
@@ -100,7 +129,12 @@ def import_package(root, files, model_format="auto", display_name='', identifier
             else:
                 validate_humanoid_names(pmx_bone_names(model.read_bytes()), model.name)
         published = []
+        reused=True
         for kind in sorted({model.suffix.lower().lstrip('.') for model in models}):
+            existing=existing_package(root,stage,[model for model in models if model.suffix.lower()=='.'+kind],kind)
+            if existing:
+                published.extend(existing);continue
+            reused=False
             first=next(model for model in models if model.suffix.lower()=='.'+kind)
             inferred=first.stem
             if inferred.lower() in ('model','avatar','character') and first.parent!=stage:inferred=first.parent.name
@@ -112,5 +146,5 @@ def import_package(root, files, model_format="auto", display_name='', identifier
                 return [entry for entry in names if Path(entry).suffix.lower() in {'.pmx', '.vrm'} and Path(entry).suffix.lower() != '.' + kind]
             shutil.copytree(stage, destination, ignore=ignore_other_models)
             published.extend(f'{kind}/{name}/{model.relative_to(stage).as_posix()}' for model in models if model.suffix.lower() == '.' + kind)
-        return {'models': published,
+        return {'models': published,'already_installed':reused,
                 'message': 'Imported into its format folder with textures and folder structure preserved.'}

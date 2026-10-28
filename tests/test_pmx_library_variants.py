@@ -48,3 +48,45 @@ def test_any_new_category_is_discovered_but_generated_packages_are_not(tmp_path,
         file=tmp_path/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_bytes(b'avatar')
     rows=list(builder.variants(tmp_path))
     assert {row[0] for row in rows}=={'New game','Another game'}
+
+
+def test_large_package_split_keeps_every_original_folder_in_title(tmp_path,monkeypatch):
+    monkeypatch.setattr(builder,'pmx_bone_names',lambda data:[])
+    monkeypatch.setattr(builder,'validate_humanoid_names',lambda *args:None)
+    monkeypatch.setattr(builder,'import_package',lambda *args:None)
+    root=tmp_path/'models';folder=root/'Miku universe/Haku/Office'
+    folder.mkdir(parents=True);(folder/'Haku.pmx').write_bytes(b'avatar')
+    out=tmp_path/'out';out.mkdir()
+    _,entry=builder.prepare(root,'Miku universe',folder,out,{})
+    assert entry['name']=='Miku universe / Haku / Office'
+
+
+def test_single_model_nested_wrappers_and_cached_packages_keep_paths(tmp_path,monkeypatch):
+    monkeypatch.setattr(builder,'pmx_bone_names',lambda data:[])
+    monkeypatch.setattr(builder,'validate_humanoid_names',lambda *args:None)
+    monkeypatch.setattr(builder,'import_package',lambda *args:None)
+    root=tmp_path/'models';folder=root/'anime/Series';model=folder/'Character/Outfit/hero.pmx'
+    model.parent.mkdir(parents=True);model.write_bytes(b'avatar')
+    out=tmp_path/'out';out.mkdir()
+    key,entry=builder.prepare(root,'anime',folder,out,{})
+    assert entry['name']=='anime / Series / Character / Outfit'
+    _,cached=builder.prepare(root,'anime',folder,out,{key:{**entry,'name':'anime / Outfit'}})
+    assert cached['name']==entry['name']
+
+
+def test_publication_stamp_includes_browsing_metadata(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1]/'tools'))
+    spec=importlib.util.spec_from_file_location('publish_pmx',Path(__file__).parents[1]/'tools/publish-library-jio.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    entry={'sha256':'a'*64,'name':'game / outfit','format':'pmx','preview':True}
+    assert module.publication_stamp(entry,'preview')!=module.publication_stamp({**entry,'name':'game / character / outfit'},'preview')
+    assert module.publication_stamp(entry,'preview')==module.publication_stamp({**entry,'source_folder':'private'},'preview')
+
+
+def test_additions_select_complete_character_assets_without_touching_old_packages():
+    from model_library_paths import pending_pmx_sources,source_package_prefix
+    files={'game/Hero/old.pmx':{},'game/Hero/New/look.pmx':{},'game/Hero/tex/body.png':{},'Other/Hero/model.pmx':{}}
+    pending=pending_pmx_sources(files,{'old':{'preview_model':'pmx/game/Hero/old.pmx'}})
+    assert pending=={'game/Hero/New/look.pmx','Other/Hero/model.pmx'}
+    assert source_package_prefix('game/Hero/New/look.pmx')=='game/Hero/'
+    assert source_package_prefix('game/model.pmx')=='game/'

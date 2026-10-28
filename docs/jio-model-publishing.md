@@ -20,6 +20,11 @@ generated ZIPs, rotating preview images and a catalogue. It is not shown as a
 game or character to users. Keep it in place; moving or deleting it breaks
 published downloads. No public Jio share links are created.
 
+Every original folder level is retained, including large character groups split
+into smaller downloadable packages. Browsing a folder shows only its direct
+subfolders and model cards; search is restricted to that folder and its children.
+Search at All games covers the whole catalogue.
+
 Nested outfit folders and multiple humanoid PMX files in the same folder are
 packaged as separate selectable looks. Browsing preserves game → character →
 outfit → variant paths, with one rotating preview per selectable PMX. Old combined
@@ -44,7 +49,7 @@ kept under **Tools & Props**; mixed character textures are left with their model
    ```powershell
    Set-Location 'F:\AI\assistant\Sakura'
    $env:NODE_PATH='C:\Users\gaura\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules'
-   venv\Scripts\python.exe tools\sync-jio-library.py
+   venv\Scripts\python.exe tools\sync-jio-library.py --all-accounts
    ```
 
 4. The owner sync reads all PMX category folders, downloads missing or
@@ -64,6 +69,23 @@ venv\Scripts\python.exe tools\sync-jio-library.py --inventory-only
 The owner sync must run on this PC with working internet before a new upload
 appears in the public catalogue. It validates complete model packages and renders
 real rotating PMX previews. Existing user installations and edits are preserved.
+No Supabase code deployment or schema edit is needed for a new folder. Publication
+updates catalogue rows through the existing protected owner API, including folder
+name corrections when ZIP bytes are unchanged. Expired owner sessions still require
+Jio reauthentication; transient read failures receive bounded retries. The launcher
+checks both configured accounts even if one fails. `--additions-only` can publish
+new PMX sources without rebuilding old packages, but use a normal full sync to
+process source edits/deletions.
+The owner Agent's hourly workflow uses additions-only mode to avoid downloading
+cloud-verified staging trees again after cleanup. To republish changes made to an
+existing file under the same name, run the full owner sync command above.
+
+Cloud cards mark an existing installation as Installed. The backend also prevents
+a second install by catalogue ID or identical package hash, including copies listed
+under another storage account. A previously manual import without a cloud receipt
+is checked for matching model and asset bytes after the first cloud transfer; it is
+reused rather than copied. Names alone never identify duplicates, so different
+outfits can still be installed separately.
 An hourly Codex follow-up named **Sync Sakura model library** checks this owner
 PC and skips while a sync is already running. The owner PC and Codex must be
 available; this is not a cloud-hosted background worker. It stays quiet when

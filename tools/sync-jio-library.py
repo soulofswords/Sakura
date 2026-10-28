@@ -17,8 +17,20 @@ ROOT=Path(__file__).resolve().parents[1]
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inventory-only',action='store_true')
+    parser.add_argument('--additions-only',action='store_true',help='Publish additions without recreating existing packages. Full sync remains the default for source edits/deletions.')
+    parser.add_argument('--all-accounts',action='store_true',help='Sync each configured storage account; one failed account does not skip another.')
     parser.add_argument('--require-lock',action='store_true',help='Fail rather than report success when another owner workflow holds the lock.')
     args=parser.parse_args()
+    if args.all_accounts:
+        failed=[]
+        for account in ('primary','account2'):
+            folder=ROOT.parent/('private-model-library'+('' if account=='primary' else '-account2'))
+            if account!='primary' and not (folder/'server-enabled.json').is_file():continue
+            flags=[flag for flag,enabled in (('--inventory-only',args.inventory_only),('--additions-only',args.additions_only),('--require-lock',args.require_lock)) if enabled]
+            result=subprocess.run([sys.executable,str(Path(__file__).resolve()),*flags],cwd=ROOT,env={**os.environ,'SAKURA_JIO_ACCOUNT':account})
+            if result.returncode:failed.append(account)
+        if failed:raise ValueError('Sync needs attention for: '+', '.join(failed)+'. Other configured accounts were still checked.')
+        return
     if account_id()!='primary' and not (private_directory()/'server-enabled.json').is_file():raise ValueError('Second-account server routing must be deployed and verified before publication.')
     directory=private_directory('pmx');directory.mkdir(exist_ok=True)
     if sys.platform=='win32':
@@ -34,6 +46,7 @@ def main():
     python=sys.executable
     command=[python,'tools/sync-jio-pmx-sources.py']
     if not args.inventory_only:command.append('--prepare')
+    if args.additions_only:command.append('--additions-only')
     run(command)
     if args.inventory_only:return
     environment=os.environ.copy();environment['SAKURA_LIBRARY_PREVIEW_PMX_ROOT']=str(directory/'jio-source')

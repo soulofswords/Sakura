@@ -101,6 +101,14 @@ class ModelLibrary:
         if not isinstance(data, dict) or not isinstance(data.get('models'), list) or len(data['models']) > 2000:
             raise ValueError('Invalid model library catalogue.')
         models = []
+        installed={}
+        packages={}
+        for path in (self.root/'.library').glob('*.json'):
+            if not ID.fullmatch(path.stem):continue
+            record=self._installed(path.stem)
+            if record:
+                installed[path.stem]=record
+                packages[(record.get('format'),record.get('sha256'))]=record
         for entry in data['models']:
             if not isinstance(entry, dict) or not ID.fullmatch(str(entry.get('id', ''))):
                 raise ValueError('Invalid library model identifier.')
@@ -109,10 +117,10 @@ class ModelLibrary:
             size = entry.get('bytes')
             if not isinstance(size, int) or isinstance(size, bool) or not 0 < size <= MAX_BYTES:
                 raise ValueError('Model packages must be under 512 MB.')
-            record = self._installed(entry['id'])
+            record = installed.get(entry['id']) or packages.get((entry['format'],entry['sha256']))
             models.append({key: entry.get(key) for key in ('id', 'name', 'format', 'bytes', 'sha256', 'version', 'mobile_compatible')}
                           | {'preview': entry.get('preview') is True,
-                             'installed': bool(record and record.get('sha256') == entry['sha256'])})
+                             'installed': bool(record)})
         return {'models': models}
 
     def preview(self, identifier):
@@ -137,6 +145,16 @@ class ModelLibrary:
             pass
         return None
 
+    def _installed_package(self, entry):
+        # The same package may be published under another account/catalogue ID.
+        # Match content, never just a character name (outfits may share names).
+        for path in (self.root / '.library').glob('*.json'):
+            if not ID.fullmatch(path.stem):continue
+            record=self._installed(path.stem)
+            if record and record.get('format')==entry['format'] and record.get('sha256')==entry['sha256']:
+                return record
+        return None
+
     def install(self, identifier):
         if not ID.fullmatch(str(identifier)):
             raise ValueError('Choose a model from the library.')
@@ -145,7 +163,7 @@ class ModelLibrary:
             entry = next((m for m in self.catalogue()['models'] if m['id'] == identifier), None)
             if entry is None:
                 raise ValueError('This model is no longer listed in the library.')
-            old = self._installed(identifier)
+            old = self._installed(identifier) or self._installed_package(entry)
             if old:
                 # Updating replaces neither user edits nor an existing character.
                 return {'ok': True, 'models': old['models'], 'already_installed': True,

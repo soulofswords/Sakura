@@ -63,15 +63,19 @@ export function installAppearance() {
         const accessState=document.createElement('span');accessState.textContent='Off';
         accessLabel.append(accessToggle,document.createTextNode(' Computer access · '),accessState);
         const accessNote=document.createElement('p');accessNote.className='modal-hint';accessNote.textContent='Allow supported PC tools such as PC status, volume and opening apps. Actions that require approval still ask first. Saves automatically.';
-        access.append(accessLabel,accessNote);themePanel.append(access);
+        const accessLevel=document.createElement('select');accessLevel.id='computer-access-level';accessLevel.setAttribute('aria-label','Computer access level');accessLevel.disabled=true;
+        for(const [value,title] of [['restricted','Restricted · hardware readings and supported PC tools'],['full','Full · also inspect resource usage by process']]){const option=document.createElement('option');option.value=value;option.textContent=title;accessLevel.append(option);}
+        const levelNote=document.createElement('p');levelNote.className='modal-hint';levelNote.textContent='Teacher mode: Full also reads top CPU/RAM processes. Windows-critical processes are excluded. Full does not bypass file/action approvals or automatically end processes. Sensor temperature/watts require hardware support.';
+        access.append(accessLabel,accessLevel,accessNote,levelNote);themePanel.append(access);
         let accessRevision=0;
         const showAccess=value=>{
             accessToggle.checked=!!value;accessToggle.setAttribute('aria-checked',String(!!value));accessState.textContent=value?'On':'Off';
+            accessLevel.disabled=!value;
             for(const id of ['computer-control-toggle','system-tools-permission']){const input=document.getElementById(id);if(input)input.checked=!!value;}
         };
         async function readAccess(){
             const current=accessRevision;
-            try{const response=await fetch('/api/settings'),data=await response.json();if(!response.ok)throw Error(data.error||'Could not read computer access.');if(current!==accessRevision)return;showAccess(data.computer_control_enabled===true);accessToggle.disabled=false;}
+            try{const response=await fetch('/api/settings'),data=await response.json();if(!response.ok)throw Error(data.error||'Could not read computer access.');if(current!==accessRevision)return;showAccess(data.computer_control_enabled===true);accessLevel.value=data.computer_access_level==='full'?'full':'restricted';accessToggle.disabled=false;}
             catch(error){accessNote.textContent=error.message;}
         }
         accessToggle.addEventListener('change',async()=>{
@@ -82,6 +86,12 @@ export function installAppearance() {
                 showAccess(requested);accessNote.textContent=requested?'Computer access is on. You can ask Sakura for PC status. Approval requirements still apply.':'Computer access is off. PC tools are blocked.';
             }catch(error){showAccess(!requested);accessNote.textContent=error.message;}
             finally{accessToggle.disabled=false;}
+        });
+        accessLevel.addEventListener('change',async()=>{
+            const requested=accessLevel.value;accessRevision++;accessLevel.disabled=true;accessToggle.disabled=true;
+            try{const response=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({computer_access_level:requested})});const data=await response.json();if(!response.ok||data.ok!==true)throw Error(data.error||'Could not save access level.');levelNote.textContent=requested==='full'?'Full access saved. In Teacher mode, ask which processes use the most CPU or RAM. Critical Windows processes remain protected; approvals still apply.':'Restricted access saved. Hardware readings remain available; process inspection is blocked.';}
+            catch(error){levelNote.textContent=error.message;accessLevel.value=requested==='full'?'restricted':'full';}
+            finally{accessLevel.disabled=!accessToggle.checked;accessToggle.disabled=false;}
         });
         document.querySelector('.tab-btn[data-tab="theme"]')?.addEventListener('click',()=>{if(!accessToggle.disabled)void readAccess();});
         void readAccess();

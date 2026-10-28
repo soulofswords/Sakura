@@ -161,7 +161,7 @@ def main():
         subprocess.run([sys.executable,'-m','unittest','tests.test_companion_performance','tests.test_vtuber','tests.test_cloud_diagnostics','tests.test_mobile_models','-q'],cwd=BASE,check=True)
         subprocess.run(['node',str(BASE/'tests/color-dial.cjs')],cwd=BASE,check=True)
         subprocess.run(['node',str(BASE/'tests/tracking-backends.mjs')],cwd=BASE,check=True)
-        for name in ('pmx-stage.cjs','material-expressions.cjs','agent-review-lifecycle.cjs','jio-library-owner.cjs'):
+        for name in ('pmx-stage.cjs','material-expressions.cjs','agent-review-lifecycle.cjs','jio-library-owner.cjs','cloud-library-folders.cjs','computer-access-level.cjs'):
             subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         subprocess.run([sys.executable,'-m','unittest','tests.test_product_editions','tests.test_startup_modes','tests.test_tracking_mode',
             'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_native_clipboard','tests.test_pmx_editor','tests.test_texture_diagnostics','tests.test_model_repairs','tests.test_mobile_link','tests.test_voice_catalog','tests.test_voice','tests.test_speech_fallback','tests.test_kokoro_speech','tests.test_screen_audio','tests.test_dance_commands','tests.test_nvidia_ar_setup','tests.test_vbridger_receiver',

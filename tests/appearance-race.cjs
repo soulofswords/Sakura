@@ -11,11 +11,11 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  });
  await page.goto('http://appearance.test/');
  await page.addScriptTag({content:fs.readFileSync('static/js/appearance.js','utf8').replace('export function','function')});
- await page.locator('select').selectOption('dark');
+ await page.locator('[data-appearance-select]').selectOption('dark');
  while(!releaseSave||!releaseRead)await new Promise(resolve=>setTimeout(resolve,10));
- await page.locator('select').selectOption('system');releaseRead();
+ await page.locator('[data-appearance-select]').selectOption('system');releaseRead();
  await page.waitForTimeout(80);
- assert.equal(await page.locator('select').inputValue(),'system','A slow startup response cannot overwrite the user choice');
+ assert.equal(await page.locator('[data-appearance-select]').inputValue(),'system','A slow startup response cannot overwrite the user choice');
  assert.deepEqual(writes,['dark'],'Only one settings write may be in flight');
  releaseSave();await page.waitForFunction(()=>localStorage.getItem('sakura_ui_theme')==='system');
  const deadline=Date.now()+3000;while(writes.length<2&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));

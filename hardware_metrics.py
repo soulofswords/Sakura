@@ -87,7 +87,16 @@ def _nvidia_devices():
             memory,util=Memory(),Util();has_memory=api.nvmlDeviceGetMemoryInfo(handle,ctypes.byref(memory))==0
             has_util=api.nvmlDeviceGetUtilizationRates(handle,ctypes.byref(util))==0 and util.gpu<=100
             total=memory.total if has_memory else 0;used=memory.used if has_memory and memory.used<=memory.total else None
+            temperature,power=ctypes.c_uint(),ctypes.c_uint()
+            def sensor(function,arguments,value,scale=1):
+                try:
+                    fn=getattr(api,function);fn.argtypes=[ctypes.c_void_p,*([ctypes.c_uint] if len(arguments) else []),ctypes.POINTER(ctypes.c_uint)]
+                    return round(value.value/scale,1) if fn(handle,*arguments,ctypes.byref(value))==0 else None
+                except AttributeError:return None
+            temp=sensor('nvmlDeviceGetTemperature',[0],temperature)
+            watts=sensor('nvmlDeviceGetPowerUsage',[],power,1000)
             rows.append({'name':name.value.decode('utf-8',errors='replace'),'utilization_percent':util.gpu if has_util else None,
+                'temperature_c':temp,'power_watts':watts,
                 'vram_total_bytes':total,'vram_used_bytes':used,'vram_percent':round(used/total*100,1) if total and used is not None else None,
                 'utilization_source':'NVIDIA NVML'})
     except (OSError,AttributeError):return []

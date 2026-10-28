@@ -1,7 +1,8 @@
 """Small, allowlisted conversational gestures; prose never executes arbitrary actions."""
 import re
 
-def conversational_gesture(user_text, reply):
+def conversational_gesture(user_text, reply, mode='friend'):
+    if mode!='friend':return None
     text=user_text.strip().lower().replace('’', "'")
     # An affectionate statement to the avatar, not medical talk or quoted instructions.
     affectionate=re.fullmatch(r"(?:sakura[, ]+)?(?:you|u)(?: are|'re| r) my (?:heart|heartbeat)[.! ]*", text)

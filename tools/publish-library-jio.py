@@ -1,5 +1,6 @@
 """Owner-only publication of verified Jio library packages to hosted Sakura."""
 import argparse
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
@@ -10,6 +11,12 @@ import requests
 from jio_library_owner import account_id, EncryptedState,JioConnection
 
 URL='https://gclwwyznseuuixnbwpyz.supabase.co/functions/v1/sakura-library-jio-owner'
+
+
+def publication_stamp(entry, portrait):
+    """Metadata-only folder repairs must publish even when ZIP bytes are unchanged."""
+    metadata={key:entry.get(key) for key in ('name','format','mobile_compatible','preview')}
+    return entry['sha256']+'|metadata='+hashlib.sha256(json.dumps(metadata,sort_keys=True).encode()).hexdigest()+'|preview='+str(portrait if entry.get('preview') else None)
 
 
 def main():
@@ -50,7 +57,7 @@ def main():
                     # Endpoint messages are fixed and never contain account credentials.
                     message=response.json().get('error','Publication refused.')
                     raise ValueError(str(message)[:150])
-                stamp=entry['sha256']+('|preview='+str(model['jio_preview_object_key']) if entry['format']=='pmx' else '')
+                stamp=publication_stamp(entry,model['jio_preview_object_key'])
                 return key,stamp
             except (ValueError,requests.RequestException):
                 if attempt==3:raise
@@ -58,7 +65,7 @@ def main():
     failures=[]
     with ThreadPoolExecutor(max_workers=3) as pool:
         jobs={pool.submit(one,pair):pair[0] for pair in prepared.items()
-              if published.get(pair[0])!=(pair[1]['sha256']+('|preview='+str(uploaded['assets'].get(pair[0]+'.webp',{}).get('objectKey') if pair[1].get('preview') else None) if pair[1]['format']=='pmx' else ''))
+              if published.get(pair[0])!=publication_stamp(pair[1],uploaded['assets'].get(pair[0]+'.webp',{}).get('objectKey'))
               and uploaded['assets'].get(pair[0]+'.zip',{}).get('verified')
               and (not pair[1].get('preview') or uploaded['assets'].get(pair[0]+'.webp',{}).get('verified'))}
         for future in as_completed(jobs):

@@ -17,6 +17,8 @@ import zipfile
 from urllib.parse import urlencode,quote
 
 from jio_library_owner import JioConnection,REGIONS,private_directory,account_id
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from model_library_paths import pending_pmx_sources,source_package_prefix
 
 
 def checked_relative(value):
@@ -29,6 +31,7 @@ def checked_relative(value):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prepare',action='store_true')
+    parser.add_argument('--additions-only',action='store_true',help='Prepare new source PMX files while keeping already-published packages; does not detect edits or deletions.')
     args=parser.parse_args();sys.stdout.reconfigure(encoding='utf-8')
     root=Path(__file__).resolve().parents[1]
     out=private_directory('pmx')
@@ -70,6 +73,16 @@ def main():
     (out/'jio-source-inventory.json').write_text(json.dumps({'files':files,'folders':folders,'categories':[x['objectName'] for x in categories]},ensure_ascii=False,indent=2),encoding='utf-8')
     if not args.prepare:
         print('Inventory saved. Run with --prepare to build new packages. No model files changed.');return
+    checkpoint=out/'prepared-models.json'
+    previous=json.loads(checkpoint.read_text(encoding='utf-8')) if checkpoint.exists() else {}
+    pending=None
+    if args.additions_only:
+        pending=pending_pmx_sources(files,previous)
+        prefixes={source_package_prefix(path) for path in pending}
+        selected_files={path:entry for path,entry in files.items() if any(path.startswith(prefix) for prefix in prefixes)}
+        print(f'New source PMX files: {len(pending)}; checking {len(selected_files)} associated assets.',flush=True)
+        if not pending:return
+    else:selected_files=files
     signature=hashlib.sha256(json.dumps(sorted((k,v.get('hash'),v.get('sizeInBytes'),v.get('lastModifiedDate')) for k,v in files.items())).encode()).hexdigest()
     signature_file=out/'jio-last-prepared-signature.txt'
     if signature_file.exists() and signature_file.read_text().strip()==signature and (out/'prepared-models.json').is_file():
@@ -85,7 +98,7 @@ def main():
                     if len(part.parts)==1 and part.suffix.casefold() in {'.tga','.png','.jpg','.jpeg','.bmp','.dds','.gif','.sph','.spa','.txt','.md','.pdf'}:expected_paths.add((archive.parent/part).relative_to(mirror).as_posix())
     # This is a disposable mirror only. Removing a hardlink here never removes
     # its original local file; stale source assets must not enter new packages.
-    for path in mirror.rglob('*'):
+    for path in ([] if args.additions_only else mirror.rglob('*')):
         if path.is_file() and path.relative_to(mirror).as_posix() not in expected_paths:
             if not path.resolve().is_relative_to(mirror.resolve()):raise ValueError('Linked private mirror entry.')
             path.unlink()
@@ -155,11 +168,11 @@ def main():
         temporary.replace(target)
     failed=[]
     with ThreadPoolExecutor(max_workers=4) as pool:
-        jobs={pool.submit(download,pair):pair[0] for pair in files.items()}
+        jobs={pool.submit(download,pair):pair[0] for pair in selected_files.items()}
         for count,future in enumerate(as_completed(jobs),1):
             try:future.result()
             except Exception as exc:failed.append({'path':jobs[future],'error':str(exc) if isinstance(exc,ValueError) else type(exc).__name__})
-            if count%500==0:print(f'Checked/downloaded {count}/{len(files)} source assets.',flush=True)
+            if count%500==0:print(f'Checked/downloaded {count}/{len(selected_files)} source assets.',flush=True)
     if failed:
         (out/'jio-source-download-errors.json').write_text(json.dumps(failed,ensure_ascii=False,indent=2),encoding='utf-8')
         raise ValueError(str(len(failed))+' source files could not be verified. Completed files kept for retry.')
@@ -177,10 +190,16 @@ def main():
                 temporary=destination.with_suffix('.sakura-restore');temporary.write_bytes(content);temporary.replace(destination)
     # Build into a fresh generation so files removed from the source cannot be
     # accidentally republished from a stale old prepared checkpoint.
-    checkpoint=out/'prepared-models.json'
-    previous=json.loads(checkpoint.read_text(encoding='utf-8')) if checkpoint.exists() else {}
-    prepared={};errors=[]
+    prepared=dict(previous) if args.additions_only else {};errors=[]
     for category,folder,selected in builder.variants(mirror):
+        if pending is not None:
+            candidate=selected
+            if candidate is None:
+                for file in sorted(folder.rglob('*.pmx')):
+                    try:builder.validate_humanoid_names(builder.pmx_bone_names(file.read_bytes()),file.name)
+                    except ValueError:continue
+                    candidate=file;break
+            if candidate is None or candidate.relative_to(mirror).as_posix() not in pending:continue
         try:
             key,entry=builder.prepare(mirror,category,folder,out,previous,selected)
             entry['storage_account']=account_id()
@@ -191,7 +210,7 @@ def main():
         except ValueError as exc:errors.append({'folder':folder.relative_to(mirror).as_posix(),'error':str(exc)})
     temporary=checkpoint.with_suffix('.sync-tmp');temporary.write_text(json.dumps(prepared,ensure_ascii=False,indent=2),encoding='utf-8');temporary.replace(checkpoint)
     (out/'jio-source-sync-report.json').write_text(json.dumps({'prepared':len(prepared),'errors':errors},ensure_ascii=False,indent=2),encoding='utf-8')
-    signature_file.write_text(signature)
+    if not args.additions_only:signature_file.write_text(signature)
     print(json.dumps({'prepared':len(prepared),'excluded':len(errors),'mirror':str(mirror)}),flush=True)
 
 

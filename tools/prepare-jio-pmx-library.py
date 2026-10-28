@@ -15,6 +15,7 @@ import zipfile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from model_import import import_package, MAX_BYTES
 from model_rig_validation import pmx_bone_names,validate_humanoid_names
+from model_library_paths import pmx_library_name
 
 CATEGORIES=('genshin impact','honkai impact 3rd','Honkai star rail','snowbreak','zenless zone zero')
 ASSETS={'.pmx','.png','.jpg','.jpeg','.bmp','.tga','.dds','.sph','.spa','.gif','.webp','.txt','.md','.pdf','.json'}
@@ -72,8 +73,10 @@ def prepare(root,category,folder,output,previous,selected_model=None):
     files=[x for x in files if x not in bad]
     if len(files)>5000 or sum(x.stat().st_size for x in files)>MAX_BYTES:raise ValueError('Package exceeds importer limits.')
     fingerprint=hashlib.sha256('\n'.join(str(x.relative_to(folder))+':'+str(x.stat().st_size)+':'+str(x.stat().st_mtime_ns) for x in files).encode()).hexdigest()
+    primary=min(good,key=lambda x:(len(x.relative_to(folder).parts),len(x.name),x.name))
+    title=pmx_library_name(primary.relative_to(root).as_posix(),len(list(primary.parent.glob('*.pmx')))>1)
     old=previous.get(identifier)
-    if old and old.get('source_fingerprint')==fingerprint and (output/(identifier+'.zip')).is_file():return identifier,old
+    if old and old.get('source_fingerprint')==fingerprint and (output/(identifier+'.zip')).is_file():return identifier,{**old,'name':title}
     target=output/(identifier+'.zip');temporary=target.with_suffix('.tmp')
     with zipfile.ZipFile(temporary,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=3) as archive:
         for file in files:archive.write(file,file.relative_to(folder).as_posix())
@@ -84,15 +87,7 @@ def prepare(root,category,folder,output,previous,selected_model=None):
         import_package(stage,[(target.name,temporary.read_bytes())],'pmx')
     temporary.replace(target)
     with target.open('rb') as stream:sha=hashlib.file_digest(stream,'sha256').hexdigest()
-    primary=min(good,key=lambda x:(len(x.relative_to(folder).parts),len(x.name),x.name))
-    title=folder.name if folder.name!='Honkai MMD' else primary.stem
-    if selected_model:
-        parts=[folder.name,*selected_model.parent.relative_to(folder).parts]
-        # Keep wrapper paths so nested outfit folders remain navigable.
-        if len(list(selected_model.parent.glob('*.pmx')))>1:
-            parts.append(selected_model.stem)
-        title=' / '.join(parts)
-    return identifier,{'id':identifier,'name':category+' / '+title,'format':'pmx','bytes':target.stat().st_size,
+    return identifier,{'id':identifier,'name':title,'format':'pmx','bytes':target.stat().st_size,
         'sha256':sha,'version':sha[:12],'preview':False,'mobile_compatible':False,
         'source_folder':relative,'preview_model':'pmx/'+primary.relative_to(root).as_posix(),
         'source_fingerprint':fingerprint,'models':len(good),'excluded_non_avatar_models':len(bad),

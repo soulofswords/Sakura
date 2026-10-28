@@ -8,7 +8,10 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
    {id:'astra',name:'zenless zone zero / Astra',format:'pmx',bytes:1800,preview:true},
    {id:'old-kafka',name:'zenless zone zero / Kafka spicy',format:'pmx',bytes:4000,preview:true},
    {id:'kafka-dress',name:'zenless zone zero / Kafka spicy / Dress / Normal',format:'pmx',bytes:2000,preview:true},
-   {id:'kafka-glasses',name:'zenless zone zero / Kafka spicy / Dress / Glasses',format:'pmx',bytes:2000,preview:true}];
+   {id:'kafka-glasses',name:'zenless zone zero / Kafka spicy / Dress / Glasses',format:'pmx',bytes:2000,preview:true},
+   {id:'haku-office',name:'Miku universe / Haku / Office',format:'pmx',bytes:2000,preview:true},
+   {id:'haku-casual',name:'Miku universe / Haku / Casual',format:'pmx',bytes:2000,preview:true},
+   {id:'gumi',name:'Miku universe / Gumi / Summer',format:'pmx',bytes:2000,preview:true}];
   await page.route('http://local.test/**',async route=>{
    const p=new URL(route.request().url()).pathname;
    if(p==='/')return route.fulfill({contentType:'text/html',body:'<div data-studio-content="models"></div><script type="module" src="/library.js"></script>'});
@@ -38,6 +41,14 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
   assert.equal(await ellen.getAttribute('aria-busy'),'true');assert.equal(await ellen.locator('.cloud-download-spinner').count(),1);
   finishInstall();await ellen.getByRole('button',{name:'Installed',exact:true}).waitFor();
   assert.equal(await ellen.locator('progress').count(),0);assert.equal(await ellen.getAttribute('aria-busy'),null);
+  await page.getByRole('button',{name:'All games',exact:true}).click();
+  await page.getByRole('button',{name:'Open game Miku universe',exact:true}).click();
+  assert.equal(await page.locator('.cloud-character-card').count(),0);
+  assert.equal(await page.locator('.cloud-library-folder').count(),2);
+  await page.getByRole('button',{name:'Open folder Haku',exact:true}).click();
+  assert.equal(await page.locator('.cloud-character-card').count(),2);
+  await page.locator('[data-library-search]').fill('Summer');
+  assert.equal(await page.locator('.cloud-character-card').count(),0);
   await page.getByRole('button',{name:'All games',exact:true}).click();
   await page.locator('[data-library-search]').fill('Amber');
   assert.equal(await page.locator('.cloud-character-card').count(),1);

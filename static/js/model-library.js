@@ -151,7 +151,7 @@ function installCard(host) {
                 if(!currentPath.length&&results.childElementCount)return;
             }
         }
-        for (const model of all.filter(m => (!hierarchical||(query||(within(m)&&modelParts(m).path.length===currentPath.length)))&&String(m.name || '').toLocaleLowerCase().includes(query))) {
+        for (const model of all.filter(m => (!hierarchical||(within(m)&&(query||modelParts(m).path.length===currentPath.length)))&&String(m.name || '').toLocaleLowerCase().includes(query))) {
             const displayName=hierarchical?modelParts(model).name:model.name;
             const row = document.createElement('article');row.className='cloud-character-card';
             const pick=document.createElement('button');pick.type='button';pick.className='cloud-character-pick';

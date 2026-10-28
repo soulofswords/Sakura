@@ -30,6 +30,21 @@ def uploader(tmp_path):
     return value
 
 
+def test_cleaned_staging_copy_reuses_confirmed_remote_asset(tmp_path,monkeypatch):
+    owner=uploader(tmp_path);owner.workers=1
+    entry={'id':'model','bytes':10,'sha256':'a'*64,'preview':False}
+    (tmp_path/'prepared-models.json').write_text(json.dumps({'model':entry}))
+    (tmp_path/'catalogue.json').write_text('{}')
+    receipt={'objectKey':'remote','bytes':10,'sha256':'a'*64,'md5':'b'*32,'verified':True}
+    owner.assets={'model.zip':receipt};owner.remote={'model.zip':[{'objectKey':'remote','sizeInBytes':10,'hash':'b'*32}]}
+    calls=[];owner.upload_file=lambda path,*args:calls.append(path.name)
+    assert owner.run()==0
+    assert calls==['catalogue.json']
+    owner.remote={}
+    monkeypatch.setattr(upload.time,'sleep',lambda value:None)
+    assert owner.run()==2
+
+
 def test_small_upload_uses_confirmed_folder_and_requires_full_download_verification(tmp_path):
     owner = uploader(tmp_path)
     path = tmp_path / 'model.zip'

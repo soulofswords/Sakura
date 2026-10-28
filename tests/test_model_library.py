@@ -106,6 +106,32 @@ class ModelLibraryTests(unittest.TestCase):
             self.client.install('live2d-test')
         self.assertFalse((self.root / 'models').exists())
 
+    def test_same_package_under_another_id_never_downloads_twice(self):
+        installed=self.client.install('live2d-test')
+        catalogue=json.loads((self.store/'catalogue.json').read_text())
+        catalogue['models'][0]['id']='another-account-copy'
+        (self.store/'catalogue.json').write_text(json.dumps(catalogue))
+        self.assertTrue(self.client.catalogue()['models'][0]['installed'])
+        result=self.client.install('another-account-copy')
+        self.assertTrue(result['already_installed'])
+        self.assertEqual(result['models'],installed['models'])
+        # No package exists for that ID: any second download would have failed.
+        self.assertEqual(len(list((self.root/'models/live2d').iterdir())),1)
+
+    def test_manually_imported_model_is_reused_instead_of_another_copy(self):
+        from model_import import import_package
+        local=import_package(self.root/'models',[('local.zip',self.blob)],'live2d')
+        result=self.client.install('live2d-test')
+        self.assertTrue(result['already_installed'])
+        self.assertEqual(result['models'],local['models'])
+        self.assertEqual(len(list((self.root/'models/live2d').iterdir())),1)
+
+    def test_updated_cloud_package_keeps_existing_edited_install_marked_installed(self):
+        self.client.install('live2d-test')
+        self.write_catalogue('a'*64)
+        self.assertTrue(self.client.catalogue()['models'][0]['installed'])
+        self.assertTrue(self.client.install('live2d-test')['already_installed'])
+
     def test_valid_hash_cannot_bypass_archive_path_guard(self):
         self.blob = package(unsafe=True)
         self.write_catalogue()

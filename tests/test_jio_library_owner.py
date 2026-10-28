@@ -58,6 +58,35 @@ def connection(replies=()):
     return owner, transport
 
 
+def test_transient_read_failure_is_retried_but_otp_write_is_not(monkeypatch):
+    monkeypatch.setattr(jio.time,'sleep',lambda seconds:None)
+    owner,transport=connection([Response({},502),{'ok':True}])
+    assert owner.request('GET',jio.SECURITY+'/security/users')=={'ok':True}
+    assert len(transport.calls)==2
+    owner,transport=connection([Response({},502),{'ok':True}])
+    with pytest.raises(jio.ConnectionError,match='502'):
+        owner.request('POST',jio.SECURITY+'/security/otp')
+    assert len(transport.calls)==1
+
+
+def test_expired_owner_login_is_never_retried(monkeypatch):
+    monkeypatch.setattr(jio.time,'sleep',lambda seconds:pytest.fail('expired login retried'))
+    owner,transport=connection([Response({},401)])
+    with pytest.raises(jio.ConnectionError,match='401'):
+        owner.request('GET',jio.SECURITY+'/security/users')
+    assert len(transport.calls)==1
+
+
+def test_resume_read_failure_preserves_previously_confirmed_destination(monkeypatch):
+    owner,transport=connection([profile(),Response({},502),Response({},502),Response({},502)])
+    destination={'folderKey':'folder-123','userId':'owner-123'}
+    owner.store.save({'session':session(twoFAValidated=True),'destination':destination,'folder_name':'PMX'})
+    monkeypatch.setattr(owner,'configure',lambda:None)
+    monkeypatch.setattr(jio.time,'sleep',lambda seconds:None)
+    with pytest.raises(jio.ConnectionError,match='502'):owner.resume()
+    assert owner.store.load()['destination']==destination
+
+
 def session(**kwargs):
     return {'userId': 'owner-123', 'deviceKey': 'device-123', 'rootFolderKey': 'root', 'dcGroupCode': 'JMNG2',
             'authToken': {'accessToken': 'secret-access-token', 'refreshToken': 'secret-refresh-token'}, **kwargs}
@@ -184,13 +213,13 @@ def test_folder_error_preserves_accepted_otp_and_retries_without_another_login()
     owner, transport = connection([{}, session(), profile(), Response({'code': 'TEJRF0400', 'error': 'sensitive provider prose'}, 400),
                                    profile(), {'objects': [folder()]}])
     owner.send_otp('owner@example.com')
-    with pytest.raises(jio.ConnectionError, match='finding the live2d folder.*TEJRF0400') as caught:
+    with pytest.raises(jio.ConnectionError, match='reading the Jio folders.*TEJRF0400') as caught:
         owner.login('123456')
     assert 'sensitive provider prose' not in str(caught.value)
     assert owner.public()['otpAccepted']
     assert owner.public()['canInspect']
     assert not owner.public()['otpRequested']
-    assert owner.public()['lastError'] == {'stage': 'finding the live2d folder', 'status': 400, 'code': 'TEJRF0400'}
+    assert owner.public()['lastError'] == {'stage': 'reading the Jio folders', 'status': 400, 'code': 'TEJRF0400'}
     owner.login('123456')
     assert owner.public()['folderCount'] == 1
     assert sum('/account/otp/login' in url for _, url, _ in transport.calls) == 1
