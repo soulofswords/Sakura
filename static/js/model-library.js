@@ -13,7 +13,8 @@ if (!document.getElementById('cloud-character-grid-style')) {
     .cloud-character-card>button{width:100%}
     .cloud-character-grid>p{grid-column:1/-1}`;
     style.textContent+=`.cloud-library-breadcrumb{display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap}
-    .cloud-library-folder{min-height:110px;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+    .cloud-library-folder{min-height:110px;min-width:0;max-width:100%;box-sizing:border-box;white-space:normal!important;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px!important}
+    .cloud-library-folder>span{min-width:0;max-width:100%;white-space:normal!important;overflow-wrap:anywhere;word-break:normal;text-align:center;line-height:1.4}
     .cloud-download-progress{display:block;width:100%;height:7px;margin:8px 0;accent-color:var(--accent,#47acdf)}
     .cloud-download-spinner{display:inline-block;width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:middle;margin-right:6px;animation:sakura-download-spin .8s linear infinite}
     @keyframes sakura-download-spin{to{transform:rotate(360deg)}}
@@ -145,7 +146,7 @@ function installCard(host) {
                 for(const game of folders){
                     const folder=document.createElement('button');folder.type='button';folder.className='cloud-library-folder';
                     const icon=document.createElement('span');icon.textContent='📁';icon.style.fontSize='30px';icon.setAttribute('aria-hidden','true');
-                    const title=document.createElement('span');title.textContent=game;
+                    const title=document.createElement('span');title.textContent=game;folder.title=game;
                     folder.append(icon,title);folder.setAttribute('aria-label',(currentPath.length?'Open folder ':'Open game ')+game);folder.onclick=()=>{selectedGame=[...currentPath,game].join(' / ');render();};results.append(folder);
                 }
                 if(!currentPath.length&&results.childElementCount)return;
