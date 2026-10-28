@@ -10,10 +10,12 @@ Keep them in separate folders.
 
 ## What 1.0.1 fixes
 
-- **Character previews are no longer blank.** In 1.0.0 the installer left a preview page out of its own
-  payload, so the local character library showed an empty box instead of a rotating preview when you
-  hovered a PMX or VRM model. The page now ships, and the build fails if any page a shipped script loads
-  is missing from the payload, so this cannot quietly come back.
+- **Character thumbnails now render.** In 1.0.0 the installer left a preview page out of its own payload.
+  The local character library renders every PMX and VRM thumbnail through that page, so with it missing the
+  library silently kept showing each character's name as plain text, and hovering did nothing even though
+  the panel promised "Hover a 3D preview to rotate it". Live2D thumbnails were unaffected because they come
+  from the server. The page now ships, and the build fails if any page a shipped script loads is missing
+  from the payload, so this cannot quietly come back.
 - **Telegram reconfiguration no longer drops messages.** Saving a new bot token or new chat IDs while the
   previous poller was still shutting down could start a second loop, and the retiring loop had already
   acknowledged messages neither one answered. Reconfiguration now waits for the old loop to stop and, if
