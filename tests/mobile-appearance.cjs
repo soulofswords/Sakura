@@ -12,9 +12,10 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
   if(path==='/mobile-appearance.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync('android/assets/mobile-appearance.js','utf8').replaceAll('https://appassets.androidplatform.net','http://mobile.test')});
   return route.fulfill({path:'android/assets'+path});
  });
+ const navigation=page.waitForEvent('framenavigated',{predicate:frame=>frame.url().startsWith('https://models.sakura.invalid')});
  await page.evaluate(()=>{document.getElementById('local-avatar').src='https://models.sakura.invalid/local-viewer.html';});
  await page.frameLocator('#local-avatar').locator('html').waitFor({state:'attached'});
- const renderer=page.frames().find(frame=>frame.url().startsWith('https://models.sakura.invalid'));
+ const renderer=await navigation;
  await renderer.waitForFunction(()=>document.documentElement.dataset.uiTheme==='dark');
  await page.locator('#mobile-appearance-home select').selectOption('light');await renderer.waitForFunction(()=>document.documentElement.dataset.uiTheme==='light');
  await page.reload();assert.equal(await page.locator('#mobile-appearance-home select').inputValue(),'light');
