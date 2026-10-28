@@ -31,8 +31,11 @@ Keep them in separate folders.
   again if the previous listener has not finished closing.
 - **The Agent review panel stops interrupting you.** While an approval was pending, the 15-second refresh
   could re-draw the panel, wiping your tick in the "remember this" box and scrolling back to the top
-  mid-read; an expired step left a dead Approve button on screen. The panel now only re-draws when the
-  action actually changes, and an expired approval reports why instead of going quiet.
+  mid-read; approving an expired step also left a dead Approve button on screen. The panel now re-draws only
+  when the action actually changes, and an expired approval clears the card instead of leaving a button that
+  can never work. **One part of that is not in these installers:** the card clears, but the status line still
+  reads "Ready. Review the current step before approving." instead of telling you the approval expired. The
+  fix is committed and lands in the next build.
 
 ## What did not change
 
@@ -47,9 +50,10 @@ Every fix above has an automated test, including two regression tests written ag
 confirmed to fail before the change. The full Python suite, the installer clean-install checks, payload
 integrity inspection and the release browser gate all run as part of producing these installers.
 
-Two honest limits: the Agent review-panel changes are frontend behaviour that the automated suite does not
-cover, so they were checked in the running app rather than by a browser test; and the Windows executables
-are still unsigned, with the same SmartScreen prompt as before.
+Two honest limits: the Agent review-panel behaviour is covered by no automated test in the suite, so it was
+driven in a real browser against the panel file these installers actually ship — a pending approval keeps
+your tick through a refresh, a genuinely new action still re-draws, and an expired approval clears its card.
+And the Windows executables are still unsigned, with the same SmartScreen prompt as before.
 
 ## Privacy and known limits
 
