@@ -146,6 +146,13 @@ def build_edition(edition,output,work):
 def main():
     # unittest subprocesses need the same test-helper path that pytest supplies.
     os.environ['PYTHONPATH']=os.pathsep.join([str(BASE),str(BASE/'tests'),os.environ.get('PYTHONPATH','')])
+    # The desktop runtime bundles the release-gate Playwright dependency rather
+    # than vendoring node_modules in the product tree.  Preserve any caller
+    # path and make every Node subprocess (including the stage-item gate) use
+    # the same deterministic module resolution.
+    bundled_node_modules=Path.home()/'.cache'/'codex-runtimes'/'codex-primary-runtime'/'dependencies'/'node'/'node_modules'
+    if bundled_node_modules.is_dir():
+        os.environ['NODE_PATH']=os.pathsep.join([str(bundled_node_modules),os.environ.get('NODE_PATH','')])
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,default=Path('C:/AI/Installer ready'));parser.add_argument('--edition',choices=['both','vtuber','companion'],default='both')
     args=parser.parse_args();reports=args.output/'split-build-reports';reports.mkdir(parents=True,exist_ok=True)
     root=BASE/'tools/edition-work';root.mkdir(exist_ok=True)
