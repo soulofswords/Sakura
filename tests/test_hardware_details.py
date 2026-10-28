@@ -9,6 +9,8 @@ def test_hardware_questions_are_routed_without_guessing():
         assert details.question(text)==kind
     assert details.question('kill high usage processes') is None
     assert details.question('I like graphics cards') is None
+    assert details.question('tell me watts of each component')=='all'
+    assert details.question('cpu and gpu temperature')=='all'
 
 
 def test_permissions_and_teacher_required_before_sampling():

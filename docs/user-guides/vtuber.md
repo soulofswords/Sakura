@@ -161,8 +161,8 @@ Note: If the RVC service/model fails, test a built-in voice first. This feature 
 Download characters with your Sakura account, independently of the library owner's storage accounts.
 1. Open Models and choose Cloud import PMX, Cloud import VRM or Cloud import Live2D.
 2. Sign in or create a Sakura account, complete email verification when requested, then refresh the library. Use Forgot password if needed.
-3. Browse the category folders or search by character name. Select a character card to inspect the preview and download it.
-4. Wait for completion and load the character from its matching local PMX, VRM or Live2D selector.
+3. Follow category → character → outfit folders to the model preview. All original folder levels are retained. Search inside a folder covers its descendants; search at All games covers the library. Select the character card to download it.
+4. Wait for completion and load the character from its matching local PMX, VRM or Live2D selector. Installed cloud models show Installed; repeated downloads and identical cloud packages are reused without creating another copy.
 Check: The character loads locally with its textures and works with normal tracking.
 Note: Users do not need Jio accounts, owner OTPs or publishing credentials. Cloud library availability depends on published packages, internet access and the account service.
 

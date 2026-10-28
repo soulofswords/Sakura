@@ -40,6 +40,12 @@ def test_cleaned_staging_copy_reuses_confirmed_remote_asset(tmp_path,monkeypatch
     calls=[];owner.upload_file=lambda path,*args:calls.append(path.name)
     assert owner.run()==0
     assert calls==['catalogue.json']
+    # Immutable remote names use the logical receipt even if a local copy exists.
+    (tmp_path/'model.zip').write_bytes(b'local staging bytes are not needed with a validated expected SHA')
+    receipt['remoteName']='model-version.zip';owner.remote={'model-version.zip':owner.remote['model.zip']}
+    assert owner.run()==0
+    assert calls==['catalogue.json','catalogue.json']
+    (tmp_path/'model.zip').unlink()
     owner.remote={}
     monkeypatch.setattr(upload.time,'sleep',lambda value:None)
     assert owner.run()==2

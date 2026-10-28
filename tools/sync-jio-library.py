@@ -65,7 +65,10 @@ def main():
             except requests.RequestException:pass
             time.sleep(.2)
         if not ready:raise ValueError('Owner preview server did not start.')
-        run(['node','tools/render-pmx-library-previews.cjs',str(directory),'--stream-publish'],env=environment)
+        # Render the complete pending set first. Uploading the full catalogue
+        # after every six frames repeatedly scans large, already-verified trees
+        # and stalls preview generation on a slow uplink.
+        run(['node','tools/render-pmx-library-previews.cjs',str(directory)],env=environment)
     finally:
         server.terminate();server.wait(timeout=10)
     run([python,'tools/upload-library-jio.py','--directory',str(directory),'--remote-folder','PMX/Sakura library packages','--workers','3'])

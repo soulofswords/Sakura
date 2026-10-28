@@ -170,9 +170,10 @@ Note: Calendar notifications depend on the connected calendar account, event rem
 Use your Sakura account; Jio storage credentials belong only to the library owner.
 1. Open Models, then Cloud import PMX, Cloud import VRM or Cloud import Live2D. Sign-in appears only when you use cloud import.
 2. Create a Sakura account or sign in with your email and password. Follow email verification if requested. Password reset uses the email link sent to your account.
-3. Open a category, search for a character, and select its card. PMX/VRM previews rotate; Live2D uses a portrait or folder-name fallback.
+3. Open a category and follow its folders to the model, for example Miku universe → Haku → outfit → model preview. Search inside a folder covers its descendants; search from All games covers the library. PMX/VRM previews rotate; Live2D uses a portrait or folder-name fallback.
 4. Click Download and wait for completion. Load the character from its separate PMX, VRM or Live2D selector afterward.
 Check: The downloaded character appears in the corresponding local selector and loads with its textures.
+An existing cloud installation is marked Installed and cannot be downloaded again. Identical packages under another catalogue ID are reused. A matching manually imported package is reused after its first cloud integrity check; different outfits remain separate.
 Note: You never need the owner's Jio login, OTP, passphrase or publishing scripts. Unpublished owner uploads do not automatically appear until library sync validates and publishes them.
 
 ## 15. Version, graphics and 3D scenery
@@ -214,3 +215,12 @@ Shared avatar tools work in Companion and optional VTuber mode.
 6. Settings > Theme contains computer-access permission and Run Sakura when Windows starts. Startup applies at your next Windows sign-in.
 Check: Selected material edits remain independent and the receiving video app displays Sakura. Turning capture/microphone off stops its respective input.
 Note: Transparent stage/window output is separate from model-part transparency. Video output does not carry voice audio automatically.
+
+## 18. Teacher hardware readings and computer access
+Ask for actual measurements rather than inferred PC specifications.
+1. Choose Teacher in Voice & speech, or say switch to Teacher mode. The hand-over-heart chest-tap gesture is reserved for Friend mode.
+2. In Settings → Theme, turn Computer access On. Restricted permits hardware readings and existing supported PC tools. Choose Full to also inspect the highest CPU/RAM user processes. File/action approval rules still apply.
+3. Ask can you tell me the GPU temperature and watts, how much RAM is being used, or CPU temperature and watts. Readings are sampled from this PC; Sakura does not guess missing values.
+4. With Full access, ask which processes are consuming the most resources. The reply lists top CPU and RAM use with process names and PIDs; critical Windows/system processes are excluded. No process is stopped by this inspection.
+Check: GPU temperature/power appears if the driver supports it; RAM reports used/total memory. Full/Restricted saves automatically and is disabled when Computer access is Off.
+Note: CPU temperatures and package power require a supported sensor source, such as LibreHardwareMonitor/OpenHardwareMonitor exposing WMI. RAM module power/temperature is often unavailable. Sakura reports unavailable rather than inventing values. Phone control also needs its separate PC-system-access permission.

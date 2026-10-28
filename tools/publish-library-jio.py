@@ -8,6 +8,8 @@ import sys
 import threading
 import time
 import requests
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from model_library_paths import pmx_library_name
 from jio_library_owner import account_id, EncryptedState,JioConnection
 
 URL='https://gclwwyznseuuixnbwpyz.supabase.co/functions/v1/sakura-library-jio-owner'
@@ -25,6 +27,14 @@ def main():
     parser.add_argument('--configure',action='store_true')
     args=parser.parse_args()
     sys.stdout.reconfigure(encoding='utf-8')
+    if sys.platform=='win32':
+        import msvcrt
+        publication_lock=(args.directory/'jio-publication.lock').open('a+b')
+        publication_lock.seek(0);publication_lock.write(b'1');publication_lock.flush();publication_lock.seek(0)
+        try:msvcrt.locking(publication_lock.fileno(),msvcrt.LK_NBLCK,1)
+        except OSError:
+            print('An owner publication pass is already running; duplicate pass skipped.',flush=True)
+            return 0
     if args.configure:
         owner=JioConnection();owner.resume()
     saved=EncryptedState().load()
@@ -37,6 +47,9 @@ def main():
         if response.status_code!=200:raise ValueError('Private Jio server configuration failed (HTTP '+str(response.status_code)+').')
         print('Private Jio connection configured on the authenticated library server.',flush=True)
     prepared=json.loads((args.directory/'prepared-models.json').read_text(encoding='utf-8'))
+    for entry in prepared.values():
+        source=entry.get('variant_model') or str(entry.get('preview_model','')).removeprefix('pmx/')
+        if entry.get('format')=='pmx' and source:entry['name']=pmx_library_name(source)
     uploaded=json.loads((args.directory/'jio-uploaded-assets.json').read_text(encoding='utf-8'))
     if uploaded['userId']!=saved['session']['userId']:raise ValueError('Upload ledger account mismatch.')
     ledger=args.directory/'jio-published-models.json'

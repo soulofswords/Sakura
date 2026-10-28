@@ -13,6 +13,9 @@ def question(text):
     text=text.lower().strip().rstrip('?.!')
     if re.search(r'\b(?:close|kill|stop|terminate|end task|delete)\b',text):return None
     if re.search(r'\b(?:process(?:es)?|apps?|programs?)\b',text) and re.search(r'\b(?:usage|consuming|consumption|using|resources|high|most|top)\b',text):return 'processes'
+    if re.search(r'\b(?:pc|computer|system|components?|hardware)\b',text) and re.search(r'\b(?:temp(?:erature)?|watts?|wattage|power|usage)\b',text):return 'all'
+    components={ {'processor':'cpu','graphics card':'gpu','memory':'ram','vram':'gpu'}.get(value,value) for value in re.findall(r'\b(cpu|processor|gpu|graphics card|ram|memory|vram)\b',text)}
+    if len(components)>1 and re.search(r'\b(?:temp(?:erature)?|watts?|wattage|power|usage|used|using)\b',text):return 'all'
     component=re.search(r'\b(cpu|processor|gpu|graphics card|ram|memory|vram)\b',text)
     if component and re.search(r'\b(?:temp(?:erature)?|watts?|wattage|power|usage|using|used|consum\w*)\b',text):
         return {'processor':'cpu','graphics card':'gpu','memory':'ram','vram':'gpu'}.get(component[0],component[0])
@@ -62,6 +65,10 @@ def answer(text,cfg):
         from conversation_modes import teacher_prompt
         return {'reply':teacher_prompt(),'mode_required':'teacher','mode_guide':'teacher'}
     if not cfg.get('computer_control_enabled'):return {'reply':'Enable Computer access in Settings → Theme first. Choose Restricted for hardware readings or Full for process usage.'}
+    if kind=='all':
+        readings=[answer(prompt,cfg) for prompt in ('cpu temperature and watts','gpu temperature and watts','how much ram is being used')]
+        return {'reply':' '.join(reading['reply'] for reading in readings)+' Motherboard, disk and PSU temperature/power readings are not exposed by this integration. GPU board power is not the whole PC power draw.',
+                'hardware':{key:reading['hardware'] for key,reading in zip(('cpu','gpu','ram'),readings)}}
     if kind=='processes':
         if cfg.get('computer_access_level','restricted')!='full':return {'reply':'Process inspection needs Full access. Open Settings → Theme → Computer access and select Full. No process was inspected.'}
         data=process_usage()

@@ -6,9 +6,9 @@ def pmx_library_name(source, multiple=False):
     path = PurePosixPath(source)
     if path.is_absolute() or any(part in ('.', '..') or '\\' in part for part in path.parts):
         raise ValueError('Unsafe PMX source path.')
-    parts = list(path.parent.parts)
-    if len(parts) < 2 or multiple:
-        parts.append(path.stem)
+    # A model file is the leaf card. Its containing directory is still a
+    # directory even when it contains just one file with the same name.
+    parts = [*path.parent.parts,path.stem]
     return ' / '.join(parts)
 
 

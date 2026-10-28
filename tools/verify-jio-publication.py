@@ -28,7 +28,7 @@ def verify(root=None):
             if not path.is_file():continue
             prepared=json.loads(path.read_text(encoding='utf-8'));counts[kind+'_looks']=counts.get(kind+'_looks',0)+len(prepared)
             for key,value in prepared.items():
-                if key not in found or found[key]['sha256']!=value['sha256'] or bool(found[key]['preview'])!=bool(value.get('preview')):raise ValueError('Published catalogue does not match the validated '+kind+' packages.')
+                if key not in found or found[key]['sha256']!=value['sha256'] or found[key]['name']!=value['name'] or bool(found[key]['preview'])!=bool(value.get('preview')):raise ValueError('Published catalogue does not match the validated '+kind+' packages or folder names.')
             if not prepared:continue
             sample=min(prepared.values(),key=lambda x:x['bytes'])
             result=library.install(sample['id'])

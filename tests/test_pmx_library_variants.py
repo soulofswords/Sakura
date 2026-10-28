@@ -58,7 +58,7 @@ def test_large_package_split_keeps_every_original_folder_in_title(tmp_path,monke
     folder.mkdir(parents=True);(folder/'Haku.pmx').write_bytes(b'avatar')
     out=tmp_path/'out';out.mkdir()
     _,entry=builder.prepare(root,'Miku universe',folder,out,{})
-    assert entry['name']=='Miku universe / Haku / Office'
+    assert entry['name']=='Miku universe / Haku / Office / Haku'
 
 
 def test_single_model_nested_wrappers_and_cached_packages_keep_paths(tmp_path,monkeypatch):
@@ -69,7 +69,7 @@ def test_single_model_nested_wrappers_and_cached_packages_keep_paths(tmp_path,mo
     model.parent.mkdir(parents=True);model.write_bytes(b'avatar')
     out=tmp_path/'out';out.mkdir()
     key,entry=builder.prepare(root,'anime',folder,out,{})
-    assert entry['name']=='anime / Series / Character / Outfit'
+    assert entry['name']=='anime / Series / Character / Outfit / hero'
     _,cached=builder.prepare(root,'anime',folder,out,{key:{**entry,'name':'anime / Outfit'}})
     assert cached['name']==entry['name']
 

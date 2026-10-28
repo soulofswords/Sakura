@@ -280,15 +280,16 @@ class JioUploader:
             # Changed source files get immutable object names. Keep the logical
             # ID stable without overwriting packages older installs may use.
             old=self.assets.get(path.name,{})
+            remote_name=old.get('remoteName') or path.name
+            remote=self.remote.get(remote_name,[])
+            known_sha=expected_sha or (digest_file(path) if path.is_file() else old.get('sha256'))
+            if old.get('verified') and old.get('sha256')==known_sha and any(
+                item.get('objectKey')==old.get('objectKey') and int(item.get('sizeInBytes',item.get('size',0)))==old.get('bytes')
+                and (not item.get('hash') or item['hash'].lower()==old.get('md5','').lower()) for item in remote):return old
             if not path.is_file():
                 # Cloud-verified staging copies may have been deliberately cleaned
                 # up. Reuse only this account's checked object, with matching size
                 # and content receipt; never fabricate a fresh upload/checksum.
-                remote_name=old.get('remoteName') or path.name
-                remote=self.remote.get(remote_name,[])
-                if old.get('verified') and (expected_sha is None or old.get('sha256')==expected_sha) and any(
-                    item.get('objectKey')==old.get('objectKey') and int(item.get('sizeInBytes',item.get('size',0)))==old.get('bytes')
-                    and (not item.get('hash') or item['hash'].lower()==old.get('md5','').lower()) for item in remote):return old
                 raise UploadError('A staging asset is missing and its cloud receipt could not be confirmed. Restore/reprepare this package before retrying.')
             sha=expected_sha or digest_file(path)
             remote_name=old.get('remoteName') if old.get('sha256')==sha else None
