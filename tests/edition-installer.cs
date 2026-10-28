@@ -22,7 +22,11 @@ static class EditionInstallerCheck {
   foreach(string asset in Directory.GetFiles(Path.Combine(appRoot,"static"),"*",SearchOption.AllDirectories))
    Require(!Regex.IsMatch(Path.GetFileName(asset),@"(?i)(\.(bak|backup|orig|rej|tmp|swp|swo|map)|~)$|\.before-"),"Backup/debug asset leaked: "+asset);
   Require(File.ReadAllText(Path.Combine(appRoot,"static","js","model-viewer.js")).Contains("_hitModelPixelAt"),"GPU cursor lag fix missing");
-  Require(File.ReadAllText(Path.Combine(appRoot,"static","index.html")).Contains("cursor-gpu6"),"Stale renderer cache version");
+  // Renderer cache-busting belongs to the module import in app.js, not the
+  // HTML shell.  Keep the installer smoke test aligned with the browser's
+  // actual load path so it catches a stale packaged module without rejecting
+  // a valid release.
+  Require(File.ReadAllText(Path.Combine(appRoot,"static","js","app.js")).Contains("cursor-gpu6"),"Stale renderer cache version");
   Require(File.Exists(Path.Combine(args[1],display+".exe")),"Branded launcher missing");
   Require(File.Exists(Path.Combine(args[1],"Sakura","tools","pmx-editor","PmxEditor.exe")),"PMX Editor integration missing");
   Require(Directory.Exists(Path.Combine(args[1],"Sakura","tools","pmx-editor","Lib")),"PMX Editor libraries missing");
