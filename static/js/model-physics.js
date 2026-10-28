@@ -395,6 +395,7 @@ export default class ModelPhysics {
         let rootCounter = 0;
         for (const root of chainRoots) rootPhase.set(root, (rootCounter++) * 1.37);
 
+        const attachedRibbonRig=!!model.getObjectByName('Breast_L_C1') && !!model.getObjectByName('Bip001 L Finger0');
         let nodes = [];
         for (const index of indices) {
             const bone = bones[index];
@@ -412,6 +413,8 @@ export default class ModelPhysics {
             // progressively rather than pulling every middle segment back
             // with the same root stiffness. Cap the taper for very long rigs.
             const hairFlex = category === 'hair' ? 1 / (1 + Math.min(chainDepth, 6) * .30) : 1;
+            const attachedRibbon=attachedRibbonRig && /^Bone_Ribbon_/i.test(bone.name);
+
             nodes.push({
                 index,
                 bone,
@@ -423,7 +426,13 @@ export default class ModelPhysics {
                 chainDepth,
                 phase: rootPhase.get(this._chainRootOf(index, indices, parentOf)) || 0,
                 category,
-                params: category === 'hair'
+                attachedRibbon,
+                carrierMatrix:attachedRibbon?new THREE.Matrix4():null,
+                carrierInverse:attachedRibbon?new THREE.Matrix4():null,
+                carrierReady:false,
+                params: attachedRibbon
+                    ? {stiffness:.72,gravity:4,drag:.78,maxAngle:8/(1+chainDepth*.35)}
+                    : category === 'hair'
                     ? {...BASE_PARAMS.hair, stiffness: BASE_PARAMS.hair.stiffness * hairFlex}
                     : BASE_PARAMS[category] || BASE_PARAMS.other,
             });
@@ -516,6 +525,7 @@ export default class ModelPhysics {
     /** Snap every particle onto its kinematic target (attach, mode changes). */
     reset() {
         if (!this.model || !this.nodes.length) return;
+        for(const node of this.nodes)node.carrierReady=false;
         this.model.updateMatrixWorld(true);
         for (const node of this.nodes) {
             const parentWorld = this._parentWorld(node.bone.parent);
@@ -708,8 +718,33 @@ export default class ModelPhysics {
         }
         for (const node of this.nodes) {
             const parentWorld = this._parentWorld(node.bone.parent);
+            if(node.attachedRibbon){
+                // Wrist cloth is anchored to a tracked limb, not world space.
+                // Carry both Verlet samples with the parent transform so fast
+                // arm drops cannot convert the entire reach into cloth speed.
+                if(node.carrierReady){
+                    node.carrierInverse.copy(node.carrierMatrix).invert();
+                    node.pos.applyMatrix4(node.carrierInverse).applyMatrix4(parentWorld);
+                    node.prev.applyMatrix4(node.carrierInverse).applyMatrix4(parentWorld);
+                }
+                node.carrierMatrix.copy(parentWorld);node.carrierReady=true;
+            }
             const restLocal = node.springRestLocal || node.restLocal;
-            const restQuat = node.springRestQuat || node.restQuat;
+            let restQuat = node.springRestQuat || node.restQuat;
+            if(node.attachedRibbon){
+                // The drape hangs in world gravity even when a tracked wrist
+                // turns above the head; copying arm rotation aims it at the face.
+                _restMatrix.compose(restLocal,node.restQuat,node.bone.scale).premultiply(parentWorld);
+                _p.copy(restLocal).applyMatrix4(parentWorld);
+                _target.copy(node.tailLocal).applyMatrix4(_restMatrix);
+                const authoredDirection=_target.clone().sub(_p).normalize();
+                const hangingDirection=new THREE.Vector3(0,-1,0);
+                const align=new THREE.Quaternion().setFromUnitVectors(authoredDirection,hangingDirection);
+                const parentRotation=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().extractRotation(parentWorld));
+                node.hangingQuat ||= new THREE.Quaternion();
+                node.hangingQuat.copy(parentRotation).invert().multiply(align).multiply(parentRotation).multiply(node.restQuat);
+                restQuat=node.hangingQuat;
+            }
             if(node.diagnosticStatic || this.disabledBones?.has(node.bone)){
                 node.bone.position.copy(node.restLocal);node.bone.quaternion.copy(node.restQuat);node.bone.updateMatrix();
                 _target.copy(node.tailLocal).applyMatrix4(node.bone.matrix).applyMatrix4(parentWorld);

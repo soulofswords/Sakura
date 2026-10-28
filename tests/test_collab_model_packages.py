@@ -4,7 +4,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from local_client import TestClient
 import app as server
 
 

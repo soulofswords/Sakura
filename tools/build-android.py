@@ -27,33 +27,12 @@ try:
     ENV={**os.environ,'JAVA_HOME':str(java.parent),'PATH':str(java)+os.pathsep+os.environ['PATH']}
     wake_jars,wake_native=runpy.run_path(str(BASE/'tools/android-wake-deps.py'))['prepare'](CACHE)
     application=BASE/'android';source_root=application
-    if args.edition=='vtuber':
-        source_root=BUILD/'edition';shutil.copytree(application,source_root,dirs_exist_ok=True)
-        manifest=source_root/'AndroidManifest.xml';manifest.write_text(manifest.read_text(encoding='utf-8').replace('app.sakura.mobile','app.sakura.vtubermobile').replace('Sakura Mobile','Sakura VTuber Mobile'),encoding='utf-8')
-        content=manifest.read_text(encoding='utf-8')
-        content=re.sub(r'\s*<uses-permission android:name="(?:android.permission.(?:CALL_PHONE|READ_CONTACTS|READ_PHONE_STATE|RECORD_AUDIO|ACCESS_COARSE_LOCATION|ACCESS_FINE_LOCATION)|com.android.alarm.permission.SET_ALARM)"/>','',content)
-        manifest.write_text(content,encoding='utf-8')
-        rules=source_root/'proguard-rules.pro';rules.write_text(rules.read_text(encoding='utf-8').replace('app.sakura.mobile','app.sakura.vtubermobile'),encoding='utf-8')
-        for java_source in (source_root/'src').rglob('*.java'):
-            content=java_source.read_text(encoding='utf-8').replace('package app.sakura.mobile;','package app.sakura.vtubermobile;').replace('/(state|command|frame|camera|chat|gemini)','/(state|command|frame)').replace('localAvailable=true','localAvailable=false')
-            java_source.write_text(content,encoding='utf-8')
-        html=source_root/'assets/index.html';content=html.read_text(encoding='utf-8').replace('Sakura Mobile','Sakura VTuber Mobile').replace('expression controls and companion chat','expression controls')
-        content=re.sub(r'<button data-tab="companion">.*?</button>','',content)
-        content=re.sub(r'<section id="companion">[\s\S]*?</section>','',content)
-        content=re.sub(r'<section id="phone-camera-section">[\s\S]*?</section>','',content)
-        content=re.sub(r'<!-- LOCAL-START -->[\s\S]*?<!-- LOCAL-END -->','',content)
-        content=content.replace('Your character, on PC or on your phone.','One character. PC rendering. Phone controls.')
-        html.write_text(content,encoding='utf-8')
-        script=source_root/'assets/mobile.js';content=script.read_text(encoding='utf-8').replace("['companion','expression','vtuber']","['expression','vtuber']")
-        content=re.sub(r"^\$\('(?:gemini|send)'\)\.onclick=.*$",'',content,flags=re.M)
-        content=content.replace("if(data.edition==='vtuber')document.querySelector('[data-tab=\"expression\"]').click();","document.querySelector('[data-tab=\"expression\"]').click();")
-        script.write_text(content,encoding='utf-8')
     res=BUILD/'res/drawable';res.mkdir(parents=True,exist_ok=True)
     (res/'icon.png').unlink(missing_ok=True) # obsolete generated drawable, never used by the new manifest
     Image.open(BASE/'static/assets/desktop-companion.png').convert('RGBA').resize((192,192)).save(res/'sakura_flower.png')
     run([tools/'aapt2.exe','compile','--dir',BUILD/'res','-o',BUILD/'resources.zip'])
     unsigned=BUILD/'unsigned.apk'
-    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','35','--version-name','0.3.29','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
+    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','37','--version-name','0.3.31','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
     classes=BUILD/'classes';classes.mkdir(exist_ok=True)
     run([java/'javac.exe','-encoding','UTF-8','-source','8','-target','8','-classpath',os.pathsep.join(map(str,[platform,*wake_jars])),'-d',classes,*sorted((source_root/'src').rglob('*.java'))])
     classes_jar=BUILD/'classes.jar'
@@ -63,7 +42,7 @@ try:
     run([java/'java.exe','-cp',tools/'lib/d8.jar','com.android.tools.r8.R8','--release','--pg-conf',source_root/'proguard-rules.pro','--lib',platform,'--min-api','28','--output',dex,classes_jar,*wake_jars])
     assets={}
     for path in (source_root/'assets').rglob('*'):
-        if path.is_file() and path.suffix.lower() not in ('.bak','.map','.tmp','.orig') and not (args.edition=='vtuber' and path.name in ('phone-local.js','phone-avatar.js','phone-stage.js','phone-stage.css','local-viewer.html','local-setup.js','provider-tools.js')):assets[path]='assets/'+path.relative_to(source_root/'assets').as_posix()
+        if path.is_file() and path.suffix.lower() not in ('.bak','.map','.tmp','.orig'):assets[path]='assets/'+path.relative_to(source_root/'assets').as_posix()
     if args.edition=='combined':
         for path in (BASE/'static/js').rglob('*.js'):assets[path]='assets/static/js/'+path.relative_to(BASE/'static/js').as_posix()
         for path in (BASE/'static/vendor').rglob('*'):

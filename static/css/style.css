@@ -1236,8 +1236,14 @@ body.desktop-companion:not(.transparent-mode):not(.tracking-only):not(.agent-mod
 #compact-companion-mic svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 #compact-companion-mic[aria-pressed="true"]{background:var(--ui-accent,#147caf);color:#fff}
 #compact-companion-mic[aria-pressed="true"] .compact-mic-slash{display:none}
+#compact-companion-transparency{display:none;position:fixed;right:74px;bottom:18px;width:48px;height:48px;padding:12px;border-radius:50%;border:1px solid var(--ui-line,#414b59);background:var(--ui-card,#20242b);color:var(--ui-ink,#edf1f7);z-index:1400;cursor:pointer;box-shadow:0 3px 14px #0004;-webkit-app-region:no-drag}
+body.desktop-companion:not(.transparent-mode):not(.tracking-only):not(.agent-mode):not(.native-library) #compact-companion-transparency{display:grid;place-items:center}
+#compact-companion-transparency svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* Compact character-only mode must win over the themed titlebar rules. */
 body.desktop-companion.native-character-only.overlay-ui-hidden :is(#top-bar,#companion-studio,#chat-bubble-btn,#restore-companion-controls,#compact-companion-mic){display:none!important;pointer-events:none!important}
 
 body.desktop-companion:not(.transparent-mode) #listening-status{left:12px;right:80px;width:auto;max-width:calc(100vw - 92px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;box-sizing:border-box}
+
+/* These controls are hidden by feature/ready state; splash transitions keep their own opacity rules. */
+:is(#glitch-restore-btn,#pmx-editor-btn,#pmx-texture-compare,#kokoro-loading-close,#rvc-loading-close).hidden{display:none!important}

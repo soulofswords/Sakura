@@ -52,6 +52,29 @@ class ToolTests(unittest.TestCase):
  def test_no_match_on_ordinary_conversation(self):
   self.assertIsNone(handle_command('I finished work then went home',True))
   self.assertIn('five',run_command('show capabilities'))
+ def test_background_sequence_reports_each_step_without_blocking(self):
+  from assistant_commands import background_sequence
+  from assistant_tools import run_state
+  with patch('assistant_tools.execute',return_value={'ok':True,'reply':'Volume is 30 percent.'}):
+   started=background_sequence('pc status then set volume to 30%',True)
+   self.assertTrue(started and started['id'])
+   self.assertEqual(started['steps'],2)
+   state=run_state(started['id'])
+   for _ in range(200):
+    if state['status']!='running':break
+    time.sleep(0.01)
+    state=run_state(started['id'])
+   self.assertEqual(state['status'],'completed')
+   self.assertEqual([step['reply'] for step in state['steps']],['Volume is 30 percent.','Volume is 30 percent.'])
+ def test_background_sequence_ignores_ordinary_conversation(self):
+  from assistant_commands import background_sequence
+  self.assertIsNone(background_sequence('I finished work then went home',True))
+ def test_background_sequence_keeps_preflight_refusals(self):
+  from assistant_commands import background_sequence
+  with patch('assistant_commands.open_installed_app') as launch,patch('assistant_tools.execute') as execute:
+   self.assertIn('No actions',background_sequence('open calculator then erase everything',True)['error'])
+   self.assertIn('No actions',background_sequence('open calculator then set volume to 30%',False)['error'])
+   launch.assert_not_called();execute.assert_not_called()
 
 class ToolEndpoints(unittest.IsolatedAsyncioTestCase):
  async def test_phone_permissions_and_allowlist(self):

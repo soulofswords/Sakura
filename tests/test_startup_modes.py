@@ -2,7 +2,7 @@ import os
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
-from fastapi.testclient import TestClient
+from local_client import TestClient
 import app
 
 

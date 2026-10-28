@@ -13,6 +13,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import local_model_setup as setup
 
 class SetupTests(unittest.TestCase):
+    def test_native_model_is_detected_without_starting_or_downloading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);local=root/'desktop-profile/agent-local-ai';local.mkdir(parents=True)
+            (root/'settings.json').write_text(json.dumps({'ollama_model':'sakura-native:existing'}))
+            weights=root/'model.gguf';weights.write_bytes(b'GGUFweights')
+            entry={'path':str(weights),'projector':False,'engine':'llama.cpp'}
+            (local/'models.json').write_text(json.dumps({'existing':entry}))
+            binary=local/'runtime-cuda/llama-server.exe';binary.parent.mkdir();binary.write_bytes(b'runtime')
+            with patch.object(setup.requests,'post') as post,patch.object(setup.requests,'get') as get:
+                self.assertTrue(setup.installed(root))
+                weights.unlink();self.assertFalse(setup.installed(root))
+                post.assert_not_called();get.assert_not_called()
+
+    def test_existing_colibri_requires_its_runtime_and_valid_container(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);local=root/'desktop-profile/agent-local-ai';local.mkdir(parents=True)
+            (root/'settings.json').write_text(json.dumps({'ollama_model':'sakura-native:existing'}))
+            (local/'models.json').write_text(json.dumps({'existing':{'path':str(root/'weights'),'engine':'colibri','projector':False}}))
+            binary=local/'colibri-runtime/coli';binary.parent.mkdir();binary.write_bytes(b'runtime')
+            with patch('inference_engines.colibri_model',return_value=(root/'weights',100,False)) as inspect:
+                self.assertTrue(setup.installed(root));inspect.assert_called_once()
+            with patch('inference_engines.colibri_model',side_effect=ValueError('Incomplete model')):
+                self.assertFalse(setup.installed(root))
+            binary.unlink();self.assertFalse(setup.installed(root))
+
     def test_archive_traversal_rejected_before_extract(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

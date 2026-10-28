@@ -18,4 +18,16 @@ class MetricsTests(unittest.TestCase):
   for value in ['CPU usage is 13 percent','Example GPU usage is 40 percent','RAM usage is 8.0 of 32.0 GB, 25 percent','VRAM usage is 2.0 of 8.0 GB, 25 percent']:self.assertIn(value,reply)
   data['gpus'][0]['utilization_percent']=None;data['gpus'][0]['vram_used_bytes']=None
   reply=status_reply(data);self.assertIn('usage is unavailable',reply);self.assertNotIn('usage is 0 percent',reply)
+ def test_specs_are_spoken_when_present_and_optional_otherwise(self):
+  data={'cpu_name':'Example CPU 9000','os':'Windows 11 (build 26200)','cpu_percent':13,'ram':{'total_bytes':32*1024**3,'used_bytes':8*1024**3,'percent':25},'disk':{'free_bytes':100*1024**3},'gpus':[]}
+  self.assertIn('System: Example CPU 9000, Windows 11 (build 26200).',status_reply(data))
+  data.pop('cpu_name');data.pop('os')
+  self.assertNotIn('System:',status_reply(data))
+ def test_spec_questions_reach_the_status_tool(self):
+  from assistant_tools import classify
+  for text in ['can u see my pc specs ?','Can you see my PC specs?','what are my pc specs','pc specs','system specifications','whats my processor','cpu model','graphics card','windows version','my hardware']:
+   self.assertEqual(classify(text),('system.status',{}),text)
+  for text in ['pc status','what is the pc status','tell me my ram usage','check battery level','free disk space']:
+   self.assertEqual(classify(text),('system.status',{}),text)
+  self.assertIsNone(classify('can you see my screen'))
 if __name__=='__main__':unittest.main()

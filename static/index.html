@@ -43,10 +43,10 @@
         @keyframes sakura-startup-progress { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
         @media(prefers-reduced-motion:reduce) { #startup-render-status img,#startup-render-status .startup-track::after { animation: none; } }
     </style>
-    <link rel="stylesheet" href="/static/css/style.css?v=compact-settings156">
+    <link rel="stylesheet" href="/static/css/style.css?v=hidden-controls158">
 
     <link rel="stylesheet" href="/static/css/vtuber-studio.css?v=part-edit11">
-    <link rel="stylesheet" href="/static/css/companion-studio.css?v=fullheight14">
+    <link rel="stylesheet" href="/static/css/companion-studio.css?v=conversation-switch16">
     <link rel="stylesheet" href="/static/css/appearance.css?v=8">
 
     <!-- Import Map for Three.js -->
@@ -172,6 +172,7 @@
             <button id="clear-memory-desktop" type="button" title="Forget saved conversations and memory">🧹 Clear memory</button>
             <button id="eye-tracking-btn" type="button" aria-pressed="false" title="Make Sakura's eyes follow your mouse cursor">👀 Eyes off</button>
             <button id="auto-game-btn" type="button" aria-pressed="false" title="Detect games, use Qwen 2B and enable occasional screen reactions">🎮 Auto game off</button>
+            <label id="game-play-mode-control">Game type <select id="game-play-mode" aria-label="Game type"><option value="singleplayer">Single-player</option><option value="multiplayer">Multiplayer</option></select></label>
             <button id="tracking-mode-btn" type="button" title="Webcam face and hand tracking with chat AI unloaded">VTuber</button>
             <button id="vtuber-collab-btn" type="button" title="Share your avatar with another Sakura user">Collab</button>
             <button id="vtuber-mode-btn" type="button" title="AI YouTube chat and screen co-hosting">AI VTuber</button>
@@ -244,6 +245,16 @@
                 <p class="hint">Negative values strengthen opacity. Use −100% for fully opaque material or ArtMesh opacity. Texture cutouts stay intact.</p>
                 <div class="save-actions"><button id="model-color-apply" data-material-action type="button">Apply color</button><button id="model-color-reset" data-material-action type="button">Restore original color</button></div>
                 <div id="model-lighting-controls">
+            <div class="slider-group">
+                <div class="slider-label-row"><span>Character Bloom:</span><span id="character-glow-value">0%</span></div>
+                <input type="range" id="character-glow-slider" min="0" max="100" value="0" step="5" aria-label="Character glow strength">
+                <span class="modal-hint">Soft glow around bright highlights. Set to 0 to turn off.</span>
+            </div>
+            <div class="slider-group"><label for="light-angle-slider">Light angle: <span id="light-angle-value">35°</span></label><input id="light-angle-slider" type="range" min="-180" max="180" value="35" step="5"></div>
+            <div class="slider-group"><label for="light-elevation-slider">Light height: <span id="light-elevation-value">30°</span></label><input id="light-elevation-slider" type="range" min="-10" max="90" value="30" step="5"></div>
+            <div class="slider-group"><label for="gloss-boost-slider">Gloss boost: <span id="gloss-boost-value">0%</span></label><input id="gloss-boost-slider" type="range" min="0" max="100" value="0" step="5"><span class="modal-hint">Boosts supported materials' highlights. 0 preserves the model's original finish.</span></div>
+
+
                   <h4>Character lighting</h4>
                   <p id="model-lighting-target-status" class="modal-hint">Target: full model. Pick a part to limit gloss and bloom to it.</p>
                   <button id="model-lighting-pick" type="button">Pick part for gloss and bloom</button>
@@ -339,60 +350,10 @@
     <!-- 🎨 Environment Color Wheel & Aura Popover -->
     <div id="theme-popover" class="hidden">
         <div class="popover-header">
-            <span>🎨 Environment &amp; Color Wheel</span>
+            <span>Appearance</span>
             <button id="close-theme-popover" class="popover-close">✕</button>
         </div>
-        <div class="popover-body">
-            <!-- Real-time Color Wheel -->
-            <div class="color-wheel-section">
-                <label>Color Wheel / Custom Hue:</label>
-                <div class="color-wheel-row">
-                    <input type="color" id="env-color-picker" value="#ff6ea7" title="Click to open Color Wheel">
-                    <span id="env-color-hex">#ff6ea7</span>
-                </div>
-            </div>
-
-            <!-- Environment Aura Presets -->
-            <div class="palette-section">
-                <label>Aura Presets:</label>
-                <div class="aura-presets" id="aura-presets-grid">
-                    <button class="aura-chip active" data-color="#ff6ea7" style="--chip-color:#ff6ea7">🌸 Sakura</button>
-                    <button class="aura-chip" data-color="#00f0ff" style="--chip-color:#00f0ff">⚡ Cyan</button>
-                    <button class="aura-chip" data-color="#a855f7" style="--chip-color:#a855f7">💜 Violet</button>
-                    <button class="aura-chip" data-color="#10b981" style="--chip-color:#10b981">🍃 Emerald</button>
-                    <button class="aura-chip" data-color="#f97316" style="--chip-color:#f97316">🌅 Sunset</button>
-                    <button class="aura-chip" data-color="#3b82f6" style="--chip-color:#3b82f6">🌊 Ocean</button>
-                    <button class="aura-chip" data-color="#eab308" style="--chip-color:#eab308">✨ Amber</button>
-                    <button class="aura-chip" data-color="#ef4444" style="--chip-color:#ef4444">🩸 Crimson</button>
-                </div>
-            </div>
-
-            <div id="env-color-dial"></div>
-            <!-- Lighting Intensity Slider -->
-            <div class="slider-group">
-                <div class="slider-label-row">
-                    <span>Aura Intensity:</span>
-                    <span id="env-intensity-val">100%</span>
-                </div>
-                <input type="range" id="env-intensity-slider" min="20" max="150" value="100" step="5">
-            </div>
-            <div class="slider-group">
-                <div class="slider-label-row"><span>Character Bloom:</span><span id="character-glow-value">0%</span></div>
-                <input type="range" id="character-glow-slider" min="0" max="100" value="0" step="5" aria-label="Character glow strength">
-                <span class="modal-hint">Soft glow around bright highlights. Set to 0 to turn off.</span>
-            </div>
-            <div class="slider-group"><label for="light-angle-slider">Light angle: <span id="light-angle-value">35°</span></label><input id="light-angle-slider" type="range" min="-180" max="180" value="35" step="5"></div>
-            <div class="slider-group"><label for="light-elevation-slider">Light height: <span id="light-elevation-value">30°</span></label><input id="light-elevation-slider" type="range" min="-10" max="90" value="30" step="5"></div>
-            <div class="slider-group"><label for="gloss-boost-slider">Gloss boost: <span id="gloss-boost-value">0%</span></label><input id="gloss-boost-slider" type="range" min="0" max="100" value="0" step="5"><span class="modal-hint">Boosts supported materials' highlights. 0 preserves the model's original finish.</span></div>
-
-            <!-- RGB Rainbow Breathing Toggle -->
-            <div class="rgb-toggle-row">
-                <label class="toggle-label">
-                    <input type="checkbox" id="env-rgb-toggle">
-                    <span>🌈 RGB Rainbow Aura (Breathing)</span>
-                </label>
-            </div>
-        </div>
+        <div class="popover-body"></div>
     </div>
 
     <!-- Floating Speech Bubble (when chat panel is minimized) -->
@@ -441,8 +402,8 @@
                 <button class="tab-btn" data-tab="general">General</button>
                 <button class="tab-btn" data-tab="models">🎎 Models</button>
                 <button class="tab-btn" data-tab="theme">🎨 Theme</button>
+                <button class="tab-btn" data-tab="ai">🧠 AI &amp; LLM</button>
                 <button class="tab-btn" data-tab="audio">📷 Camera &amp; Audio</button>
-                <button class="tab-btn" data-tab="ai">🧠 AI</button>
                 <button class="tab-btn" data-tab="assistant">🌸 Assistant</button>
             </div>
 
@@ -468,6 +429,7 @@
                     <label for="phone-link-address">PC connection link</label><input id="phone-link-address" readonly placeholder="Enable phone connection first">
                     <button id="phone-link-copy-address" type="button" disabled>Copy link</button>
                     <p id="phone-link-fingerprint" class="phone-link-fingerprint" hidden></p>
+                    <button id="phone-link-copy-fingerprint" type="button" disabled>Copy certificate fingerprint</button>
                     <label for="phone-link-code">Pairing code</label><input id="phone-link-code" readonly placeholder="Enable phone connection first">
                     <button id="phone-link-copy-code" type="button" disabled>Copy pairing code</button>
                     <p class="modal-hint">Choose New device to pair an Android phone. Existing devices lists remembered phones; reconnect from the phone without another code. Turning this off disconnects phones but keeps the list. Forget removes that phone's access. Keep both devices on the same trusted home network.</p>
@@ -654,55 +616,7 @@
             </div>
 
             <!-- ── TAB: Theme & Environment ── -->
-            <div class="tab-content" id="tab-theme">
-                <div class="setting-group">
-                    <label>🎨 Environment Color &amp; Atmosphere:</label>
-                    <div class="color-wheel-section">
-                        <label>Color Wheel / Custom Hue:</label>
-                        <div class="color-wheel-row">
-                            <input type="color" id="env-color-picker-modal" value="#ff6ea7">
-                            <span id="env-color-hex-modal">#ff6ea7</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="setting-group">
-                    <label>Aura Atmosphere Presets:</label>
-                    <div class="aura-presets" id="aura-presets-modal">
-                        <button class="aura-chip active" data-color="#ff6ea7" style="--chip-color:#ff6ea7">🌸 Sakura Pink</button>
-                        <button class="aura-chip" data-color="#00f0ff" style="--chip-color:#00f0ff">⚡ Cyber Cyan</button>
-                        <button class="aura-chip" data-color="#a855f7" style="--chip-color:#a855f7">💜 Neon Violet</button>
-                        <button class="aura-chip" data-color="#10b981" style="--chip-color:#10b981">🍃 Emerald Sage</button>
-                        <button class="aura-chip" data-color="#f97316" style="--chip-color:#f97316">🌅 Sunset Ember</button>
-                        <button class="aura-chip" data-color="#3b82f6" style="--chip-color:#3b82f6">🌊 Deep Ocean</button>
-                        <button class="aura-chip" data-color="#eab308" style="--chip-color:#eab308">✨ Golden Sun</button>
-                        <button class="aura-chip" data-color="#ef4444" style="--chip-color:#ef4444">🩸 Crimson Moon</button>
-                    </div>
-                </div>
-
-                <div class="setting-group">
-                    <label>3D Lighting &amp; Atmosphere Intensity:</label>
-                    <div class="slider-group">
-                        <div class="slider-label-row">
-                            <span>Aura Glow:</span>
-                            <span id="env-intensity-val-modal">100%</span>
-                        </div>
-                        <input type="range" id="env-intensity-slider-modal" min="20" max="150" value="100" step="5">
-                    </div>
-                </div>
-
-                <div class="setting-group checkbox-group">
-                    <label class="toggle-label">
-                        <input type="checkbox" id="env-rgb-toggle-modal">
-                        <span>🌈 RGB Rainbow Aura Breathing Mode (cycles smoothly)</span>
-                    </label>
-                </div>
-
-                <div class="save-actions">
-                    <button id="save-theme-btn" class="accent-btn save-btn">💾 Save Theme</button>
-                    <span id="theme-save-msg" class="save-status-msg"></span>
-                </div>
-            </div>
+            <div class="tab-content" id="tab-theme"></div>
 
             <!-- ── TAB: Audio ── -->
             <div class="tab-content" id="tab-audio">
@@ -886,12 +800,15 @@
                     </div>
                     <div class="setting-group">
                         <label for="ollama-model">Universal local model (outside Game Mode):</label>
-                        <input id="ollama-model" type="text" list="ollama-model-options" value="qwen3-vl:2b-instruct" placeholder="Choose an installed model">
+                        <input id="ollama-model" type="text" list="universal-model-options" value="qwen3-vl:2b-instruct" placeholder="Choose an installed model">
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
                             <button type="button" id="qwen-2b-btn">Qwen 2B · Laptop</button>
                             <button type="button" id="qwen-4b-btn">Qwen 4B · Higher quality</button>
+                            <button type="button" id="qwen-native-btn" hidden>Qwen 3.6 · Colibri</button>
                         </div>
                         <datalist id="ollama-model-options"></datalist>
+                        <datalist id="universal-model-options"></datalist>
+                        <p id="native-model-requirements" class="modal-hint" hidden>Qwen 3.6 · Colibri: a more capable option for demanding text tasks than Qwen3-VL 4B, with much higher resource use. Reference PC: RTX 3080 (12 GB VRAM). Plan for around 10 GB VRAM and 24 GB system RAM; 32 GB RAM recommended. These are estimates; context, avatar and other apps change usage. Speed and answer quality vary. Screen and camera images still use your separate vision model.</p>
                         <span id="ollama-scan-status" class="modal-hint" role="status"></span>
                     </div>
                     <div class="setting-group">
@@ -1081,10 +998,12 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=cursor-gpu6"></script>
-    <script type="module" src="/static/js/vtuber-studio.js?v=companion-parity153"></script>
-    <script type="module" src="/static/js/appearance.js?v=2"></script>
-    <script type="module" src="/static/js/companion-studio.js?v=modelsearch141"></script>
+    <script type="module" src="/static/js/app.js?v=native-choice122"></script>
+    <script type="module" src="/static/js/vtuber-studio.js?v=phone-panel76"></script>
+    <script type="module" src="/static/js/appearance.js?v=computer-access6"></script>
+    <script type="module" src="/static/js/companion-studio.js?v=guided-modes4"></script>
+    <script type="module" src="/static/js/model-library.js?v=variants7"></script>
+    <script type="module" src="/static/js/local-character-library.js?v=named-imports2"></script>
 </body>
 </html>
 

@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from collections import deque
 import httpx
+from local_api_security import internal_headers
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse,FileResponse
 import uvicorn
@@ -44,7 +45,7 @@ class MobileLink:
         if not isinstance(self.devices,dict):self.devices={}
         self.devices={key:value for key,value in self.devices.items() if isinstance(key,str) and isinstance(value,dict)
             and re.fullmatch(r'[0-9a-f]{64}',str(value.get('token_hash','')))}
-        self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={};self._tls=None
+        self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={};self.last_contact=0;self.contact_kind='';self.contact_host='';self.own_addresses=set();self._tls=None
         self.pc_port=8766;self.port=(8772 if slot==1 else 8810+slot) if EDITION=='vtuber' else (8771 if slot==1 else 8820+slot);self.code_expires=0;self.thread=None
         self.model_transfer=None;self.model_package=None;self.transfer_request=None;self.tracking_control=None;self.tracking_sequence=0
         self.api=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
@@ -60,11 +61,20 @@ class MobileLink:
         self.api.add_api_route('/gemini',self.gemini,methods=['POST'])
         self.api.middleware('http')(self.guard)
 
+    def contact(self,kind,host):
+        # This PC answering its own probe, or talking to itself, is not proof that a phone
+        # arrived, and the panel goes on to claim exactly that, so only count foreign hosts.
+        if host.startswith('127.') or host in self.own_addresses:return
+        self.last_contact=time.time();self.contact_kind=kind;self.contact_host=host
+
     async def guard(self,request,call_next):
         host=request.client.host if request.client else ''
-        try:private=ipaddress.ip_address(host).is_private
+        try:private=any(ipaddress.ip_address(host) in ipaddress.ip_network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8','::1/128'))
         except ValueError:private=False
         if not self.enabled or not private:return JSONResponse({'error':'Phone link is off.'},403)
+        # Whether the phone ever arrived is the difference between a wrong code and a
+        # network that cannot see this PC, so remember the last time anything did.
+        # Record authenticated contacts below, not untrusted traffic.
         # A chunked body has no Content-Length, so demand one before reading anything.
         if request.method in ('POST','PUT','PATCH'):
             try:length=int(request.headers.get('content-length',''))
@@ -78,6 +88,7 @@ class MobileLink:
             if device is not None and device.get('expires_at',0)<=time.time():return JSONResponse({'error':'Pairing expired. Pair this phone again.'},401)
             if not token or (token not in self.tokens and device is None):return JSONResponse({'error':'Pair with the PC first.'},401)
             if device is not None:device['last_seen']=time.time()
+        if request.url.path not in ('/pair','/identity-proof'):self.contact('request',host)
         return await call_next(request)
 
     def _load_identity(self):
@@ -110,7 +121,8 @@ class MobileLink:
     def start_beacon(self):
         self.stop_beacon()
         sockets=[]
-        for address in self.lan_addresses():
+        addresses=self.lan_addresses();self.own_addresses=set(addresses)
+        for address in addresses:
             try:
                 probe=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
                 probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
@@ -131,23 +143,27 @@ class MobileLink:
         thread=self.beacon_thread;self.beacon_thread=None
         if thread and thread.is_alive():thread.join(timeout=1.5)
 
-    def discovery_reply(self,data,host):
+    def discovery_reply(self,data,host,sender=None):
         # A flooded probe still must not starve the phone's HTTP pairing calls.
         if not self.enabled or data.strip()!=DISCOVERY_MAGIC:return None
+        if sender:
+            try:
+                if not any(ipaddress.ip_address(sender) in ipaddress.ip_network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8')):return None
+            except ValueError:return None
         now=time.time()
-        self.beacon_replies=[stamp for stamp in self.beacon_replies if now-stamp<1]
-        if len(self.beacon_replies)>=10:return None
-        self.beacon_replies.append(now)
+        self.beacon_replies=[entry for entry in self.beacon_replies if isinstance(entry,tuple) and now-entry[1]<1]
+        if sum(peer==sender for peer,stamp in self.beacon_replies)>=10 or len(self.beacon_replies)>=200:return None
+        self.beacon_replies.append((sender,now))
         # The phone pins this certificate before it sends the pairing code, so a
         # spoofed beacon cannot read the code or impersonate this PC later.
         return json.dumps({'service':'sakura','id':self.pc_id,'name':self.pc_name,'edition':self.edition,
             'https':f'https://{host}:{self.port}','port':self.port,'fingerprint':self.tls['fingerprint']}).encode()
 
     def beacon_loop(self,sockets,stop):
-        addresses=tuple(self.lan_addresses());next_refresh=time.monotonic()+2
+        addresses=tuple(self.lan_addresses());self.own_addresses=set(addresses);next_refresh=time.monotonic()+2
         while not stop.is_set() and self.enabled:
             if time.monotonic()>=next_refresh:
-                current=tuple(self.lan_addresses());next_refresh=time.monotonic()+2
+                current=tuple(self.lan_addresses());self.own_addresses=set(current);next_refresh=time.monotonic()+2
                 if current!=addresses or not sockets:
                     for probe in sockets:
                         try:probe.close()
@@ -169,7 +185,7 @@ class MobileLink:
             for probe in readable:
                 try:data,sender=probe.recvfrom(512)
                 except OSError:continue
-                reply=self.discovery_reply(data,probe.getsockname()[0])
+                reply=self.discovery_reply(data,probe.getsockname()[0],sender[0])
                 if reply is None:continue
                 try:probe.sendto(reply,sender)
                 except OSError:pass
@@ -207,8 +223,15 @@ class MobileLink:
         return self.info()
 
     def info(self):
-        with self.lock:devices=[{'id':id,'name':device.get('name','Android device'),'connected':self.enabled and time.time()-device.get('last_seen',0)<15} for id,device in self.devices.items()]
-        return {'enabled':self.enabled,'code':self.code if self.enabled else '',
+        # A record saved before pairings carried an expiry is refused by guard(), so the
+        # panel must not call it "Remembered" and invite a tap that can only fail.
+        with self.lock:devices=[{'id':id,'name':device.get('name','Android device'),'connected':self.enabled and time.time()-device.get('last_seen',0)<15,'pairable':device.get('expires_at',0)>time.time()} for id,device in self.devices.items()]
+        # /pair rejects an expired code, so the settings panel must never present one as live:
+        # a box full of digits the phone will refuse is worse than an empty box that says why.
+        live=self.enabled and time.time()<self.code_expires
+        return {'enabled':self.enabled,'code':self.code if live else '','code_expired':bool(self.enabled and not live),
+                'contact_age':round(time.time()-self.last_contact) if self.last_contact else None,
+                'contact_kind':self.contact_kind,'contact_host':self.contact_host,
                 'addresses':[f'https://{ip}:{self.port}' for ip in self.lan_addresses()],'port':self.port,'paired':len(self.tokens),
                 'id':self.pc_id,'name':self.pc_name,'discovery_port':self.discovery_port,'devices':devices,
                 'fingerprint':self.tls['fingerprint']}
@@ -219,7 +242,10 @@ class MobileLink:
             pending=self.store.with_suffix('.tmp');pending.write_text(json.dumps(self.devices,indent=2),encoding='utf-8');pending.replace(self.store)
 
     def forget_device(self,device_id):
-        with self.lock:self.devices.pop(device_id,None);self.tokens.clear();self.save_devices()
+        with self.lock:
+            removed=self.devices.pop(device_id,None)
+            if removed:self.tokens={token for token in self.tokens if hashlib.sha256(token.encode()).hexdigest()!=removed.get('token_hash')}
+            self.save_devices()
         return self.info()
 
     def new_pairing_code(self):
@@ -243,7 +269,7 @@ class MobileLink:
         body=await request.json()
         if now>self.code_expires or not secrets.compare_digest(str(body.get('code','')),self.code):
             return JSONResponse({'error':'Pairing code is wrong or expired. Turn phone link off and on.'},401)
-        token=secrets.token_urlsafe(32);self.tokens.add(token)
+        token=secrets.token_urlsafe(32)
         device_id=str(body.get('device_id') or secrets.token_hex(16))[:64]
         if not re.fullmatch(r'[A-Za-z0-9_-]+',device_id):return JSONResponse({'error':'Invalid device identifier'},400)
         if device_id not in self.devices and len(self.devices)>=32:return JSONResponse({'error':'Forget an old device before adding another.'},409)
@@ -251,6 +277,7 @@ class MobileLink:
             self.devices[device_id]={'name':str(body.get('device_name') or 'Android device')[:80],
                 'token_hash':hashlib.sha256(token.encode()).hexdigest(),'last_seen':now,'expires_at':now+30*86400}
             self.save_devices()
+            self.contact('paired',host)
             self.code='';self.code_expires=0
         # The phone records this fingerprint with the token and rejects any other
         # certificate on reconnect, so a later LAN impostor cannot collect frames.
@@ -264,7 +291,7 @@ class MobileLink:
         payload={k:body[k] for k in ('action','operation','value','text') if k in body};payload['phone']=True
         try:
             async with httpx.AsyncClient(timeout=8) as client:
-                response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/assistant-tools/device',json=payload)
+                response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/assistant-tools/device',json=payload,headers=internal_headers())
                 return JSONResponse(response.json(),response.status_code)
         except (httpx.HTTPError,ValueError):return JSONResponse({'error':'PC tool unavailable. Retry when Sakura is ready.'},503)
 
@@ -445,7 +472,7 @@ class MobileLink:
         body=await request.json();text=str(body.get('text','')).strip()[:4000]
         if not text:return JSONResponse({'error':'Enter a message'},400)
         async with httpx.AsyncClient(timeout=120) as client:
-            response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/chat',json={'text':text,'defer_audio':True,'phone':True})
+            response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/chat',json={'text':text,'defer_audio':True,'phone':True},headers=internal_headers())
             if not response.is_success:return JSONResponse({'error':'PC companion could not reply. Check its AI settings.'},response.status_code)
             reply=response.json().get('reply','')
             with self.lock:self.commands.append({'type':'phone-reply','text':reply})
@@ -457,7 +484,7 @@ class MobileLink:
         payload={'llm_provider':'gemini'}
         if key:payload['gemini_api_key']=key
         async with httpx.AsyncClient(timeout=30) as client:
-            response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/settings',json=payload)
+            response=await client.post(f'http://127.0.0.1:{self.pc_port}/api/settings',json=payload,headers=internal_headers())
             if not response.is_success:return JSONResponse({'error':'Could not configure Gemini on the PC.'},response.status_code)
         return {'ok':True}
 
@@ -465,7 +492,8 @@ class MobileLink:
         with self.lock:
             self.state=state;commands=list(self.commands);self.commands.clear();frame=self.frame;self.frame=None
             camera=self.camera;self.camera=None
+            connected=self.enabled and any(time.time()-device.get('last_seen',0)<15 for device in self.devices.values())
         if camera and time.time()-camera['timestamp']>4:camera=None
-        return {'enabled':self.enabled,'commands':commands,'frame':frame,'camera':camera}
+        return {'enabled':self.enabled,'connected':connected,'commands':commands,'frame':frame,'camera':camera}
 
 link=MobileLink()

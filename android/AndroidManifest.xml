@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.sakura.mobile">
  <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+ <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
  <uses-feature android:name="android.hardware.location" android:required="false"/>
@@ -26,9 +28,9 @@
  </queries>
  <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35"/>
- <application android:label="Sakura Mobile" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:icon="@drawable/sakura_flower" android:roundIcon="@drawable/sakura_flower">
+ <application android:label="Sakura Mobile" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false" android:icon="@drawable/sakura_flower" android:roundIcon="@drawable/sakura_flower">
   <service android:name=".WakeService" android:exported="false" android:foregroundServiceType="microphone"/>
-  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
+  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:configChanges="orientation|screenSize|keyboardHidden|uiMode|density|fontScale|screenLayout|smallestScreenSize">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
  </application>

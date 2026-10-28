@@ -4,6 +4,8 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  let html=fs.readFileSync('static/index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<link[^>]*rel="stylesheet"[^>]*>/g,'');
  html=html.replace('</head>','<style>'+['style.css','companion-studio.css','appearance.css'].map(f=>fs.readFileSync('static/css/'+f,'utf8')).join('\n')+'</style></head>');
  await page.route('http://nav.test/**',route=>route.fulfill({contentType:'text/html',body:html}));await page.goto('http://nav.test/');
+ let conversationMode='friend';const styleSaves=[];
+ await page.route('**/api/settings',async route=>{if(route.request().method()==='POST'){const payload=route.request().postDataJSON();styleSaves.push(payload);conversationMode=payload.conversation_mode;}await route.fulfill({json:{conversation_mode:conversationMode}});});
  await page.evaluate(()=>{
   document.body.className='native-renderer native-library';window.SAKURA_EDITION='companion';
   for(const [id,modal]of [['settings-btn','settings-modal'],['expression-editor-btn','expression-modal']])document.getElementById(id).onclick=()=>document.getElementById(modal).classList.remove('hidden');
@@ -13,6 +15,19 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  });
  await page.addScriptTag({content:fs.readFileSync('static/js/companion-studio.js','utf8').replace('export function','function')});
  await page.evaluate(()=>{for(const [id,label]of [['model-select','Ananta'],['vrm-select','Anna'],['live2d-select','Annie']]){const select=document.getElementById(id);select.add(new Option(label,id));select.onchange=()=>window.pickedModel=id;}});
+ await page.locator('[data-companion-pane="voice"]').click();
+ assert.equal(await page.getByRole('switch',{name:'Friend',exact:true}).getAttribute('aria-checked'),'true');
+ await page.getByRole('switch',{name:'Teacher',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('[data-companion-style="teacher"]').getAttribute('aria-checked')==='true');
+ assert.deepEqual(styleSaves,[{conversation_mode:'teacher'}]);
+ assert.equal(await page.getByRole('switch',{name:'Friend',exact:true}).getAttribute('aria-checked'),'false');
+ assert.equal(await page.locator('[data-companion-style="teacher"] [data-style-state]').textContent(),'On');
+ await page.getByRole('switch',{name:'Teacher',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('[data-companion-style="friend"]').getAttribute('aria-checked')==='true');
+ assert.deepEqual(styleSaves,[{conversation_mode:'teacher'},{conversation_mode:'friend'}]);
+ await page.locator('[data-companion-pane="character"]').click();
+ await page.locator('[data-companion-pane="voice"]').click();
+ assert.equal(await page.locator('[data-companion-style="teacher"] [data-style-state]').textContent(),'Off');
  await page.locator('[data-companion-pane="character"]').click();
  await page.locator('#companion-model-search').fill('an');
  assert.equal(await page.locator('#companion-model-results button').count(),3);
@@ -34,6 +49,13 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2);await page.mouse.down();await page.mouse.move(handleBox.x-110,handleBox.y-90);await page.mouse.up();
  const editorAfter=await page.locator('#expression-modal').boundingBox();assert.ok(editorAfter.width>editorBefore.width+60&&editorAfter.height<editorBefore.height-50,'Resize handle changes editor width and height');
  await page.getByRole('button',{name:'Settings',exact:true}).click();assert.equal(await page.locator('#settings-modal').isVisible(),true);assert.equal(await page.locator('#expression-modal').isVisible(),false);assert.equal(await page.locator('#tab-general').isVisible(),true);
+ const ai=page.locator('#settings-modal [data-tab="ai"]');
+ assert.equal(await ai.isVisible(),true,'Companion settings must expose the AI tab.');
+ await ai.click();
+ assert.equal(await page.locator('#llm-provider').isVisible(),true);
+ assert.equal(await page.locator('#ollama-model').isVisible(),true);
+ assert.equal(await page.locator('#game-ollama-model').isVisible(),true);
+ assert.equal(await page.locator('#local-model-manager').isVisible(),true);
  const settingsHeight=await page.locator('#settings-modal').boundingBox();assert.ok(settingsHeight.y+settingsHeight.height>=884,'Settings extends to the bottom margin');
  await page.locator('#close-settings-btn').click();await page.getByRole('button',{name:'Settings',exact:true}).click();assert.equal(await page.locator('#settings-modal').isVisible(),true,'Settings reopens after X close');
  await page.getByRole('button',{name:'Memory & privacy',exact:true}).click();assert.equal(await page.locator('#settings-modal').isVisible(),false);
@@ -44,5 +66,13 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  assert.ok((await page.locator('#companion-panel').boundingBox()).x>700,'Streaming opens on the right');
  const chat=await page.locator('#chat-panel').boundingBox(),settings=await page.locator('#companion-panel').boundingBox();
  assert.ok(chat.x>=74&&chat.x+chat.width<settings.x,'Chat stays left of adjustments');
- assert.deepEqual(errors,[]);console.log('PASS: Companion pencil opens model editor, tools in Memory & privacy, Settings switches and reopens correctly, no extra theme icon, output controls preserved.');
+ await page.evaluate(()=>{const event=new CustomEvent('sakura-open-phone-panel',{cancelable:true});window.dispatchEvent(event);window.phonePanelHandled=event.defaultPrevented;});
+ assert.equal(await page.evaluate(()=>window.phonePanelHandled),true);
+ assert.equal(await page.locator('#settings-modal').isVisible(),false,'Phone connection must not open General settings');
+ assert.equal(await page.locator('[data-companion-content="phone"] #phone-link-code').isVisible(),true,'Pairing code is visible in the phone panel');
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('sakura-open-conversation-mode',{cancelable:true,detail:{mode:'teacher'}})));
+ assert.equal(await page.locator('[data-companion-content="voice"]').isVisible(),true);
+ assert.equal(await page.locator('[data-companion-style="teacher"]').evaluate(el=>el===document.activeElement),true,'Guide focuses the actual Teacher switch');
+ assert.equal(await page.locator('[data-companion-style="teacher"]').getAttribute('aria-checked'),'false','Opening guidance does not silently switch modes');
+ assert.deepEqual(errors,[]);console.log('PASS: Companion navigation, direct phone panel and pairing code, model editor, Settings and output.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

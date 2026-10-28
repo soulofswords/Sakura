@@ -40,7 +40,7 @@ export default class ModelRigMonitor {
             let s=this.samples.get(node.index);if(!s){s={bad:0,total:0,previous:q.clone(),jitter:0,outsideLimit:0,collisionConflict:0,persistentBend:0};this.samples.set(node.index,s);}
             const finite=[q.x,q.y,q.z,q.w,p.x,p.y,p.z].every(Number.isFinite);
             const stretch=finite&&p.distanceTo(node.restLocal)>Math.max(.5,node.restLocal.length()*1.5);
-            const angle=finite?q.angleTo(node.restQuat):Math.PI;
+            const angle=finite?q.angleTo(node.attachedRibbon&&node.hangingQuat?node.hangingQuat:node.restQuat):Math.PI;
             const jump=finite?q.angleTo(s.previous):Math.PI;
             s.total++;if(!finite||stretch)s.bad++;
             if(angle>2.6&&jump>1.2)s.jitter++;

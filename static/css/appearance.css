@@ -15,7 +15,7 @@ html[data-ui-theme] #studio-statusbar :is(button,.studio-status-text){background
 html[data-ui-theme] #vtuber-studio fieldset.setting-group :is(label,legend){color:var(--ui-ink)!important}
 .appearance-controls select{display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px}
 .appearance-controls p{margin-top:12px;line-height:1.5}
-#legacy-lighting-controls{display:none!important}
+
 html[data-ui-theme] body.studio-ui-active .studio-docked .tracking-options>p:first-of-type{background:var(--ui-input)!important;color:var(--ui-muted)!important}
 html[data-ui-theme] #vtuber-collab-dialog button{background:var(--ui-button)!important;color:var(--ui-accent)!important;border:1px solid var(--ui-line)!important;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer}
 html[data-ui-theme] #vtuber-collab-dialog button:hover{filter:brightness(.94)}

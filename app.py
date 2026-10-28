@@ -83,7 +83,7 @@ def get_settings():
     default = {
         "llm_provider": "ollama",
         "ollama_model": OLLAMA_MODEL,
-        "game_ollama_model": "", "game_cloud_auto_enabled": True,
+        "game_ollama_model": "", "game_cloud_auto_enabled": True, "game_play_mode": "singleplayer",
         "ollama_models_folder": "",
         "ollama_context": 4096,
         "gemini_fallback_enabled": False,
@@ -93,6 +93,7 @@ def get_settings():
         "last_cloud_provider": "gemini",
         "assistant_name": "Sakura",
         "user_address": "sir",
+        "conversation_mode": "friend",
         "news_area": "",
         "evidence_confidence_threshold": 0.9,
         "response_restriction_level": "off",
@@ -246,7 +247,8 @@ async def lifespan(_app: FastAPI):
     if llm:configure_saved_ai(llm,cfg)
     _app.state.tracking_only = False if startup_mode == 'agent' else bool(cfg.get('vtuber_tracking_only', False))
     _app.state.ai_unloaded = _app.state.tracking_only
-    if not _app.state.tracking_only and cfg['llm_provider'] == 'ollama':
+    _app.state.local_setup = None
+    async def configure_startup_local():
         try:
             await run_in_threadpool(llm.configure_local, cfg['ollama_model'], cfg['ollama_models_folder'] if cfg['llm_provider'] == 'ollama' else '',
                 cfg['gemini_fallback_enabled'], cfg['ollama_context'], cfg['local_timeout'])
@@ -254,12 +256,18 @@ async def lifespan(_app: FastAPI):
             print(f'  Local model folder unavailable: {exc}')
             await run_in_threadpool(llm.configure_local, cfg['ollama_model'], '',
                 cfg['gemini_fallback_enabled'], cfg['ollama_context'], cfg['local_timeout'])
+    if not _app.state.tracking_only and cfg['llm_provider'] == 'ollama':
+        if os.environ.get('SAKURA_DESKTOP') == '1':
+            _app.state.local_setup = asyncio.create_task(configure_startup_local())
+        else:
+            await configure_startup_local()
     if llm:
         llm.tracking_only = _app.state.tracking_only
         llm.set_assistant_name(cfg.get("assistant_name", "Sakura"))
         llm.set_vtuber_name(cfg.get('vtuber_name','Sakura'))
         llm.avatar_presentation=cfg.get('avatar_presentation','auto')
         llm.user_address=cfg.get('user_address','sir')
+        llm.conversation_mode=cfg.get('conversation_mode','friend')
     _app.state.renderer_ready=False
     # Desktop GPU uploads must finish before local inference reserves VRAM.
     _app.state.llm_warmup = None if _app.state.tracking_only or os.environ.get('SAKURA_DESKTOP')=='1' else asyncio.create_task(asyncio.to_thread(llm.warmup))
@@ -284,10 +292,15 @@ async def lifespan(_app: FastAPI):
             print(f"  ⚠️ Saved voice model is missing: {pth_path}. Falling back to Sakura voice.")
             tts.set_voice_preset("kokoro_af_heart", cfg.get("tts_pitch"), cfg.get("tts_rate"))
 
-    try:
-        await sync_selected_rvc_service()
-    except RuntimeError as exc:
-        print(f'  RVC startup: {exc}', flush=True)
+    _app.state.rvc_startup = None
+    if os.environ.get('SAKURA_DESKTOP') == '1' and tts.rvc_model and not _app.state.tracking_only:
+        _app.state.rvc_startup_pending = True
+    else:
+        _app.state.rvc_startup_pending = False
+        try:
+            await sync_selected_rvc_service()
+        except RuntimeError as exc:
+            print(f'  RVC startup: {exc}', flush=True)
 
     # STT is optional for GUI (browser can record → send audio)
     def load_stt():
@@ -316,6 +329,10 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        setup=getattr(_app.state,'local_setup',None)
+        if setup is not None and not setup.done():await asyncio.shield(setup)
+        rvc_startup=getattr(_app.state,'rvc_startup',None)
+        if rvc_startup is not None and not rvc_startup.done():await asyncio.shield(rvc_startup)
         if llm and not getattr(llm,'persist_memory',False):
             await run_in_threadpool(llm.clear_history)
         from screen_audio import listener as audio_listener
@@ -368,12 +385,20 @@ async def dismiss_reminder(payload:dict):
 async def tracking_only_guard(request, call_next):
     # A visited website must not hold a conversation with the local AI and read the
     # reply (CORS used to hand it every response) or start screen capture.
-    if request.url.path in ('/api/chat', '/api/screen-audio', '/api/assistant-tools/device') and not _started_locally(request):
-        return JSONResponse({'error': 'This feature can only be used from this computer.'}, 403)
+    if request.url.path=='/api/messaging/whatsapp/webhook' and request.method in ('GET','POST'):
+        if not _served_locally(request) or EDITION=='vtuber' or getattr(app.state,'tracking_only',False):
+            return JSONResponse({'error':'Messaging webhook unavailable.'},403)
+        return await call_next(request)  # This exact route verifies the provider signature or setup challenge.
+    if request.url.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS') and not _started_locally(request):
+        return JSONResponse({'error': 'Only this computer can use this feature.'}, 403)
+    if request.url.path.startswith('/api/') and (not _served_locally(request) or (request.headers.get('origin') and not _started_locally(request))):
+        return JSONResponse({'error':'Only this computer can use the Sakura API.'},403)
     # Loading the local speech engine is shared by Chat Reader and voice
     # changer; it does not enable AI replies in the tracking-only product.
     if request.url.path=='/api/tts/kokoro':return await call_next(request)
-    if EDITION=='vtuber' and (request.url.path in ('/api/chat','/api/clear','/api/memory/refresh','/api/vtuber/connect','/api/vtuber/reply') or request.url.path.startswith(('/api/ollama','/api/local','/api/vision','/api/tts/'))):
+    if (EDITION=='vtuber' or getattr(app.state,'tracking_only',False)) and request.url.path.startswith(('/api/agent','/api/companion/agent-tasks')):
+        return JSONResponse({'error':'Agent features are available in Companion mode only.'},409)
+    if EDITION=='vtuber' and (request.url.path in ('/api/chat','/api/clear','/api/refresh-memory','/api/vtuber/connect','/api/vtuber/reply') or request.url.path.startswith(('/api/ollama','/api/local','/api/vision','/api/tts/'))):
         return JSONResponse({'error':'This feature is not available in Sakura VTuber.'},409)
     if request.url.path.startswith('/api/screen-audio') and (EDITION=='vtuber' or getattr(app.state, 'tracking_only', False)):
         return JSONResponse({'error': 'Screen audio is only available in AI modes.'}, 409)
@@ -493,7 +518,9 @@ def _served_locally(request: Request):
     """
     from urllib.parse import urlsplit
     try:
-        host = (urlsplit('//' + str(request.headers.get('host') or '')).hostname or '').strip('[]')
+        parsed = urlsplit('//' + str(request.headers.get('host') or ''))
+        host = (parsed.hostname or '').strip('[]')
+        if (parsed.port or 80) != gui_server.port:return False
     except ValueError:
         return False
     return host in LOOPBACK_HOSTS
@@ -505,22 +532,20 @@ def _started_locally(request: Request):
     A cross-origin page cannot read these responses, but a multipart or JSON POST still
     executes, so the endpoints that launch installers have to check who is asking.
     """
-    origin = str(request.headers.get('origin') or '').strip()
+    from urllib.parse import urlsplit
+    from local_api_security import is_internal
+    if not _served_locally(request):return False
+    try:
+        host=urlsplit('//' + request.headers.get('host',''))
+        bound_port=gui_server.port
+        if (host.port or 80)!=bound_port:return False
+    except ValueError:return False
+    if is_internal(request):return True
+    origin=str(request.headers.get('origin') or '').strip()
     if origin:
-        from urllib.parse import urlsplit
-        try:
-            host = (urlsplit(origin).hostname or '').strip('[]')
-        except ValueError:
-            return False
-        return host in LOOPBACK_HOSTS
-    site = str(request.headers.get('sec-fetch-site') or '').lower()
-    if site == 'cross-site':
-        return False
-    # Browsers always send Sec-Fetch-Site; scripts and the phone relay do not. On a
-    # browser request, insist the Host header still points at this computer.
-    if site:
-        return _served_locally(request)
-    return True
+        return origin == str(request.base_url).rstrip('/')
+    return request.headers.get('sec-fetch-site','').lower() in ('same-origin','none')
+
 
 
 @app.post('/api/tracking/nvidia-sdk/install-features')
@@ -682,6 +707,8 @@ async def set_tracking_mode(payload: dict):
     if not hasattr(app.state, 'tracking_mode_lock'):
         app.state.tracking_mode_lock = asyncio.Lock()
     async with app.state.tracking_mode_lock:
+        setup=getattr(app.state,'local_setup',None)
+        if setup is not None and not setup.done():await asyncio.shield(setup)
         if enabled:
             if getattr(app.state, 'ai_unloaded', False):
                 return {'ok': True, 'tracking_only': True}
@@ -788,14 +815,8 @@ async def speak_chat_reader(payload: dict):
     except Exception as exc:
         return JSONResponse({'error': str(exc)}, 503)
 
-app.add_middleware(
-    CORSMiddleware,
-    # The window and local dev pages are loopback origins. A wildcard would let any
-    # visited website read settings, chats and the phone pairing code from this API.
-    allow_origin_regex=r'^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$',
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Same-origin UI needs no cross-origin API grants.
+
 
 # ── static files ───────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -805,6 +826,15 @@ app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 async def assistant_capabilities():
     from assistant_tools import capabilities
     return {'capabilities':capabilities()}
+
+@app.get('/api/assistant-tools/workflow/{identifier}')
+async def assistant_workflow_state(identifier: str):
+    """Progress for a sequence started without blocking the reply."""
+    from assistant_tools import run_state
+    run = run_state(identifier)
+    if run is None: return JSONResponse({'error':'Unknown action sequence.'}, 404)
+    return {'id':run['id'],'status':run['status'],'cancel_requested':bool(run.get('cancel_requested')),
+            'steps':[{'request':step.get('request'),'ok':bool(step.get('ok')),'reply':step.get('reply','')} for step in run['steps']]}
 
 @app.get('/api/assistant-tools/status')
 async def assistant_system_status():
@@ -1205,7 +1235,8 @@ async def collab_remove_import(token: str):
 @app.get("/")
 async def index():
     # A visited page must not frame the desktop UI and click its controls.
-    return FileResponse(str(STATIC_DIR / "index.html"), headers={'X-Frame-Options': 'SAMEORIGIN'})
+    from app_branding import edition_html
+    return Response(edition_html((STATIC_DIR/'index.html').read_text(encoding='utf-8-sig'),EDITION),media_type='text/html',headers={'X-Frame-Options':'SAMEORIGIN','Cache-Control':'no-store'})
 
 
 @app.get("/api/identity")
@@ -1237,8 +1268,16 @@ async def screen_cursor_position():
 async def renderer_ready():
     if getattr(app.state,'renderer_ready',False):return {'ok':True}
     app.state.renderer_ready=True
+    if getattr(app.state,'rvc_startup_pending',False):
+        app.state.rvc_startup_pending=False
+        async def start_saved_voice():
+            try:await sync_selected_rvc_service()
+            except RuntimeError as error:print(f'  RVC startup: {error}',flush=True)
+        app.state.rvc_startup=asyncio.create_task(start_saved_voice())
     if llm and not getattr(app.state,'tracking_only',False) and getattr(llm,'provider',None)=='ollama':
         async def settled_warmup():
+            setup=getattr(app.state,'local_setup',None)
+            if setup is not None:await asyncio.shield(setup)
             await asyncio.sleep(1)
             if llm and not getattr(app.state,'tracking_only',False):await asyncio.to_thread(llm.warmup)
         if getattr(app.state,'llm_warmup',None) is None:
@@ -1642,6 +1681,9 @@ async def update_app_settings(request: Request, payload: dict):
     import re
     if not _started_locally(request):
         return JSONResponse({'error': 'Settings can only be changed from this computer.'}, 403)
+    if set(payload)&{'llm_provider','ollama_model','ollama_models_folder','ollama_context','local_timeout','gemini_model','cloud_model','cloud_endpoint'}:
+        setup=getattr(app.state,'local_setup',None)
+        if setup is not None and not setup.done():await asyncio.shield(setup)
     if 'response_restriction_level' in payload and payload['response_restriction_level'] not in ('off','medium','strict'):
         return JSONResponse({'error':'Choose off, medium or strict response restrictions.'},400)
     if 'evidence_confidence_threshold' in payload:
@@ -1653,6 +1695,10 @@ async def update_app_settings(request: Request, payload: dict):
         if not isinstance(payload['news_area'], str) or len(payload['news_area']) > 100:
             return JSONResponse({'error':'News area must be a city or state of up to 100 characters.'},400)
         payload['news_area'] = payload['news_area'].strip()
+    if 'conversation_mode' in payload and payload['conversation_mode'] not in ('friend','teacher'):
+        return JSONResponse({'error':'Choose Friend or Teacher conversation mode.'},400)
+    if 'game_play_mode' in payload and payload['game_play_mode'] not in ('singleplayer','multiplayer'):
+        return JSONResponse({'error':'Choose Single-player or Multiplayer game mode.'},400)
     if 'user_address' in payload and payload['user_address'] not in ('sir','maam','none'):
         return JSONResponse({'error':'Choose Sir, Ma’am or No title.'},400)
     if 'avatar_presentation' in payload and payload['avatar_presentation'] not in ('auto','feminine','masculine','neutral'):
@@ -1774,6 +1820,8 @@ async def update_app_settings(request: Request, payload: dict):
         llm.avatar_presentation=payload['avatar_presentation']
     if llm and 'user_address' in payload:
         llm.user_address=payload['user_address']
+    if llm and 'conversation_mode' in payload:
+        llm.conversation_mode=payload['conversation_mode']
     if llm and 'evidence_confidence_threshold' in payload:
         llm.evidence_confidence_threshold=payload['evidence_confidence_threshold']
     if llm and 'response_restriction_level' in payload:
@@ -1808,10 +1856,13 @@ async def update_app_settings(request: Request, payload: dict):
 @app.post('/api/ollama/models')
 async def local_models(payload: dict):
     from ollama_runtime import list_models
+    from agent_local_ai import local_ai
+    native_models=local_ai.companion_models()
     try:
         models = await run_in_threadpool(list_models, payload.get('folder', ''))
-        return {'models': models}
+        return {'models': models,'native_models':native_models}
     except (ValueError, OSError) as exc:
+        if native_models:return {'models':[],'native_models':native_models,'warning':str(exc)}
         return JSONResponse({'error': str(exc)}, 400)
 
 @app.get('/api/ollama/manager')
@@ -2033,6 +2084,8 @@ async def reply_vtuber(payload: dict):
 
 
 async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, preflight=False, offer_search=False):
+    setup=getattr(app.state,'local_setup',None)
+    if setup is not None and not setup.done():await asyncio.shield(setup)
     text = payload.get("text", "").strip()
     if not text:
         return JSONResponse({"error": "empty message"}, 400)
@@ -2143,8 +2196,30 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
     if not payload.get('screen_reaction'):app.state.last_avatar_action=None
     from assistant_commands import run_command
     command_reply = resolved_reply
+    if command_reply is None and not skip_retrieval and not payload.get('screen_reaction') and phone_command_allowed(cfg,payload):
+        from command_approval import required,propose
+        if required(text):
+            identifier=propose(text,'phone' if payload.get('phone') else ('ai-vtuber' if payload.get('ai_vtuber') else 'desktop'))
+            return {'reply':'Review this PC action before it runs: '+text,'audio':None,'command_approval':identifier}
+    workflow = None
+    if command_reply is None and not skip_retrieval and not payload.get('screen_reaction'):
+        # An explicit multi-step sequence runs on a worker thread: acknowledge now,
+        # report each step as it lands, instead of staying silent until the last one.
+        from assistant_commands import background_sequence
+        pending = await run_in_threadpool(background_sequence, text, phone_command_allowed(cfg, payload), cfg.get('assistant_name', 'Sakura'), 'phone' if payload.get('phone') else ('ai-vtuber' if payload.get('ai_vtuber') else 'desktop'))
+        if pending and pending.get('id'):
+            workflow = pending
+            command_reply = pending['ack']
     if command_reply is None and not skip_retrieval:
-        command_reply = await run_in_threadpool(run_command, text, phone_command_allowed(cfg, payload), cfg.get('assistant_name', 'Sakura')) if not payload.get('screen_reaction') else None
+        command_reply = await run_in_threadpool(run_command, text, phone_command_allowed(cfg, payload), cfg.get('assistant_name', 'Sakura'), 'phone' if payload.get('phone') else ('ai-vtuber' if payload.get('ai_vtuber') else 'desktop')) if not payload.get('screen_reaction') else None
+    if command_reply is None and not skip_retrieval and not payload.get('screen_reaction') and phone_command_allowed(cfg,payload):
+        # An explicit "agent: ..." goal becomes a reviewable Agent task, never an
+        # immediate action. Ordinary conversation is unaffected.
+        from agent_handoff import start as start_agent_task
+        handoff = await run_in_threadpool(start_agent_task, text)
+        if handoff:
+            if llm:await run_in_threadpool(llm.remember_exchange,text,handoff['reply'])
+            return handoff
     if not command_reply and not skip_retrieval and not payload.get('screen_reaction'):
         from factual_grounding import gpu_memory_lookup
         command_reply = await run_in_threadpool(gpu_memory_lookup, text)
@@ -2197,7 +2272,8 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
     # LLM response
     if command_reply:
         reply = command_reply
-        if llm:
+        # A sequence acknowledgement is not the result; do not store it as the exchange.
+        if llm and not workflow:
             await run_in_threadpool(llm.remember_exchange, text, reply)
     elif payload.get('screen_reaction'):
         if not screen_image:
@@ -2238,9 +2314,10 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
     if not avatar_motion and not command_reply and not payload.get('screen_reaction') and payload.get('avatar_can_chest_tap') is True and not getattr(app.state,'tracking_only',False):
         from avatar_gestures import conversational_gesture
         avatar_motion=conversational_gesture(text,reply)
+    workflow_public = ({'id': workflow['id'], 'steps': workflow['steps']} if workflow else None)
     if payload.get('defer_audio'):
         from tts import polish_spoken_text
-        return {"reply": reply, "speech_reply":polish_spoken_text(reply), "audio": None, "voice_error": None, "game_result":game_result,"avatar_motion":avatar_motion,"emotion":reply_mood}
+        return {"reply": reply, "speech_reply":polish_spoken_text(reply), "audio": None, "voice_error": None, "game_result":game_result,"avatar_motion":avatar_motion,"emotion":reply_mood,"workflow":workflow_public}
 
     # TTS → file (no local playback — browser handles it)
     audio_url = None
@@ -2254,7 +2331,8 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
         print(f"  ⚠️  TTS error: {exc}")
 
     return {"reply": reply, "audio": audio_url, "voice_error": voice_error, "game_result":game_result,
-            "voice_notice": speech_notice(path) if audio_url else None,"avatar_motion":avatar_motion,"emotion":reply_mood}
+            "voice_notice": speech_notice(path) if audio_url else None,"avatar_motion":avatar_motion,"emotion":reply_mood,
+            "workflow":workflow_public}
 
 
 async def _strict_reply(evidence,payload):
@@ -2303,12 +2381,57 @@ def phone_command_allowed(cfg, payload):
     return bool(cfg.get('computer_control_enabled', False) and
         (not payload.get('phone') or cfg.get('phone_system_access_enabled', False)))
 
+@app.post('/api/commands/decide')
+async def decide_companion_command(payload:dict):
+    from command_approval import consume
+    if llm is None or EDITION=='vtuber' or getattr(app.state,'tracking_only',False):return JSONResponse({'error':'PC commands require Companion AI mode.'},409)
+    if set(payload)-{'id','approved'} or type(payload.get('approved')) is not bool:return JSONResponse({'error':'Invalid action decision.'},400)
+    try:
+        action=consume(payload.get('id'),payload['approved'])
+        if action is None:return {'reply':'Cancelled. The PC action was not run.'}
+        text,channel=action;cfg=get_settings()
+        if cfg.get('conversation_mode')=='friend':
+            from conversation_modes import teacher_prompt
+            return {'reply':teacher_prompt(),'mode_required':'teacher','mode_guide':'teacher'}
+        if not phone_command_allowed(cfg,{'phone':channel=='phone'}):return JSONResponse({'error':'Computer access is disabled.'},403)
+        from assistant_commands import background_sequence, run_command
+        # An approved sequence reports each step instead of staying silent until the last.
+        pending=await run_in_threadpool(background_sequence,text,True,cfg.get('assistant_name','Sakura'),channel)
+        if pending and pending.get('id'):
+            return {'reply':pending['ack'],'workflow':{'id':pending['id'],'steps':pending['steps']}}
+        reply=await run_in_threadpool(run_command,text,True,cfg.get('assistant_name','Sakura'),channel)
+        return {'reply':reply or 'No supported PC action matched. Nothing was run.'}
+    except ValueError as error:return JSONResponse({'error':str(error)},400)
+
+
 @app.post("/api/chat")
 async def chat(payload: dict):
     from response_evidence import Evidence, UNKNOWN, retrieve, threshold, response_answer
     text=payload.get('text')
     if not isinstance(text,str) or not text.strip():
         return JSONResponse({'error':'empty message'},400)
+    cfg=get_settings()
+    if not any(payload.get(k) for k in ('screen_reaction','camera_reaction','screen_observation','ai_vtuber')):
+        from conversation_modes import mode_command,mode_help,work_request,teacher_prompt,MODE_PATH
+        switch=mode_command(text)
+        if switch:
+            save_settings({'conversation_mode':switch})
+            if llm:llm.conversation_mode=switch
+            reply=switch.title()+' mode is on. '+('Tell me what you want to work on.' if switch=='teacher' else 'We can chat naturally.')
+            return {'reply':reply,'speech_reply':reply,'audio':None,'conversation_mode':switch,'mode_guide':switch}
+        if mode_help(text):
+            reply='Friend is for conversation; Teacher is for tasks and step-by-step help. '+MODE_PATH
+            return {'reply':reply,'speech_reply':reply,'audio':None,'mode_guide':'teacher'}
+        if cfg.get('conversation_mode')=='friend' and work_request(text):
+            reply=teacher_prompt()
+            if llm:await run_in_threadpool(llm.remember_exchange,text,reply)
+            return {'reply':reply,'speech_reply':reply,'audio':None,'mode_required':'teacher','mode_guide':'teacher'}
+    from teacher_agent_chat import teacher_agent_chat
+    task_reply=await run_in_threadpool(teacher_agent_chat.handle,text,cfg,llm,payload)
+    if task_reply is not None:
+        task_reply['speech_reply']=task_reply['reply']
+        if llm:await run_in_threadpool(llm.remember_exchange,text,task_reply['reply'])
+        return task_reply
     if get_settings().get('response_restriction_level')=='off':
         if llm:llm.response_restriction_level='off'
         from search_confirmation import search_consent
@@ -2353,6 +2476,29 @@ async def chat(payload: dict):
     evidence=await run_in_threadpool(response_answer,raw,minimum,text,cfg,llm)
     # No call to _chat_core's action/generation path, llm.chat or _request here.
     return await _strict_reply(evidence,payload)
+
+
+@app.get('/api/companion/agent-tasks/{identifier}')
+async def companion_agent_status(identifier:str):
+    from teacher_agent_chat import teacher_agent_chat
+    try:return teacher_agent_chat.status(identifier)
+    except ValueError as error:return JSONResponse({'error':str(error)},404)
+
+@app.post('/api/companion/agent-tasks/{identifier}/decide')
+async def companion_agent_decide(identifier:str,payload:dict):
+    if get_settings().get('conversation_mode')!='teacher' or not llm or getattr(app.state,'tracking_only',False):
+        return JSONResponse({'error':'Switch to Teacher mode to approve this task.'},409)
+    from teacher_agent_chat import teacher_agent_chat
+    try:return teacher_agent_chat.decide(identifier,payload.get('action'),payload.get('approved'),llm)
+    except ValueError as error:return JSONResponse({'error':str(error)},400)
+
+@app.post('/api/companion/agent-tasks/{identifier}/schedule')
+async def companion_agent_schedule(identifier:str,payload:dict):
+    if get_settings().get('conversation_mode')!='teacher' or getattr(app.state,'tracking_only',False):
+        return JSONResponse({'error':'Switch to Teacher mode to approve the schedule.'},409)
+    from teacher_agent_chat import teacher_agent_chat
+    try:return teacher_agent_chat.schedule(identifier,payload.get('approved'))
+    except ValueError as error:return JSONResponse({'error':str(error)},400)
 
 
 @app.post("/api/tts/speak")
@@ -2576,6 +2722,7 @@ async def speech_to_text(audio: UploadFile = File(...)):
 
 @app.post("/api/clear")
 async def clear_history():
+    if llm is None:return JSONResponse({"error":"Chat is unavailable in tracking-only mode."},409)
     from chat_attachments import attachments
     attachments.clear()
     from search_confirmation import search_consent
@@ -2586,13 +2733,13 @@ async def clear_history():
 
 @app.post("/api/refresh-memory")
 async def refresh_memory():
+    if llm is None:return JSONResponse({"error":"Memory is unavailable in tracking-only mode."},409)
     from starlette.concurrency import run_in_threadpool
     count = await run_in_threadpool(llm.refresh_memory)
     return {"ok": True, "messages": count, "message": "Chat lasts only for this app session and clears when you exit." if not llm.persist_memory else "Memory refreshed."}
 
 
 # ── entry point ────────────────────────────────────────────────
-from agent_api import agent_router
 def _agent_model_for(choice='current'):
     if choice=='current':return llm
     if choice=='ollama' or (isinstance(choice,str) and choice.startswith('ollama:')):
@@ -2634,17 +2781,19 @@ def _agent_local_model_names(settings):
             if model and re.fullmatch(r'[A-Za-z0-9._-]{1,100}',tag) and not re.fullmatch(r'[a-f0-9]{64}',tag):names.add(model+':'+tag)
     return sorted(names,key=str.casefold)
 
-app.include_router(agent_router(_agent_model_for,lambda:EDITION!='vtuber' and not getattr(app.state,'tracking_only',False),_agent_provider_status))
+def _agent_voice_transcribe(audio):
+    if stt is None:raise ValueError('Load Sakura speech recognition before transcribing voice memos.')
+    return stt.transcribe(audio)
+
+if EDITION!='vtuber':
+    from agent_api import agent_router
+    app.include_router(agent_router(_agent_model_for,lambda:not getattr(app.state,'tracking_only',False),_agent_provider_status,_agent_voice_transcribe))
+from model_library import router as model_library_router
+app.include_router(model_library_router(MODELS_DIR, _started_locally))
 from model_library_confirm import router as model_library_confirm_router
 app.include_router(model_library_confirm_router(_served_locally, _started_locally))
-
-if __name__ == "__main__":
-    print()
-    print("  🌸 Sakura — Anime AI Assistant (GUI Mode)")
-    print("  ──────────────────────────────────────────")
-    print()
-    gui_server.launch()
-
+from local_model_library import router as local_model_library_router
+app.include_router(local_model_library_router(MODELS_DIR, _started_locally))
 
 @app.post('/api/game-mode/model')
 async def game_mode_model(payload: dict):
@@ -2665,3 +2814,13 @@ async def game_mode_model(payload: dict):
         app.state.game_model_active=active
         return {'ok':True,'model':model,'provider':'ollama'}
     except Exception as error:return JSONResponse({'error':str(error)},400)
+
+
+if __name__ == "__main__":
+    print()
+    print("  🌸 Sakura — Anime AI Assistant (GUI Mode)")
+    print("  ──────────────────────────────────────────")
+    print()
+    gui_server.launch()
+
+

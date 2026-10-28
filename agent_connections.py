@@ -59,7 +59,13 @@ class Connections:
         identifier=payload.get('id') or uuid.uuid4().hex
         if not re.fullmatch(r'[a-f0-9]{32}',identifier):raise ValueError('Invalid connection ID.')
         config={'id':identifier,'name':name,'transport':kind,'revision':uuid.uuid4().hex}
-        if kind=='http':
+        if kind=='builtin':
+            from agent_service_mcp import SERVICES
+            service=payload.get('service')
+            if service not in SERVICES:raise ValueError('Choose a supported built-in service.')
+            if payload.get('token') or payload.get('env'):raise ValueError('Built-in services use the account connected in Connections.')
+            config['service']=service
+        elif kind=='http':
             url=payload.get('url','');parsed=urlparse(url)
             if (parsed.scheme not in ('https','http') or not parsed.hostname or parsed.username or parsed.password
                     or parsed.query or parsed.fragment or (parsed.scheme=='http' and parsed.hostname not in ('localhost','127.0.0.1','::1'))):
@@ -70,7 +76,7 @@ class Connections:
             if not isinstance(command,str) or not command or len(command)>500:raise ValueError('Enter the MCP server executable.')
             if not isinstance(args,list) or len(args)>50 or any(not isinstance(x,str) or len(x)>2000 for x in args):raise ValueError('MCP arguments must be an array of strings.')
             config.update(command=command,args=args)
-        else:raise ValueError('Choose http or stdio.')
+        else:raise ValueError('Choose a built-in service, HTTP or stdio.')
         env=payload.get('env',{})
         if not isinstance(env,dict) or any(not isinstance(k,str) or not isinstance(v,str) for k,v in env.items()):raise ValueError('Environment variables must be string key/value pairs.')
         old=secret_get('mcp:'+identifier)
@@ -102,17 +108,30 @@ async def _mcp_request(config,operation,tool=None,arguments=None,schema_hash=Non
     from agent_runtime import digest
     secrets=secret_get('mcp:'+config['id'])
     async with AsyncExitStack() as stack:
-        if config['transport']=='stdio':
+        if config['transport']=='builtin':
+            from mcp.shared.memory import create_connected_server_and_client_session
+            from agent_service_mcp import create_server
+            session=await stack.enter_async_context(create_connected_server_and_client_session(create_server(config['service']),read_timeout_seconds=timedelta(seconds=30)))
+        elif config['transport']=='stdio':
             env={key:os.environ[key] for key in ('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','USERPROFILE','HOME') if key in os.environ}
             env.update(secrets.get('env',{}))
             streams=await stack.enter_async_context(stdio_client(StdioServerParameters(command=config['command'],args=config['args'],env=env)))
         else:
             headers={'Authorization':'Bearer '+secrets['token']} if secrets.get('token') else {}
             streams=await stack.enter_async_context(streamablehttp_client(config['url'],headers=headers,timeout=timedelta(seconds=20),sse_read_timeout=timedelta(seconds=30)))
-        session=await stack.enter_async_context(ClientSession(streams[0],streams[1],read_timeout_seconds=timedelta(seconds=30)))
-        await session.initialize()
-        listing=await session.list_tools()
-        tools=[{'name':item.name,'description':(item.description or '')[:1200],'inputSchema':bounded_schema(item.inputSchema)} for item in listing.tools[:80]]
+        if config['transport']!='builtin':
+            session=await stack.enter_async_context(ClientSession(streams[0],streams[1],read_timeout_seconds=timedelta(seconds=30)))
+            await session.initialize()
+        tools=[];cursor=None;seen=set()
+        for _ in range(16):
+            listing=await session.list_tools(cursor=cursor) if cursor else await session.list_tools()
+            tools.extend({'name':item.name,'description':(item.description or '')[:1200],'inputSchema':bounded_schema(item.inputSchema)} for item in listing.tools)
+            if len(tools)>500:raise ValueError('This server exposes more than 500 tools. Configure a smaller tool tier.')
+            cursor=getattr(listing,'nextCursor',None)
+            if not cursor:break
+            if not isinstance(cursor,str) or cursor in seen:raise ValueError('The MCP server returned invalid tool pagination.')
+            seen.add(cursor)
+        else:raise ValueError('Too many MCP tool pages. Configure a smaller tool tier.')
         if operation=='discover':return tools
         selected=next((item for item in tools if item['name']==tool),None)
         if not selected:raise ValueError('The connected server no longer exposes this tool. Discover its tools again.')

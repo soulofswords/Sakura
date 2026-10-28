@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 import requests
-from fastapi.testclient import TestClient
+from local_client import TestClient
 import app
 from llm import LLM
 from ollama_runtime import validate_folder, server_for_folder

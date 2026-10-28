@@ -64,6 +64,25 @@ class ModelImportTests(unittest.TestCase):
                 import_package(folder, files[:-1], 'live2d')
             self.assertEqual(list(Path(folder).iterdir()), [])
 
+    def test_named_folders_add_id_only_on_collision_and_never_overwrite(self):
+        files=[('Ringo.pmx',pmx_with_bones(['全ての親','センター','上半身','頭','左腕','右腕','左足','右足']))]
+        with tempfile.TemporaryDirectory() as folder:
+            first=import_package(folder,files,'pmx','Ananta / Ringo','cloud-first')
+            second=import_package(folder,files,'pmx','Ananta / Ringo','cloud-second')
+            self.assertEqual(Path(first['models'][0]).parts[1],'Ringo')
+            self.assertEqual(Path(second['models'][0]).parts[1],'Ringo cloud-second')
+            self.assertTrue((Path(folder)/first['models'][0]).is_file())
+            self.assertTrue((Path(folder)/second['models'][0]).is_file())
+
+    def test_unsafe_or_reserved_display_names_stay_in_format_directory(self):
+        from model_import import model_folder_name
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name in ['../../escape','CON','NUL.txt','..','name:*?<>|','日本語モデル']:
+                label=model_folder_name(root,'pmx',name)
+                self.assertTrue((root/'pmx'/label).resolve().is_relative_to(root/'pmx'))
+                self.assertNotEqual(label,'CON');self.assertNotEqual(label,'NUL.txt')
+
     def test_format_buttons_reject_wrong_model_type(self):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaisesRegex(ValueError, 'matching'):

@@ -161,10 +161,18 @@ class CalendarChat:
         return 'Add '+self._details(item)+' to Google Calendar with a notification at the start? Say yes to save, or cancel.'
 
 _instance=None
-def calendar_command(text):
+_instances={}
+
+def calendar_command(text,channel="desktop"):
     global _instance
-    if _instance is None:
+    if channel=='desktop':
+        if _instance is None:
+            from agent_calendar import google_calendar
+            from assistant_reminders import reminders
+            _instance=CalendarChat(google_calendar,reminders)
+        return _instance.command(text)
+    if channel not in _instances:
         from agent_calendar import google_calendar
         from assistant_reminders import reminders
-        _instance=CalendarChat(google_calendar,reminders)
-    return _instance.command(text)
+        _instances[channel]=CalendarChat(google_calendar,reminders)
+    return _instances[channel].command(text)

@@ -51,25 +51,30 @@ def account_error(response):
     return AccountError('The account service refused the request. Check your email and password, or ask the Sakura owner to check the Auth logs.')
 
 
-def library_url(value):
+def library_url(value, *, allow_loopback=False):
     value = str(value or '').strip().rstrip('/')
     parsed = urlsplit(value)
     if (parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in {'127.0.0.1', 'localhost', '::1'})) or not parsed.hostname:
         raise ValueError('Use the HTTPS address of the Sakura library service.')
     if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/', '/functions/v1/sakura-library'):
         raise ValueError('Use the library service address without a path, password or query.')
+    # A settings field is not a trust decision. Never send saved account tokens
+    # to an arbitrary HTTPS host. Loopback remains available for owner tools.
+    if value != LIBRARY_URL and not (allow_loopback and parsed.scheme == 'http' and parsed.hostname in {'127.0.0.1', 'localhost', '::1'}):
+        raise ValueError('Use the official Sakura library address.')
     return value
 
 
 class ModelLibrary:
-    def __init__(self, root, configuration, transport=requests):
+    def __init__(self, root, configuration, transport=requests, *, allow_loopback=False):
         self.root = Path(root)
         self.configuration = configuration
         self.transport = transport
+        self.allow_loopback = allow_loopback
 
     def _request(self, path):
         config = self.configuration()
-        endpoint = library_url(config.get('url'))
+        endpoint = library_url(config.get('url'), allow_loopback=self.allow_loopback)
         token = str(config.get('token') or '')
         if not token:
             raise ValueError('Connect to the Sakura library with your access code first.')
@@ -106,8 +111,22 @@ class ModelLibrary:
                 raise ValueError('Model packages must be under 512 MB.')
             record = self._installed(entry['id'])
             models.append({key: entry.get(key) for key in ('id', 'name', 'format', 'bytes', 'sha256', 'version', 'mobile_compatible')}
-                          | {'installed': bool(record and record.get('sha256') == entry['sha256'])})
+                          | {'preview': entry.get('preview') is True,
+                             'installed': bool(record and record.get('sha256') == entry['sha256'])})
         return {'models': models}
+
+    def preview(self, identifier):
+        if not ID.fullmatch(str(identifier)):
+            raise ValueError('Choose a model from the library.')
+        with self._request('/v1/models/' + identifier + '/preview') as response:
+            content=bytearray()
+            for chunk in response.iter_content(65536):
+                content.extend(chunk)
+                if len(content)>8_000_000:raise ValueError('The model preview is too large.')
+        # Only publisher-generated raster previews, never HTML/SVG or remote scripts.
+        if content[:4]!=b'RIFF' or content[8:12]!=b'WEBP':
+            raise ValueError('Invalid model preview.')
+        return bytes(content)
 
     def _installed(self, identifier):
         try:
@@ -141,7 +160,7 @@ class ModelLibrary:
                         raise ValueError('The download exceeded its declared size.')
             if len(content) != entry['bytes'] or digest.hexdigest() != entry['sha256']:
                 raise ValueError('The model download failed its integrity check. Nothing was installed.')
-            result = import_package(self.root, [('library.zip', content)], entry['format'])
+            result = import_package(self.root, [('library.zip', content)], entry['format'], entry['name'], identifier)
             record = {**entry, 'models': result['models']}
             folder = self.root / '.library'
             folder.mkdir(exist_ok=True)
@@ -156,7 +175,6 @@ def router(root, local_check):
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
     from agent_connections import secret_get, secret_set
-    from model_library_confirm import reset_pending
 
     routes = APIRouter(prefix='/api/model-library')
     session_lock = threading.Lock()
@@ -170,14 +188,13 @@ def router(root, local_check):
                 ' will open nothing on this computer. Close whatever uses ' + str(LINK_PORT) + ', restart Sakura, then request a fresh email.')
 
     def auth_call(endpoint, action, body):
+        if endpoint != LIBRARY_URL:
+            raise AccountError('Sakura account sign-in is only available through the official Sakura library.')
         # Direct managed Auth avoids routing passwords through a model-file host.
-        if endpoint == LIBRARY_URL:
-            path = {'signin': '/token?grant_type=password', 'signup': '/signup', 'recover': '/recover',
-                    'refresh': '/token?grant_type=refresh_token'}[action]
-            target = SUPABASE_URL + '/auth/v1' + path
-            headers = {'apikey': SUPABASE_PUBLISHABLE_KEY}
-        else:
-            target, headers = endpoint + '/v1/auth/' + action, {}
+        path = {'signin': '/token?grant_type=password', 'signup': '/signup', 'recover': '/recover',
+                'refresh': '/token?grant_type=refresh_token'}[action]
+        target = SUPABASE_URL + '/auth/v1' + path
+        headers = {'apikey': SUPABASE_PUBLISHABLE_KEY}
         with requests.post(target, json=body, headers=headers, timeout=(8, 30), allow_redirects=False) as response:
             if response.status_code not in (200, 201):
                 raise account_error(response)
@@ -186,7 +203,8 @@ def router(root, local_check):
             # Auth replies the same way whether or not the address has an account, so the
             # wording must not confirm either case.
             return {'reset_sent': True, 'message': 'If that email has a Sakura account, a reset link is on its way. Check your inbox and your spam folder.'
-                        ' Open the link on this computer and choose the new password there: Sakura keeps using your old password until you press Set new password.'}
+                        ' Open the link on this computer: that proves the mailbox is yours and Sakura keeps the verified session here.'
+                        ' Choose the new password on that page, then return to Sakura and sign in.'}
         # A refresh must always carry a session, so only a sign-up or sign-in answer may read as
         # "confirm your email first".
         if action != 'refresh' and (data.get('confirmation_required') or (endpoint == LIBRARY_URL and not data.get('access_token'))):
@@ -250,21 +268,14 @@ def router(root, local_check):
                 return {**data, 'message': data['message'] + warning} if warning else data
             candidate = {'url': endpoint, 'token': data['access_token'], 'refresh_token': data['refresh_token'],
                          'expires_at': time.time() + int(data['expires_in'])}
-            if endpoint != LIBRARY_URL:
-                try:
-                    await run_in_threadpool(ModelLibrary(root, lambda: candidate).catalogue)
-                except ValueError as exc:
-                    raise AccountError(str(exc))
             secret_set('model-library', candidate)
             return {'ok': True}
         except AccountError as exc:
             text = str(exc)
-            # A reset link the user has opened but not finished looks exactly like a wrong
-            # password from here, so say which of the two it is while the link still waits.
-            if action == 'signin' and isinstance(email, str) and reset_pending(email):
-                text += (' You have a reset link open on this computer that has not been finished yet:'
-                         ' choose the new password on that page and press Set new password, then sign in with it.')
-            return JSONResponse({'error': text}, 400)
+            payload = {'error': text}
+            # Recovery authorization belongs only to the page opened by the
+            # mailbox link. An email address must never disclose its reset slot.
+            return JSONResponse(payload, 400)
         except requests.exceptions.JSONDecodeError:
             # A reply that is not JSON means the service is reachable and confused, which is a
             # different thing to tell the user from a network that is not there at all.
@@ -322,5 +333,17 @@ def router(root, local_check):
             return await run_in_threadpool(client.install, identifier)
         except (ValueError, requests.RequestException, OSError):
             return JSONResponse({'error': 'Installation failed. Check access, free space and the model package. Your existing models were kept.'}, 400)
+
+    @routes.get('/models/{identifier}/preview')
+    async def preview(identifier: str, request: Request):
+        from fastapi.responses import Response
+        if not local_check(request):
+            return JSONResponse({'error': 'Use Sakura on this computer.'},403)
+        try:
+            image=await run_in_threadpool(client.preview,identifier)
+            return Response(image,media_type='image/webp',headers={
+                'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+        except (ValueError,requests.RequestException):
+            return JSONResponse({'error':'Preview unavailable.'},404)
 
     return routes

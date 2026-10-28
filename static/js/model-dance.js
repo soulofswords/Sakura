@@ -1,4 +1,4 @@
-import ImportedGreeting from './imported-greeting.js?v=fbx90';
+import ImportedGreeting from './imported-greeting.js?v=irina-greeting113';
 import {presentHand} from './hand-presentation.js?v=session87';
 // Original procedural routines retargeted to the currently loaded 3D rig.
 export default class ModelDance {

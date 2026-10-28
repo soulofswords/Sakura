@@ -10,8 +10,18 @@ from pathlib import Path
 
 
 def system_status():
-    result={'platform':platform.system(),'logical_cpus':os.cpu_count(),'sampled_at':time.time()}
+    result={'platform':platform.system(),'logical_cpus':os.cpu_count(),'architecture':platform.machine(),'sampled_at':time.time()}
     if os.name=='nt':
+        import sys
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r'HARDWARE\DESCRIPTION\System\CentralProcessor\0') as key:
+                result['cpu_name']=winreg.QueryValueEx(key,'ProcessorNameString')[0].strip()
+        except OSError:
+            pass
+        version=sys.getwindowsversion()
+        name='Windows 11' if version.major==10 and version.build>=22000 else f'Windows {version.major}'
+        result['os']=f'{name} (build {version.build})'
         from ctypes import wintypes as w
         kernel=ctypes.WinDLL('kernel32',use_last_error=True)
         class Memory(ctypes.Structure):
@@ -37,6 +47,8 @@ def system_status():
 
 def status_reply(data):
     parts=[]
+    identity=[value for value in (data.get('cpu_name'),data.get('os')) if value]
+    if identity:parts.append('System: '+', '.join(identity)+'.')
     cpu=data.get('cpu_percent')
     parts.append('CPU usage is '+str(cpu)+' percent.' if cpu is not None else 'CPU usage is unavailable from Windows.')
     if data.get('ram'):

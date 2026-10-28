@@ -1,7 +1,7 @@
 import tempfile,unittest,json
 from pathlib import Path
 from unittest.mock import patch
-from fastapi.testclient import TestClient
+from local_client import TestClient
 import app
 class LayoutTests(unittest.TestCase):
  def test_grouped_discovery_legacy_url_and_texture_fallback(self):

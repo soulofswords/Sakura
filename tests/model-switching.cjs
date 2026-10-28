@@ -35,7 +35,13 @@ let source = fs.readFileSync('static/js/model-viewer.js', 'utf8')
     .replace(/^import .*;\r?\n/gm, '').replace('export default class ModelViewer', 'class ModelViewer');
 vm.runInNewContext(source + '\nthis.ModelViewer = ModelViewer; this.SmartTgaLoader = SmartTgaLoader;', context);
 vm.runInNewContext(fs.readFileSync('static/js/model-bones.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+'\nthis.ModelBones=ModelBones;',context);
+for(const [file,names]of [['pmx-material-controls.js',['collectMaterialControls','withoutMaterialTargets','bindMaterialControls']],['pmx-sparse-morphs.js',['bindSparseMorphs']],['pmx-accessory-ik.js',['updateAccessoryIK']]]){
+ const moduleSource=fs.readFileSync('static/js/'+file,'utf8').replace(/^import .*;\r?\n/gm,'').replace(/^export /gm,'');
+ Object.assign(context,vm.runInNewContext(moduleSource+'\n({'+names.join(',')+'})',{THREE:context.THREE}));
+}
 const viewer = Object.create(context.ModelViewer.prototype);
+// Exercise internal stale-result/error handling here; the public serialized queue has its own regression test.
+viewer.loadModel=viewer._loadModelSerialized;
 const scene = new Set();
 Object.assign(viewer, {
     loadGeneration: 0, model: null, placeholderGroup: null,
@@ -71,7 +77,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     const initial = viewer.loadModel('evelyn');
     await tick(); pending.get('evelyn').onLoad(first); await initial;
     assert.ok(viewer.boneControls instanceof context.ModelBones,'Bone restoration must initialize during model load, before Settings is opened');
-    const kafkaPromise = viewer.loadModel('kafka');
+    const kafkaPromise = viewer.loadModel('kafka',{lowMemory:true});
     assert.equal(scene.size, 0, 'Previous model removed immediately');
     for (const resource of [first.geometry, first.skeleton, first.material, first.texture]) {
         assert.equal(resource.disposed, 1, 'GPU resources released once');

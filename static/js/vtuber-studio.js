@@ -166,7 +166,7 @@ export function installVtuberStudio(){
   if(!node.classList.contains('hidden')){setHidden(panel,true);if(id==='tracking-modal')markPane('tracking');else if(id==='expression-modal')markPane('expressions');else if(id==='settings-modal')markPane('settings');}
  }).observe(node,{attributes:true,attributeFilter:['class']});}
  for(const id of ['tracking-status','tracking-hands-enabled']){const el=byId(id);if(el)new MutationObserver(syncStatus).observe(el,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-pressed']});}
- for(const id of ['tracking-connect-phone-btn','settings-connect-phone-btn','connect-phone-btn'])byId(id)?.addEventListener('click',()=>{if(active)queueMicrotask(()=>showCustom('phone'));});
+ window.addEventListener('sakura-open-phone-panel',event=>{if(active){event.preventDefault();showCustom('phone');}});
  // Advanced camera settings remain the original fully wired camera/audio panel.
  const agentSection=byId('open-agent-panel')?.closest('fieldset');if(agentSection)agentSection.classList.add('studio-ai-only');
  const trackingOptions=document.querySelector('#tracking-modal .tracking-options');

@@ -19,7 +19,9 @@ const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playw
  await page.evaluate(()=>window.toggleCompanionView());
  assert.equal(await page.evaluate(()=>document.body.classList.contains('transparent-mode')),false);
  assert.equal(await page.locator('#compact-companion-mic').isVisible(),true);
- await page.evaluate(()=>window.toggleCompanionView());
+ assert.equal(await page.locator('#compact-companion-transparency').isVisible(),true);
+ const transparentBox=await page.locator('#compact-companion-transparency').boundingBox();assert.ok(transparentBox.x+transparentBox.width<micBox.x,'Transparency shortcut does not overlap mic');
+ await page.locator('#compact-companion-transparency').click();
  assert.equal(await page.evaluate(()=>document.body.classList.contains('transparent-mode')),true);
  assert.equal(await page.locator('#compact-companion-mic').isVisible(),false);
  assert.equal(await page.locator('#top-bar').isVisible(),false,'Themed header cannot leak into character-only transparent mode');

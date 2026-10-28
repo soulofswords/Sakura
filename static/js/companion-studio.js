@@ -21,7 +21,7 @@ export function installCompanionStudio(){
  <aside id="companion-panel" hidden aria-labelledby="companion-panel-title"><header class="studio-panel-header"><div><small>SAKURA COMPANION</small><h2 id="companion-panel-title">Character</h2></div><button id="companion-panel-close" type="button" aria-label="Close panel">×</button></header><div class="studio-panel-body">
  <div data-companion-content="character" hidden><section class="studio-card"><h3>Your character library</h3><input id="companion-model-search" type="search" aria-label="Search imported characters" placeholder="Search your characters…"><div id="companion-model-results" hidden></div><div data-companion-port="model-dropdown"></div><div data-companion-port="vrm-dropdown"></div><div data-companion-port="live2d-dropdown"></div><p>Select a character above, or import a complete model package below.</p></section><section class="studio-card"><h3>Import a character</h3><div class="studio-actions" data-companion-port="imports"></div><p>PMX and Live2D need their texture folders. VRM uses a single .vrm file.</p></section><section class="studio-card"><h3>Framing & customization</h3><div data-companion-port="size"></div><div class="studio-actions" data-companion-port="framing"></div></section></div>
  <div data-companion-content="camera" hidden><section class="studio-card"><h3>Give Sakura the camera</h3><div class="studio-camera-choices"><button type="button" data-companion-camera="objects" aria-pressed="false"><strong>See objects</strong><span>Lens-style: show her something and she describes it</span></button><button type="button" data-companion-camera="tracking" aria-pressed="false"><strong>Track my face &amp; hands</strong><span>Add-on: your movement drives the avatar while chat stays on</span></button></div><div data-companion-port="camera-device"></div><div data-companion-port="camera"></div><p>Only one camera task runs at a time. Object frames go to your AI provider; face and hand tracking stay on this PC.</p></section></div>
- <div data-companion-content="voice" hidden><section class="studio-card"><h3>Voice & speech</h3><div data-companion-port="voice"></div><div class="studio-actions" data-companion-port="speech"></div><div class="studio-actions" style="margin-top:10px"><button type="button" data-companion-action="voice-library">Voice library</button><button type="button" data-companion-action="mouth">Mouth & lip sync</button></div></section></div>
+ <div data-companion-content="voice" hidden><section class="studio-card"><h3>Voice & speech</h3><h4>Conversation mode</h4><div class="studio-actions" role="group" aria-label="Conversation mode"><button type="button" data-companion-style="friend" role="switch" aria-label="Friend" aria-checked="true"><span>Friend</span><span class="conversation-switch-track" aria-hidden="true"></span><span data-style-state aria-hidden="true">On</span></button><button type="button" data-companion-style="teacher" role="switch" aria-label="Teacher" aria-checked="false"><span>Teacher</span><span class="conversation-switch-track" aria-hidden="true"></span><span data-style-state aria-hidden="true">Off</span></button></div><p id="companion-style-status" role="status">Friend: warm, casual conversation.</p><div data-companion-port="voice"></div><div class="studio-actions" data-companion-port="speech"></div><div class="studio-actions" style="margin-top:10px"><button type="button" data-companion-action="voice-library">Voice library</button><button type="button" data-companion-action="mouth">Mouth & lip sync</button></div></section></div>
  <div data-companion-content="tools" hidden><section class="studio-card"><h3>Movement & dance</h3><div data-companion-port="dance"></div><div class="studio-actions" data-companion-port="dance-buttons"></div></section><section class="studio-card"><h3>Screen & games</h3><div class="studio-actions" data-companion-port="screen"></div><p>Screen viewing, reactions and game detection run locally and only while enabled.</p></section><section class="studio-card"><h3>Stage & extras</h3><div class="studio-actions" data-companion-port="stage"></div></section></div>
  <div data-companion-content="output" hidden><section class="studio-card"><h3>Virtual camera</h3><div class="studio-actions" data-companion-port="virtual-camera"></div><p>Install the Sakura camera driver here, then pick Sakura Virtual Camera in Discord, Zoom or OBS.</p></section><div data-companion-port="spout"></div></div>
  <div data-companion-content="phone" hidden><div data-companion-port="phone"></div><section class="studio-card"><h3>Use your phone camera</h3><div class="studio-actions" data-companion-port="phone-buttons"></div><p>Open Sakura Mobile, choose this PC from the list and enter its 6-digit pairing code. Keep Sakura Mobile open.</p></section></div>
@@ -60,6 +60,12 @@ export function installCompanionStudio(){
   });
   window.addEventListener('resize',()=>{if(active&&editor.style.height){const rect=editor.getBoundingClientRect();resize(rect.width,rect.height);}});
  }
+ let styleRevision=0;
+ const styleButtons=[...root.querySelectorAll('[data-companion-style]')];
+ function showConversationStyle(mode){for(const button of styleButtons){const on=button.dataset.companionStyle===mode;button.setAttribute('aria-checked',String(on));button.querySelector('[data-style-state]').textContent=on?'On':'Off';}byId('companion-style-status').textContent=mode==='teacher'?'Teacher: patient explanations, useful examples and step-by-step guidance.':'Friend: warm, casual conversation.';}
+ async function readConversationStyle(){const revision=styleRevision;try{const response=await fetch('/api/settings');if(!response.ok)throw Error('Could not read conversation mode.');const data=await response.json();if(revision===styleRevision)showConversationStyle(data.conversation_mode||'friend');}catch(error){if(revision===styleRevision)byId('companion-style-status').textContent=error.message;}}
+ async function setConversationStyle(mode){++styleRevision;for(const button of styleButtons)button.disabled=true;try{const response=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_mode:mode})});const data=await response.json();if(!response.ok)throw Error(data.error||'Could not save conversation mode.');showConversationStyle(mode);}catch(error){byId('companion-style-status').textContent=error.message;}finally{for(const button of styleButtons)button.disabled=false;}}
+ for(const button of styleButtons)button.onclick=()=>void setConversationStyle(button.getAttribute('aria-checked')==='true'?(button.dataset.companionStyle==='friend'?'teacher':'friend'):button.dataset.companionStyle);
  const click=id=>byId(id)?.click();
  const setHidden=(el,hidden)=>{if(el&&el.hidden!==hidden)el.hidden=hidden;};
  function markPane(key){
@@ -73,6 +79,7 @@ export function installCompanionStudio(){
   for(const el of root.querySelectorAll('[data-companion-content]'))setHidden(el,el.dataset.companionContent!==key);
   byId('companion-panel-title').textContent=entries.find(e=>e[0]===key)?.[1]||key;markPane(key);
   if(key==='camera')syncCameraButtons();
+  if(key==='voice')void readConversationStyle();
  }
  function hideNative(except=''){
   for(const [id,close] of [['settings-modal','close-settings-btn'],['expression-modal','close-expression-modal'],['tracking-modal','close-tracking-modal']]){
@@ -126,7 +133,7 @@ export function installCompanionStudio(){
   for(const id of ['interrupt-btn'])move(byId(id),'speech');
   move(byId('dance-style')?.closest('label'),'dance');
   for(const id of ['dance-btn','dance-stop-btn'])move(byId(id),'dance-buttons');
-  for(const id of ['screen-view-btn','screen-react-btn','auto-game-btn'])move(byId(id),'screen');
+  for(const id of ['screen-view-btn','screen-react-btn','auto-game-btn','game-play-mode-control'])move(byId(id),'screen');
   for(const id of ['bg-toggle-btn','vtuber-mode-btn','send-model-mobile'])move(byId(id),'stage');
   move(byId('virtual-camera-toggle'),'virtual-camera');
   move(byId('spout-enabled')?.closest('fieldset'),'spout');
@@ -201,6 +208,13 @@ export function installCompanionStudio(){
   else if(action==='mouth'){closePanel();click('expression-editor-btn');document.querySelector('[data-model-tab="mouth"]')?.click();markPane('voice');}
  });
  byId('companion-panel-close').onclick=closePanel;
+ window.addEventListener('sakura-open-phone-panel',event=>{if(active){event.preventDefault();openPane('phone');}});
+ window.addEventListener('sakura-open-conversation-mode',event=>{
+  if(!active)return;event.preventDefault();openPane('voice');
+  const mode=event.detail?.mode==='friend'?'friend':'teacher';
+  const target=root.querySelector('[data-companion-style="'+mode+'"]');
+  target?.scrollIntoView({block:'nearest'});target?.focus();
+ });
  byId('companion-vtuber-switch').onclick=()=>click('tracking-mode-btn');
  byId('companion-agent-switch').onclick=()=>click('agent-mode-toggle');
  document.addEventListener('keydown',event=>{if(active&&event.key==='Escape')closePanel();});

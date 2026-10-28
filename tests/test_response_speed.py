@@ -4,7 +4,7 @@ import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch
-from fastapi.testclient import TestClient
+from local_client import TestClient
 import app
 from llm import LLM
 

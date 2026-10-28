@@ -4,11 +4,11 @@ from pathlib import Path
 import argparse
 
 PERSONAL_EXTENSIONS={'.pmx','.pmd','.vrm','.moc3','.gguf','.safetensors','.pth','.pt','.index'}
-PERSONAL_NAMES={'.gemini-key.bin','.cloud-keys.bin','phone-devices.json','conversation-memory.json','agent-connections.json','agent-task-history.json','phone-link.key','google-token.json'}
+PERSONAL_NAMES={'agent-learning.json','agent-learning.tmp','.gemini-key.bin','.cloud-keys.bin','.library-publisher.bin','.library-publisher.tmp','phone-devices.json','conversation-memory.json','agent-connections.json','agent-task-history.json','agent-automations.json','agent-automations.tmp','phone-link.key','google-token.json'}
 def inspect(archive,windows):
     names=archive.namelist()
     assert len(names)==len(set(names)),'Duplicate archive entries'
-    leaks=[n for n in names if Path(n).suffix.lower() in PERSONAL_EXTENSIONS or Path(n).name in PERSONAL_NAMES or n.startswith(('Sakura/models/','Sakura/voices/','Sakura/llm-models/','Sakura/rvc-assets/'))]
+    leaks=[n for n in names if Path(n).suffix.lower() in PERSONAL_EXTENSIONS or Path(n).name in PERSONAL_NAMES or '/agent-local-ai/' in n or n.startswith(('Sakura/models/','Sakura/voices/','Sakura/llm-models/','Sakura/rvc-assets/'))]
     assert not leaks,'Personal assets/credentials leaked: '+str(leaks)
     backups=[n for n in names if n.lower().endswith(('.bak','.backup','.orig','.rej','.tmp','.map','~')) or '.before-' in n.lower()]
     assert not backups,'Backup/debug sources leaked: '+str(backups)

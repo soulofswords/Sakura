@@ -55,6 +55,18 @@ class ProcessJob:
         if resume(wintypes.HANDLE(int(process._handle))) != 0:
             raise RuntimeError('Could not resume the owned Ollama process.')
 
+    def attach_running_pid(self, pid):
+        """Own an app-created driver before it spawns browser children. Windows only."""
+        if os.name != 'nt':
+            raise RuntimeError('Running process ownership requires a Windows job.')
+        self.kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+        self.kernel.OpenProcess.restype=wintypes.HANDLE
+        handle=self.kernel.OpenProcess(0x0100|0x0001,False,pid)
+        if not handle:raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if not self.kernel.AssignProcessToJobObject(self.handle,handle):raise ctypes.WinError(ctypes.get_last_error())
+        finally:self.kernel.CloseHandle(handle)
+
     def close(self):
         if self.process_group is not None:
             try:

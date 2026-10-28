@@ -5,7 +5,7 @@ const restore = new Function(source.match(/_restoreCursorHeadPose\([^)]*\) \{([\
 const method = name => {
     const fn = new Function(...(name === '_animateEyeTracking' ? ['delta'] : name === 'setEyeTrackingTarget' ? ['x', 'y'] : []),
         source.match(new RegExp(name + '\\([^)]*\\) \\{([\\s\\S]*?)\\n    \\}'))[1]);
-    return function(...args){ this._restoreCursorHeadPose ||= restore; return fn.apply(this,args); };
+    return function(...args){ this._restoreCursorHeadPose ||= restore; this.limitEyeRotation ||= new Function('pitch','yaw',source.match(/limitEyeRotation\(pitch,yaw\) \{([\s\S]*?)\n    \}/)[1]); return fn.apply(this,args); };
 };
 const configureGaze = new Function('vrm', source.slice(source.indexOf('        const lookAtApplier = vrm.lookAt?.applier;'),source.indexOf('        VRMUtils.rotateVRM0(vrm);')));
 for(const expressionBased of [false,true]) {

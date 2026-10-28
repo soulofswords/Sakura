@@ -1,3 +1,5 @@
+import {bindSparseMorphs} from './pmx-sparse-morphs.js?v=material-controls114';
+import {collectMaterialControls,withoutMaterialTargets,bindMaterialControls} from './pmx-material-controls.js?v=material-controls114';
 import {waitForModelGpu} from './model-presentation.js?v=switch85';
 import Live2DViewer from './live2d-viewer.js?v=stage-items151';
 import ModelBlockTransition from './model-block-transition.js?v=switch85';
@@ -12,16 +14,17 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/static/vendor/vrm/three-vrm.module.min.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import AvatarRetarget from './avatar-retarget.js?v=torso-fluid145';
+import AvatarRetarget from './avatar-retarget.js?v=irina-greeting113';
 import ArmClearance from './arm-clearance.js?v=clearance1';
-import ModelPhysics from './model-physics.js?v=rest-clearance112';
-import ModelRigMonitor from './model-rig-monitor.js?v=authored-cloth76';
+import ModelPhysics from './model-physics.js?v=irina-drape112';
+import ModelRigMonitor from './model-rig-monitor.js?v=irina-greeting113';
 import ModelRepairStore from './model-repair-store.js?v=1';
 import {ModelBones} from './model-bones.js?v=persistent5';
 import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
+import {updateAccessoryIK} from './pmx-accessory-ik.js?v=1';
 import ReactionExpressions from './reaction-expressions.js?v=files106';
 import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
-import ModelDance from './model-dance.js?v=fbx90';
+import ModelDance from './model-dance.js?v=irina-greeting113';
 import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
 
 /**
@@ -164,29 +167,29 @@ export default class ModelViewer {
         this.renderer.sortObjects = true; // depth-sort transparent draw calls
         this.container.appendChild(this.renderer.domElement);
 
-        // Lights
+        // Neutral stage lighting preserves imported texture colours.
         this.ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
         this.scene.add(this.ambientLight);
 
-        this.keyLight = new THREE.DirectionalLight(0xfff5f8, 1.4);
+        this.keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
         this.keyLight.position.set(5, 20, 15);
         this.scene.add(this.keyLight);
         this.scene.add(this.keyLight.target);
 
-        this.rimLight = new THREE.DirectionalLight(0xff99bb, 0.9);
+        this.rimLight = new THREE.DirectionalLight(0xffffff, 0.9);
         this.rimLight.position.set(-8, 15, -10);
         this.scene.add(this.rimLight);
 
         // Ground / floor atmospheric bounce light
-        this.groundLight = new THREE.DirectionalLight(0xff6ea7, 0.4);
+        this.groundLight = new THREE.DirectionalLight(0xffffff, 0.4);
         this.groundLight.position.set(0, -6, 6);
         this.scene.add(this.groundLight);
-        this.fillLight = new THREE.HemisphereLight(0xf0f5ff, 0x494052, 0.35);
+        this.fillLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.35);
         this.scene.add(this.fillLight);
         this.setQuality(localStorage.getItem('sakura_render_quality') || 'balanced');
 
         // Environment color state
-        this.envColor = '#ff6ea7';
+        this.envColor = '#ffffff';
         this.envIntensity = 1.0;
         this.rgbBreathing = false;
         this.onColorChange = null;
@@ -755,6 +758,21 @@ export default class ModelViewer {
     }
 
     async loadModel(url, options = {}) {
+        const request=(this._modelSwitchRequest||0)+1;
+        this._modelSwitchRequest=request;
+        const previous=this._modelSwitchQueue||Promise.resolve();
+        const operation=previous.catch(()=>{}).then(()=>{
+            if(request!==this._modelSwitchRequest)return null;
+            return this._loadModelSerialized(url,options);
+        });
+        this._modelSwitchQueue=operation;
+        try{return await operation;}
+        finally{if(this._modelSwitchQueue===operation)this._modelSwitchQueue=null;}
+    }
+
+    async _loadModelSerialized(url, options = {}) {
+        this.pmxMaterialControls=null;
+        this.pmxSparseMorphs=null;
         this.blockTransition ||= new ModelBlockTransition(this);
         const transitionHoldsFrame=this.blockTransition.begin();
         // The running camera worker must never retarget the disposed skeleton.
@@ -774,6 +792,15 @@ export default class ModelViewer {
         this.clearManualExpression();
         this._displayLoading = true;
         try {
+            // In a running game, do not retain one avatar's GPU resources while
+            // GLTF/PIXI uploads the replacement. The transition holds its image.
+            if(options.lowMemory){
+                this.physics.detach();
+                this._disposeLive2D();
+                this._disposeObject(this.model);
+                this.model=null;this.vrm=null;
+                this.animationBones={};this.morphMeshes=[];this.morphMap={};this.resolvedVowels={};
+            }
             const result=await this._loadModelInternal(url, options);
             if(result&&ticket===this._displayLoadTicket){
                 this.lastModelUrl=url;
@@ -854,6 +881,7 @@ export default class ModelViewer {
         this.morphMeshes = [];
         this.morphMap = {};
         this.allMorphNames = [];
+        this.pmxMaterialControls = null;
         this.physicsInfo = null;
         this.physics.detach();
         this.resolvedVowels = {};
@@ -962,7 +990,9 @@ export default class ModelViewer {
                         textureReview = fetch('/api/models/texture-check', {method: 'POST', signal: AbortSignal.timeout(5000), headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({paths, optional_paths})}).then(r => r.ok ? r.json() : null).catch(() => null);
                     }
+                    const materialControls=collectMaterialControls(data);
                     const mesh = buildMesh(this._validatePmxReferences(data), ...args);
+                    mesh.userData.pmxMaterialControls=materialControls;
                     for (const [i, material] of (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).entries()) {
                         if (!material) continue;
                         material.userData ||= {};
@@ -979,9 +1009,11 @@ export default class ModelViewer {
                 const build = geometryBuilder.build.bind(geometryBuilder);
                 geometryBuilder.build = data => {
                     this.pendingMorphBudget = null;
-                    const prepared = this._preparePmxMorphData(data);
+                    const prepared = this._preparePmxMorphData(withoutMaterialTargets(data));
                     memoryNotice = this.pendingMorphBudget;
-                    return build(prepared);
+                    const geometry=build(prepared);
+                    geometry.userData.pmxFullMorphs=withoutMaterialTargets(data).morphs;
+                    return geometry;
                 };
             }
 
@@ -1052,6 +1084,8 @@ export default class ModelViewer {
 
                         // Scan meshes for morph targets
                         this._indexMorphTargets(this.model);
+                        bindMaterialControls(this,this.model);
+                        bindSparseMorphs(this,this.model);
                         this._setupCharacterAnimation(this.model);
                         // Run the model's own physics rig (hair, clothing, body)
                         // through Bullet, with spring fallback, after gesture bones are
@@ -1383,6 +1417,7 @@ export default class ModelViewer {
             && [...authoredTextureNames].some(name => /(?:^|\/)face_mikuap_b\.tga$/i.test(name))
             && [...authoredTextureNames].some(name => /(?:^|\/)face\.png$/i.test(name));
         this.isShenheQipaoModel = shenheQipaoProfile;
+        this.eyeRotationLimits = (shenheQipaoProfile || shenheProfile) ? {pitch:.07,yaw:.10} : null;
         this.isRacingOutfitModel = racingOutfitProfile;
         root.traverse(child => {
             for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
@@ -1717,8 +1752,9 @@ export default class ModelViewer {
         } else {
             for (const key of ['leftEye', 'rightEye']) {
                 const entry = this.animationBones[key];
-                if (entry) entry.bone.rotation.set(entry.rest.x + this.eyeTrackingPosition.y * 0.20,
-                    entry.rest.y + this.eyeTrackingPosition.x * 0.30, entry.rest.z, entry.rest.order);
+                const gaze=this.limitEyeRotation(this.eyeTrackingPosition.y*.20,this.eyeTrackingPosition.x*.30);
+                if (entry) entry.bone.rotation.set(entry.rest.x+gaze.pitch,
+                    entry.rest.y+gaze.yaw,entry.rest.z,entry.rest.order);
             }
         }
         // Explicit cursor gaze also adds a head glance during camera tracking.
@@ -1746,6 +1782,16 @@ export default class ModelViewer {
         if (Math.abs(rotation.x-pose.applied.x)<1e-6 && Math.abs(rotation.y-pose.applied.y)<1e-6 &&
             Math.abs(rotation.z-pose.applied.z)<1e-6)
             rotation.set(pose.base.x, pose.base.y, pose.base.z, pose.base.order);
+    }
+
+    limitEyeRotation(pitch,yaw) {
+        const limits=this.eyeRotationLimits;
+        if(!limits)return {pitch,yaw};
+        // Joint extremes must stay within an ellipse, rather than permitting
+        // the diagonal corner of two independent full-strength eye motions.
+        const distance=Math.hypot(pitch/limits.pitch,yaw/limits.yaw);
+        const scale=distance>1?1/distance:1;
+        return {pitch:pitch*scale,yaw:yaw*scale};
     }
 
     _shouldUseCursorGaze() {
@@ -1839,6 +1885,7 @@ export default class ModelViewer {
             }
             this.model.updateMatrixWorld(true);
         }
+        updateAccessoryIK(this);
     }
 
     updateUserTracking(sample) { this.userTrackingSample = {...sample, receivedAt: performance.now()}; }
@@ -2304,6 +2351,8 @@ export default class ModelViewer {
     }
 
     setMorph(name, value) {
+        this.pmxMaterialControls?.set(name,value);
+        this.pmxSparseMorphs?.set(name,value);
         if(this.live2d){this.live2d.setMorph(name,value);return;}
         if (this.vrm?.expressionManager) {
             this.vrm.expressionManager.setValue(this.resolvedVowels[name] || name, value);
@@ -2319,6 +2368,7 @@ export default class ModelViewer {
 
         // Try resolved vowels (A, I, U, E, O)
         const resolved = this.resolvedVowels ? this.resolvedVowels[name] : null;
+        if(resolved)this.pmxSparseMorphs?.set(resolved,value);
         if (resolved && this.morphMap[resolved]) {
             for (const item of this.morphMap[resolved]) {
                 item.mesh.morphTargetInfluences[item.index] = value;
@@ -2611,10 +2661,13 @@ export default class ModelViewer {
         } else if (!this.areAiExpressionsAutomatic?.() && this.manualExpression)
             this.setMorph(this.manualExpression.name, this.manualExpression.weight);
         // Physics runs after the gesture poses are written so hair, clothing
+        this.pmxSparseMorphs?.apply();
+        this.pmxMaterialControls?.apply();
         applyVisibility(this);
         // and body chains inherit their motion as inertia this frame.
         this.physics.updateSpeechPhysics(this.userTracking ? (this.avatarRetarget?.weights?.A || 0)
             : this.activity === 'talking' ? this.speechLevel : 0, delta);
+        updateAccessoryIK(this);
         this.physics.update(delta);
         if (this._shouldUseCursorGaze()) this._animateEyeTracking(delta);
         if (this.vrm) this.vrm.update(delta);

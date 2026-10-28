@@ -6,7 +6,7 @@ import java.security.MessageDigest;
 import java.util.zip.*;
 
 final class WakeAssets {
- static volatile boolean downloading;static volatile String downloadStatus="";
+ static final java.util.concurrent.atomic.AtomicBoolean downloading=new java.util.concurrent.atomic.AtomicBoolean();static volatile String downloadStatus="";
  static final String HASH="30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498";
  static File model(Context c){return new File(c.getFilesDir(),"wake/vosk-model-small-en-us-0.15");}
  static boolean ready(Context c){File d=model(c);return new File(d,"ready.sha256").isFile()&&new File(d,"am/final.mdl").isFile()&&new File(d,"graph/Gr.fst").isFile();}

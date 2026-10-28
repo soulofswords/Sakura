@@ -78,6 +78,18 @@ _desktop_server = None
 
 # ── Desktop Window API ──────────────────────────────────────────
 class DesktopApi:
+    def windows_startup_status(self):
+        try:
+            from windows_startup import status
+            return status()
+        except Exception:return {'supported':False,'enabled':False,'error':'Could not read Windows startup settings.'}
+
+    def set_windows_startup(self,enabled):
+        try:
+            from windows_startup import configure
+            return configure(enabled)
+        except Exception as error:return {'error':str(error)}
+
     def new_vtuber_instance(self):
         try:
             from vtuber_instances import spawn_instance, claim_instance

@@ -34,9 +34,10 @@ FORM_HEADERS = {**HEADERS, 'Content-Security-Policy': "default-src 'none'; style
 # Visiting a page without a token is normal history noise, not an error; only a spent or
 # unreachable confirmation answers with a failure status.
 STATUS = {'confirmed': 200, 'already': 200, 'absent': 200, 'invalid': 400, 'offline': 503, 'foreign': 403,
-          'form': 200, 'done': 200, 'length': 400, 'mismatch': 400, 'weak': 400, 'expired': 400, 'failed': 400}
+          'form': 200, 'done': 200, 'length': 400, 'mismatch': 400, 'weak': 400, 'same_password': 400,
+          'busy': 503, 'expired': 400, 'failed': 400}
 # States that still owe the user a working form, so the slot id goes back into it.
-RETRYABLE = ('form', 'length', 'mismatch', 'weak', 'offline')
+RETRYABLE = ('form', 'length', 'mismatch', 'weak', 'same_password', 'busy', 'offline')
 
 MESSAGES = {
     'confirmed': ('🌸', 'Your email address is confirmed.',
@@ -66,6 +67,10 @@ RESET_MESSAGES = {
                  'Type the new password the same way twice.'),
     'weak': ('🥀', 'That password is not strong enough.',
              'Mix letters, numbers and a symbol, then try again.'),
+    'same_password': ('🔑', 'That password is already set.',
+                      'Sign in with it, or choose a different new password below.'),
+    'busy': ('🌙', 'The account service is temporarily unavailable.',
+             'Wait a moment and try again. Your reset form is still usable until it expires.'),
     'expired': ('🥀', 'That reset link has already been used or has gone stale.',
                 'Choose Forgot password in Sakura to get a fresh link.'),
     'failed': ('🥀', 'Sakura could not set that password.',
@@ -80,6 +85,21 @@ RESET_MESSAGES = {
                 'Check your internet connection, then open the link from the email again.'),
     'foreign': ('🔒', 'Only this computer can finish a Sakura account.',
                 'Open Sakura on the PC that sent the reset email.'),
+}
+
+# What Sakura's own panel is told when it finishes a reset link the reader opened on this PC.
+FINISH_MESSAGES = {
+    'no_pending': (400, 'No reset link is waiting for that address on this computer. Choose '
+                        'Forgot password, open the link it emails, then set the password here.'),
+    'length': (400, 'Sakura accounts need a password of 8 to 256 characters.'),
+    'mismatch': (400, 'The two passwords do not match. Type the new one the same way twice.'),
+    'weak': (400, 'That password is not strong enough. Mix letters, numbers and a symbol, then try again.'),
+    'same_password': (400, 'That password is already set. Sign in with it, or choose a different new password here.'),
+    'busy': (503, 'The account service is temporarily unavailable. Wait a moment and try again; your reset is still waiting.'),
+    'offline': (503, 'Sakura could not reach its account service. Check your internet connection, then try again.'),
+    'failed': (400, 'Sakura could not set that password. Choose Forgot password again and open the new link.'),
+    'foreign': (403, 'Only this computer can finish a Sakura account.'),
+    'done': (200, 'Your password is changed. Sign in to Sakura with your new password.'),
 }
 
 FIELD = ('style="display:block;width:100%;box-sizing:border-box;margin-top:.35rem;padding:.6rem;'
@@ -198,13 +218,17 @@ def recover(token, transport=requests):
 
 
 def set_password(session, password, email='', transport=requests):
-    """'done', 'weak', 'failed' or 'offline' after Auth answers a new password."""
+    """Classify Auth's answer without discarding a usable session on a retryable refusal."""
     try:
         with transport.put(USER_ENDPOINT, json={'password': password},
                            headers={'apikey': SUPABASE_PUBLISHABLE_KEY, 'Authorization': 'Bearer ' + session},
                            timeout=(8, 25), allow_redirects=False) as response:
             if response.status_code != 200:
+                if response.status_code == 429 or response.status_code >= 500:
+                    return 'busy'
                 detail = _detail(response)
+                if re.search(r'\bsame_password\b', detail, re.I):
+                    return 'same_password'
                 return 'weak' if WEAK_PASSWORD.search(detail) else 'failed'
             # A 200 that is not this account proves nothing about the password, so only the
             # updated user object may say it changed.
@@ -225,17 +249,38 @@ def _retire():
     now = time.time()
     for stale in [key for key, (_, until, _) in _pending.items() if until < now]:
         _pending.pop(stale, None)
+    live = set(_pending)
+    for token, identifier in [t for t in _held_by_token.items() if t[1] not in live]:
+        _held_by_token.pop(token, None)
 
 
-def hold(session, email=''):
-    """Hand out a one-use id for a recovered session; the session itself never reaches the page."""
+def hold(session, email='', token=''):
+    """Hand out a one-use id for a recovered session; the session itself never reaches the page.
+
+    The link token is remembered too, so a second open of the same link hands the reader back
+    this session instead of telling them the link was used: mail scanners fetch link targets
+    before the reader clicks, and a reset page that dead-ends on the real click loses the password.
+    """
     identifier = secrets.token_urlsafe(18)
     with _pending_lock:
         _retire()
         while len(_pending) >= MAX_PENDING:
             _pending.pop(next(iter(_pending)))
         _pending[identifier] = (session, time.time() + RESET_TTL, email)
+        if token:
+            _held_by_token[str(token)] = identifier
     return identifier
+
+
+def held_for(token):
+    """The slot id this server already verified for that link token, while it is still live."""
+    if not token:
+        return ''
+    with _pending_lock:
+        _retire()
+        identifier = _held_by_token.get(str(token), '')
+        session, until, _ = _pending.get(identifier, ('', 0, ''))
+        return identifier if session and until > time.time() else ''
 
 
 def take(identifier):
@@ -258,15 +303,31 @@ def give_back(identifier, session, until, email=''):
 def reset_pending(email):
     """True while a verified reset link waits unspent for this address, so the sign-in error can
     say that the new password is not live yet rather than calling it a wrong password."""
+    return bool(pending_for_email(email))
+
+
+def pending_for_email(email):
+    """The live slot id held for that address, or '' when no verified reset link is waiting."""
     target = str(email or '').casefold()
     if not target:
-        return False
+        return ''
     with _pending_lock:
         _retire()
-        return any(kept.casefold() == target for _, _, kept in _pending.values())
+        for identifier, (_, _, kept) in _pending.items():
+            if kept.casefold() == target:
+                return identifier
+    return ''
+
+
+def take_for_email(email):
+    """Claim the live slot for that address outright: (id, session, deadline, email)."""
+    identifier = pending_for_email(email)
+    session, until, kept = take(identifier)
+    return identifier, session, until, kept
 
 
 _pending = {}
+_held_by_token = {}
 _pending_lock = threading.Lock()
 
 
@@ -279,13 +340,19 @@ def router(local_check, form_check, transport=requests):
     break the flow it protects.
     """
     from fastapi import APIRouter, Request
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, JSONResponse
     from starlette.concurrency import run_in_threadpool
 
     routes = APIRouter(prefix='/api/model-library')
 
     def argument(request, names):
         return next((value for name in names if (value := str(request.query_params.get(name) or '').strip())), '')
+
+    def answered(state):
+        """A JSON reply for the panel: one plain sentence, and never a word from the provider."""
+        code, message = FINISH_MESSAGES[state]
+        payload = {'ok': True, 'message': message} if state == 'done' else {'error': message}
+        return JSONResponse(payload, status_code=code, headers=HEADERS)
 
     def html(state, identifier='', code=None, headers=HEADERS):
         # A page that can still take a password also carries the reveal script, and that script is
@@ -316,8 +383,16 @@ def router(local_check, form_check, transport=requests):
             return html('absent')
         state, session, email = await run_in_threadpool(recover, token, transport)
         if state != 'recovered':
+            # Auth refused this token, but this server may still be holding the session it
+            # exchanged for it: a scanner, a second tab or the back button opens the link before the
+            # reader does, and a page that dead-ends there loses the password. Auth answers a link it
+            # has already spent and a link that went stale with the same words, so the refusal itself
+            # proves nothing - only a session this process really verified is worth handing back.
+            held = '' if state == 'offline' else held_for(token)
+            if held:
+                return html('form', held, headers=FORM_HEADERS)
             return html(state)
-        return html('form', hold(session, email), headers=FORM_HEADERS)
+        return html('form', hold(session, email, token), headers=FORM_HEADERS)
 
     @routes.post('/reset')
     async def apply_reset(request: Request):
@@ -347,5 +422,37 @@ def router(local_check, form_check, transport=requests):
             give_back(identifier, session, until, email)
             return html(state, identifier, headers=FORM_HEADERS)
         return html(state, headers=FORM_HEADERS)
+
+    @routes.post('/finish-reset')
+    async def finish_reset(request: Request):
+        """Set the new password from inside Sakura when the emailed page was never submitted.
+
+        Opening the link on this PC is what proves the reader owns the mailbox, and that proof is
+        already sitting in this process. A reset left unfinished looks exactly like a wrong
+        password, so offer the held session back through the panel the user is typing in rather
+        than making them find the browser tab again.
+        """
+        if not form_check(request):
+            return answered('foreign')
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        identifier = str(body.get('reset_id') or '')
+        if not SLOT.fullmatch(identifier):return answered('no_pending')
+        session, until, email = take(identifier)
+        if not session:
+            return answered('no_pending')
+        password = str(body.get('password') or '')
+        if not 8 <= len(password) <= 256:
+            state = 'length'
+        elif password != str(body.get('confirm') or ''):
+            state = 'mismatch'
+        else:
+            state = await run_in_threadpool(set_password, session, password, email, transport)
+        if state in RETRYABLE:
+            give_back(identifier, session, until, email)
+        return answered(state)
 
     return routes

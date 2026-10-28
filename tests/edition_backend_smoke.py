@@ -38,7 +38,9 @@ async def check():
  async with app.lifespan(app.app):
   if edition=='vtuber':assert app.llm is None and 'llm' not in sys.modules
   else:assert app.llm is not None and not app.app.state.tracking_only
-  async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url='http://test') as client:
+  import gui_server
+  origin=f'http://127.0.0.1:{gui_server.port}'
+  async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url=origin,headers={'Origin':origin}) as client:
    for path in ['/','/api/models','/api/voices','/api/settings','/api/identity']:
     response=await client.get(path);assert response.status_code==200,(path,response.text)
    settings=(await client.get('/api/settings')).json();assert settings['product_edition']==edition
@@ -56,6 +58,9 @@ async def check():
     assert (await client.post('/api/tracking/mode',json={'enabled':False})).status_code==409
     assert app.llm is None
    else:
+    from agent_runtime import runtime
+    from agent_starter_skills import PACK
+    assert set(PACK).issubset({skill['name'] for skill in runtime.skills.list()}),'Starter skills missing from clean installation'
     response=await client.post('/api/tracking/mode',json={'enabled':True});assert response.status_code==200,response.text
     assert app.app.state.tracking_only
     response=await client.post('/api/tracking/mode',json={'enabled':False});assert response.status_code==200,response.text

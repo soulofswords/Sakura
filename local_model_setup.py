@@ -37,15 +37,39 @@ def progress(message, percent=None):
 
 def installed(base=BASE):
     """Check the private store without starting an AI process."""
-    runtime = base / 'ollama-runtime' / ('ollama.exe' if sys.platform == 'win32' else 'bin/ollama')
-    if not runtime.is_file():
-        return False
+    base = Path(base)
     try:
         settings = base / 'settings.json'
         cfg = json.loads(settings.read_text(encoding='utf-8-sig')) if settings.exists() else {}
         name = cfg.get('ollama_model', MODELS['2b'])
+        if not isinstance(name, str):
+            return False
+        if name.startswith('sakura-native:'):
+            local = base / 'desktop-profile' / 'agent-local-ai'
+            registry = json.loads((local / 'models.json').read_text(encoding='utf-8'))
+            if not isinstance(registry, dict):
+                return False
+            entry = registry.get(name.partition(':')[2])
+            if not isinstance(entry, dict) or entry.get('projector'):
+                return False
+            if entry.get('engine') == 'colibri':
+                if not (local / 'colibri-runtime' / 'coli').is_file():
+                    return False
+                from inference_engines import colibri_model
+                colibri_model(entry.get('path', ''))
+                return True
+            if entry.get('engine', 'llama.cpp') != 'llama.cpp':
+                return False
+            if not any((local / folder / 'llama-server.exe').is_file() for folder in ('runtime', 'runtime-cuda', 'runtime-vulkan')):
+                return False
+            weights = Path(entry.get('path', ''))
+            with weights.open('rb') as stream:
+                return stream.read(4) == b'GGUF' and weights.stat().st_size > 4
+        runtime = base / 'ollama-runtime' / ('ollama.exe' if sys.platform == 'win32' else 'bin/ollama')
+        if not runtime.is_file():
+            return False
         repo, tag = name.rsplit(':', 1)
-        if name not in MODELS.values():
+        if not repo or any(part in ('', '.', '..') for part in repo.replace('\\', '/').split('/')) or '/' in tag or '\\' in tag or tag in ('', '.', '..'):
             return False
         store = Path(cfg.get('ollama_models_folder') or base / 'llm-models')
         if not store.is_absolute():

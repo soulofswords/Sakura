@@ -49,6 +49,18 @@ class GameModeFallbackTests(unittest.TestCase):
             self.assertEqual(model.provider, 'ollama')
             self.assertEqual(model.calls[-1], ('local', 'qwen3-vl:4b-instruct'))
 
+    def test_gemini_pressure_recovery_restores_game_2b_not_universal_colibri(self):
+        cfg={'llm_provider':'ollama','last_cloud_provider':'gemini','gemini_model':'gemini-flash-latest',
+             'ollama_model':'sakura-native:test-colibri','game_ollama_model':'qwen3-vl:2b-instruct'}
+        model=FakeLLM();model.model='qwen3-vl:2b-instruct';model.vision_model=model.model
+        with patch.object(app,'llm',model),patch.object(app,'get_settings',return_value=cfg),patch.object(app,'get_gemini_key',return_value='test-saved-key'),patch.object(app,'_unload_game_local_models') as unload,patch.object(app.app.state,'game_model_active',True,create=True),patch.object(app.app.state,'game_cloud_fallback_active',False,create=True),patch.object(app.app.state,'tracking_only',False,create=True):
+            enabled=asyncio.run(app.game_mode_cloud_fallback({'active':True}))
+            assert enabled['provider']=='gemini';unload.assert_called_once()
+            recovered=asyncio.run(app.game_mode_cloud_fallback({'active':False}))
+            assert recovered['provider']=='ollama'
+            assert model.calls[-1]==('local','qwen3-vl:2b-instruct')
+            assert cfg['ollama_model']=='sakura-native:test-colibri'
+
     def test_missing_key_keeps_local_and_invalid_flag_is_rejected(self):
         cfg = {'llm_provider': 'ollama', 'last_cloud_provider': 'gemini'}
         model = FakeLLM()

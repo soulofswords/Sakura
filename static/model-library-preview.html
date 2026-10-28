@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Character preview</title>
+<style>html,body,#preview{margin:0;width:100%;height:100%;overflow:hidden;background:#202830}</style>
+<script type="importmap">{"imports":{"three":"/static/vendor/three/build/three.module.js","three/addons/":"/static/vendor/three/examples/jsm/"}}</script>
+</head><body><div id="preview"></div><script type="module">
+import ModelViewer from '/static/js/model-viewer.js?v=game-switch115';
+const viewer=new ModelViewer('preview');
+cancelAnimationFrame(viewer.animationFrame);viewer.animate=()=>{};
+viewer.desktopMode=true;viewer.setQuality('balanced');
+let rotation=0,frame=0,start=0;
+function stop(){cancelAnimationFrame(frame);frame=0;}
+function draw(){viewer.model.rotation.y=rotation;viewer.model.updateMatrixWorld(true);viewer.renderer.render(viewer.scene,viewer.camera);}
+function tick(now){rotation+=(now-start)*.0005;start=now;draw();frame=requestAnimationFrame(tick);}
+addEventListener('message',async event=>{
+ if(event.source!==parent||event.origin!==location.origin)return;
+ const data=event.data;
+ if(data?.type==='rotate'){stop();if(data.enabled&&viewer.model){start=performance.now();frame=requestAnimationFrame(tick);}return;}
+ if(data?.type!=='load'||typeof data.path!=='string'||data.path.includes('..')||!/^\w[\s\S]*\.(?:pmx|vrm)$/i.test(data.path))return;
+ stop();
+ try{
+  await viewer.loadModel('/models/'+data.path.split('/').map(encodeURIComponent).join('/'));
+  if(!viewer.model)throw Error('No model');
+  viewer.vrm?.humanoid?.resetNormalizedPose?.();viewer.vrm?.springBoneManager?.reset?.();
+  if(!viewer.vrm)viewer.model.skeleton?.pose?.();
+  viewer.model.updateMatrixWorld(true);viewer._autoFrame(viewer.model);rotation=viewer.model.rotation.y;draw();
+  parent.postMessage({type:'model-preview',path:data.path,image:viewer.renderer.domElement.toDataURL('image/png')},location.origin);
+ }catch(_){parent.postMessage({type:'model-preview',path:data.path,error:true},location.origin);}
+});
+parent.postMessage({type:'preview-ready'},location.origin);
+</script></body></html>

@@ -1,0 +1,21 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('static/js/model-viewer.js','utf8');
+const start=source.indexOf('    async loadModel(url, options = {}) {'),end=source.indexOf('    async _loadModelSerialized(',start);
+assert.ok(start>=0&&end>start);const method=source.slice(start,end);
+const proto=vm.runInNewContext('({' + method + '})',{Promise});
+(async()=>{
+ let active=0,max=0,finish,loads=[];
+ const viewer={...proto,async _loadModelSerialized(url){++active;max=Math.max(max,active);loads.push(url);if(url==='first')await new Promise(resolve=>finish=resolve);--active;if(url==='fail')throw Error('load failed');return url;}};
+ const first=viewer.loadModel('first');await Promise.resolve();await Promise.resolve();
+ const obsolete=viewer.loadModel('obsolete'),last=viewer.loadModel('last');finish();
+ assert.equal(await first,'first');assert.equal(await obsolete,null);assert.equal(await last,'last');
+ assert.equal(max,1);assert.deepEqual(loads,['first','last']);assert.equal(viewer._modelSwitchQueue,null);
+ await assert.rejects(viewer.loadModel('fail'));assert.equal(await viewer.loadModel('recover'),'recover');
+ const app=fs.readFileSync('static/js/app.js','utf8');
+ const expression=app.match(/const mediaWake = ([^;]+);/)[1];
+ const evaluate=values=>vm.runInNewContext(expression,{continuous:true,screenAudio:{playbackActive:()=>true},...values});
+ assert.equal(evaluate({gameActive:true,currentSettings:{game_play_mode:'singleplayer'}}),false);
+ assert.equal(evaluate({gameActive:true,currentSettings:{game_play_mode:'multiplayer'}}),true);
+ assert.equal(evaluate({gameActive:false,currentSettings:{game_play_mode:'singleplayer'}}),true);
+ console.log('PASS: model loads serialized, obsolete selections skipped, failed load recoverable; single/multiplayer microphone routing.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -64,7 +64,12 @@ class SearchConsent:
 
 def _learn(question):
     from learned_answers import learn_approved_search
-    return learn_approved_search(question)
+    # Reuse the running companion's configured search providers without
+    # importing app (which would start a second application instance).
+    import sys
+    model=getattr(sys.modules.get('app'),'llm',None)
+    credentials=model.search_credentials() if model and hasattr(model,'search_credentials') else None
+    return learn_approved_search(question,credentials)
 
 
 search_consent=SearchConsent(on_approved=_learn)

@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const code=fs.readFileSync('static/js/app.js','utf8');
 const start=code.indexOf('function extractWakeCommand('),end=code.indexOf('// ─────────────────────────── UI Helpers',start);
 let transcript='',media=true,sent=[],mic={enabled:true,generation:0,stop(){}};
-const c={trackingOnly:false,vtuberEnabled:false,aiVtuberStarting:false,continuousMic:mic,currentSettings:{wake_word_enabled:false,wake_word:'hey sakura'},wakeCommandDeadline:0,
+const c={trackingOnly:false,vtuberEnabled:false,aiVtuberStarting:false,gameActive:false,continuousMic:mic,currentSettings:{wake_word_enabled:false,wake_word:'hey sakura'},wakeCommandDeadline:0,
  interruptFollowupUntil:0,interruptFollowupTimer:null,temporaryFollowupMic:false,speechInputUsed:false,chatBusy:false,lipSync:null,isSpeechInterrupt:()=>false,clearTimeout(){},nativeWake:{enabled:()=>false},
  screenAudio:{playbackActive:()=>media},listeningStatus:{},chatInput:{},FormData:class{append(){}},showTypingIndicator(){},removeTypingIndicator(){},addMessage(){},console,
  fetch:async()=>({ok:true,json:async()=>({text:transcript})}),handleSendMessage:async()=>sent.push(c.chatInput.value)};

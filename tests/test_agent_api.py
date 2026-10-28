@@ -26,6 +26,45 @@ class AgentAPITests(unittest.TestCase):
             response=self.client.post('/api/agent/tasks',headers=headers,json={'goal':'Do stuff','workspace':self.folder.name})
             self.assertEqual(response.status_code,403)
         self.assertEqual(self.client.get('/agent',headers={'Origin':'https://untrusted.example'}).status_code,403)
+
+    def test_new_native_and_schedule_routes_require_local_panel_authorization(self):
+        for endpoint,payload in [('local-ai/runtime',{}),('local-ai/import',{'path':'secret.gguf'}),('local-ai/inspect',{'path':'C:/private'}),('local-ai/import-detected',{'path':'secret.gguf'}),
+                                 ('local-ai/chat',{'messages':[]}),('automations',{'approved':True}),('library-sync/run',{'approved':True}),('memory',{'enabled':True}),('skills/learn',{'run_id':'a','name':'test'})]:
+            self.assertEqual(self.client.post('/api/agent/'+endpoint,json=payload).status_code,403)
+            self.assertEqual(self.client.post('/api/agent/'+endpoint,headers={**self.headers,'Origin':'https://outside.example'},json=payload).status_code,403)
+
+    def test_telegram_api_requires_local_authorization(self):
+        from telegram_bot import TelegramGateway
+        bot=TelegramGateway(Path(self.folder.name)/'telegram.json')
+        with patch('telegram_bot.gateway',bot):
+            app=FastAPI();app.include_router(agent_router(lambda choice:Mock()))
+        client=TestClient(app,base_url='http://127.0.0.1:8790',client=('127.0.0.1',35000))
+        token=re.search(r"const token='([^']+)'",client.get('/agent').text)[1]
+        headers={'X-Sakura-Agent':token}
+        for denied in ({},{'X-Sakura-Agent':'wrong'},{**headers,'Origin':'https://outside.example'}):
+            self.assertEqual(client.get('/api/agent/telegram',headers=denied).status_code,403)
+            self.assertEqual(client.post('/api/agent/telegram',headers=denied,json={'enabled':False}).status_code,403)
+        with patch('credentials.get_cloud_key',return_value=''):
+            for payload in ({'enabled':True},{'enabled':False,'chat_ids':'bad'},{'enabled':False,'token':123},
+                            {'enabled':False,'clear_token':'yes'},{'enabled':False,'command':'anything'}):
+                self.assertEqual(client.post('/api/agent/telegram',headers=headers,json=payload).status_code,400)
+            response=client.post('/api/agent/telegram',headers=headers,json={'enabled':False,'chat_ids':'42'})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json()['chat_ids'],[42])
+            self.assertNotIn('token',response.json())
+            self.assertFalse(response.json()['running'])
+
+    def test_owner_workflow_cannot_accept_command_or_path_injection(self):
+        for extra in ({'command':'Remove-Item *'},{'root':'C:/Windows'},{'token':'not-owner'}):
+            response=self.client.post('/api/agent/library-sync/run',headers=self.headers,json={'approved':True,**extra})
+            self.assertEqual(response.status_code,400)
+
+    def test_native_planner_does_not_call_external_provider_getter(self):
+        with patch('agent_api.runtime.plan',return_value={'ok':True}) as plan:
+            response=self.client.post('/api/agent/tasks/example/plan',headers=self.headers,json={'provider':'sakura-native'})
+        from agent_local_ai import local_ai
+        self.assertEqual(response.status_code,200)
+        self.assertIs(plan.call_args.args[1],local_ai)
     def test_approval_decision_has_no_mutable_argument_override(self):
         run=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Hello test','workspace':self.folder.name}).json()
         proposal=self.client.post('/api/agent/tasks/'+run['id']+'/propose',headers=self.headers,json={'tool':'shell.run','arguments':{'command':'Write-Output original'}}).json()

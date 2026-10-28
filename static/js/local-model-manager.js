@@ -1,3 +1,20 @@
+export function updateLocalModelChoices(data) {
+    const models=data.models||[],native=data.native_models||[];
+    const game=document.getElementById('ollama-model-options');
+    game?.replaceChildren(...models.map(item=>new Option(item.name,item.name)));
+    const universal=document.getElementById('universal-model-options');
+    universal?.replaceChildren(...models.map(item=>new Option(item.name,item.name)),...native.map(item=>new Option(item.label+' · '+item.engine,item.name)));
+    const button=document.getElementById('qwen-native-btn');
+    const qwen=native.find(item=>item.engine==='colibri'&&/qwen.*3[.]6/i.test(item.label));
+    const requirements=document.getElementById('native-model-requirements');
+    if(requirements)requirements.hidden=!qwen;
+    if(button){button.hidden=!qwen;button.onclick=()=>{
+        if(!qwen)return;
+        document.getElementById('ollama-model').value=qwen.name;
+        document.getElementById('ollama-scan-status').textContent='Selected '+qwen.label+'. Save AI settings to activate it. Screen images still use your vision model.';
+    };}
+}
+
 export function installLocalModelManager() {
     const choice=document.getElementById('local-download-choice'),name=document.getElementById('local-download-name');
     const specs=document.getElementById('local-download-specs'),status=document.getElementById('local-download-status');
@@ -44,7 +61,7 @@ export function installLocalModelManager() {
         }
         data.models=[...clean.values()];
         installed.replaceChildren(...data.models.map(item=>new Option(`${item.name} · ${(item.size/1e9).toFixed(1)} GB`,item.name)));
-        const list=document.getElementById('ollama-model-options');list.replaceChildren(...data.models.map(item=>new Option(item.name,item.name)));
+        updateLocalModelChoices(data);
     }
     async function poll() {
         try {

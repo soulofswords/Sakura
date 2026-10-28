@@ -31,3 +31,6 @@ bounded._renderFrame();assert.equal(step,.05,'A stalled frame cannot advance sim
 bounded.clock.getDelta=()=>NaN;bounded._renderFrame();assert.equal(step,0);
 bounded.clock.getDelta=()=>-.1;bounded._renderFrame();assert.equal(step,0);
 console.log('PASS: all three modes share controls; presentation snapshot survives overlapping loads and releases only after ready');
+
+for(const name of ['keyLight','rimLight','groundLight'])assert.match(source,new RegExp('this\\.'+name+' = new THREE\\.DirectionalLight\\(0xffffff,'),'Imported models use neutral '+name);
+assert.match(source,/this\.envColor = '#ffffff'/,'Disabling colour breathing restores neutral lighting');

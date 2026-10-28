@@ -126,7 +126,7 @@ body.companion-ui-active .studio-docked .settings-tabs{background:#fff;border-bo
 body.companion-ui-active .studio-docked .tab-content.active{overflow-y:auto;min-height:0;flex:1;scrollbar-width:thin;scrollbar-color:#b9d2e4 transparent}
 body.companion-ui-active .studio-docked #tracking-hands-enabled{background:#e9f4fb!important;color:#147caf!important;border:1px solid #d3e5f1!important}
 body.companion-ui-active .studio-docked #tracking-hands-enabled[aria-pressed="true"]{background:#168fd5!important;color:#fff!important}
-body.companion-ui-active .studio-docked .tab-btn[data-tab="ai"],body.companion-ui-active .studio-docked .tab-btn[data-tab="assistant"],body.companion-ui-active .studio-docked #system-tools,body.companion-ui-active .studio-ai-only{display:none!important}
+body.companion-ui-active .studio-docked .tab-btn[data-tab="assistant"],body.companion-ui-active .studio-docked #system-tools{display:none!important}
 body.companion-ui-active .studio-docked button{font-size:13px}
 body.companion-ui-active .studio-docked .setting-group label,body.companion-ui-active .studio-docked label{font-size:13px}
 /* Keep the capture background picker compact instead of inheriting full-width fields. */
@@ -236,3 +236,11 @@ body.companion-ui-active #companion-statusbar{left:90px;right:20px;bottom:14px}
 #companion-studio [data-companion-content="camera"] :is(label[for="companion-camera-mode"],#companion-camera-mode){display:none}
 #companion-studio .studio-card fieldset{border:0;padding:0;margin:0 0 10px;min-width:0}
 #companion-studio .studio-card fieldset legend{padding:0;margin:0 0 6px;font-size:13px;font-weight:650;color:#344760}
+
+/* Mutually exclusive conversation styles: visible state in every theme. */
+#companion-panel [data-companion-style]{display:flex;align-items:center;gap:10px;min-height:44px}
+.conversation-switch-track{width:34px;height:20px;display:inline-block;position:relative;border-radius:20px;background:#67717e;flex-shrink:0}
+.conversation-switch-track::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:white;transition:transform .15s}
+[data-companion-style][aria-checked="true"] .conversation-switch-track{background:#087fab}
+[data-companion-style][aria-checked="true"] .conversation-switch-track::after{transform:translateX(14px)}
+[data-style-state]{min-width:22px;font-weight:700}

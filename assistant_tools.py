@@ -9,7 +9,7 @@ _lock=threading.Lock()
 _runs=deque(maxlen=20)
 _workflow_lock=threading.Lock()
 _CAPABILITIES=[
- {'id':'system.status','name':'PC status','examples':['PC status','CPU usage','RAM usage','battery level'],'permission':'computer_access','platform':'Windows measurements; basic disk information elsewhere'},
+ {'id':'system.status','name':'PC status','examples':['PC status','PC specs','can you see my pc specs','CPU usage','RAM usage','battery level'],'permission':'computer_access','platform':'Windows measurements; basic disk information elsewhere'},
  {'id':'audio.volume','name':'System output volume','examples':['set volume to 30%','volume up','mute volume','unmute volume'],'permission':'computer_access','platform':'Windows'},
  {'id':'files.find','name':'Find files by name','examples':['find file report in downloads'],'permission':'computer_access','scope':'Top level of Downloads, Documents or Desktop; read-only; up to 20 matches'},
  {'id':'apps.open','name':'Launch an installed app or approved website','examples':['open YouTube','open calculator'],'permission':'computer_access'},
@@ -32,8 +32,8 @@ def cancel_run(identifier=None):
     return False
 
 def classify(text):
-    t=text.strip().lower().rstrip('.!?')
-    if re.fullmatch(r'(?:show |check |tell me (?:the |my )?|what(?:\x27s| is) (?:the |my )?)?(?:pc status|system status|system information|cpu usage|gpu usage|vram usage|ram usage|memory usage|battery(?: level| status)?|disk space|free disk space)',t):return ('system.status',{})
+    t=text.strip().lower().rstrip('.!?').strip()
+    if re.fullmatch(r"(?:show |check |tell me |can (?:you|u) (?:see|show|tell me) |do (?:you|u) (?:know|have) |what(?:\x27?s| is| are) )?(?:the |my |your |this )?(?:pc status|system status|system information|cpu usage|gpu usage|vram usage|ram usage|memory usage|battery(?: level| status)?|disk space|free disk space|(?:(?:pc|computer|system|hardware|machine) )?spec(?:s|ifications)?|processor|cpu(?: model| name)?|graphics card|gpu name|windows version|os version|hardware)",t):return ('system.status',{})
     match=re.fullmatch(r'(?:set |change )?(?:the |system |computer )?volume(?: to)? (\d{1,3})(?:\s*(?:%|percent))?',t)
     if match:
         n=int(match[1])
@@ -74,7 +74,75 @@ def _delegate_known(text):
     if re.fullmatch(r'(?:set|start|make) (?:a |an )?(?:timer|alarm).{0,70}|(?:set|start|make) (?:a |an )?.{1,50} (?:timer|alarm)',text,re.I):return True
     return False
 
-def handle_command(text,computer_access=False,assistant_name='Sakura'):
+def _parse_sequence(text,computer_access):
+    pieces=re.split(r'\s*(?:,?\s+(?:and )?then\s+|;\s*)',text,flags=re.I)
+    if len(pieces)<2:return None,None
+    # Ignore ordinary conversation, rather than interpreting every "then" as a workflow.
+    if not any(classify(x) or _delegate_known(x) for x in pieces):return None,None
+    if len(pieces)>5:return None,'Use at most five actions in one sequence.'
+    plan=[]
+    for piece in pieces:
+        action=classify(piece)
+        if not action and not _delegate_known(piece):return None,'I cannot execute that whole sequence. Unsupported step: '+piece+'. No actions were started.'
+        needs_access=action is not None or bool(re.match(r'(?:open|launch|start) ',piece,re.I) and not re.search(r'\b(?:timer|alarm)\b',piece,re.I))
+        if needs_access and not computer_access:return None,'Enable computer access first. No actions in the sequence were started.'
+        plan.append((piece,action))
+    return plan,None
+
+def _run_plan(run,plan,computer_access,assistant_name,channel='desktop'):
+    try:
+        for piece,action in plan:
+            with _lock:
+                if run.get('cancel_requested'):
+                    run['status']='cancelled'
+                    break
+            try:
+                if action:result=execute(*action)
+                else:
+                    from assistant_commands import run_command
+                    reply=run_command(piece,computer_access,assistant_name,channel=channel)
+                    failed=not reply or bool(re.search(r"couldn't|could not|not find|not found|enable |invalid|please choose|tell me a|what time|already passed|unavailable|no matching",reply,re.I))
+                    result={'ok':not failed,'reply':reply or 'This action was not recognized.'}
+                with _lock:run['steps'].append({'request':piece,**result})
+                if not result['ok']:
+                    with _lock:run['status']='failed'
+                    break
+            except Exception as error:
+                with _lock:run['steps'].append({'request':piece,'ok':False,'reply':str(error)});run['status']='failed'
+                break
+        with _lock:
+            if run['status']=='running':run['status']='completed'
+            replies=[x['reply'] for x in run['steps']]
+            stopped=run['status'] in ('failed','cancelled')
+        return ' '.join(replies)+(' Remaining steps were not run.' if stopped else '')
+    finally:
+        _workflow_lock.release()
+
+def start_sequence(text,computer_access=False,assistant_name='Sakura',channel='desktop'):
+    """Run an explicit multi-step sequence on a worker thread. None when the text is not one."""
+    plan,error=_parse_sequence(text,computer_access)
+    if error:return {'error':error}
+    if plan is None:return None
+    if not _workflow_lock.acquire(blocking=False):
+        return {'error':'Another action sequence is running. Wait for it or say cancel current task.'}
+    run={'id':uuid.uuid4().hex,'created_at':time.time(),'status':'running','steps':[]}
+    with _lock:_runs.append(run)
+    try:
+        threading.Thread(target=_run_plan,args=(run,plan,computer_access,assistant_name,channel),daemon=True,name='sakura-workflow').start()
+    except RuntimeError:
+        _workflow_lock.release()
+        return {'error':'I could not start that action sequence.'}
+    # Speak before the work, not after it: the steps report themselves as they land.
+    return {'id':run['id'],'steps':len(plan),'ack':'Okay, starting that now.'}
+
+def run_state(identifier):
+    import copy
+    with _lock:
+        for run in reversed(_runs):
+            if run['id']==identifier:return copy.deepcopy(run)
+    return None
+
+def handle_command(text,computer_access=False,assistant_name='Sakura',channel='desktop'):
     if text in ('show task results','show recent action results','what happened to my task'):
         history=runs()
         if not history:return 'There are no action sequences in this app session.'
@@ -89,44 +157,11 @@ def handle_command(text,computer_access=False,assistant_name='Sakura'):
         if action:
             if not computer_access:return 'Enable computer access in Settings first to use PC tools.'
             result=execute(*action);return result['reply']
-        pieces=re.split(r'\s*(?:,?\s+(?:and )?then\s+|;\s*)',text,flags=re.I)
-        if len(pieces)<2:return None
-        # Ignore ordinary conversation, rather than interpreting every "then" as a workflow.
-        if not any(classify(x) or _delegate_known(x) for x in pieces):return None
-        if len(pieces)>5:return 'Use at most five actions in one sequence.'
-        plan=[]
-        for piece in pieces:
-            action=classify(piece)
-            if not action and not _delegate_known(piece):return 'I cannot execute that whole sequence. Unsupported step: '+piece+'. No actions were started.'
-            needs_access=action is not None or bool(re.match(r'(?:open|launch|start) ',piece,re.I) and not re.search(r'\b(?:timer|alarm)\b',piece,re.I))
-            if needs_access and not computer_access:return 'Enable computer access first. No actions in the sequence were started.'
-            plan.append((piece,action))
+        plan,error=_parse_sequence(text,computer_access)
+        if error:return error
+        if plan is None:return None
         if not _workflow_lock.acquire(blocking=False):return 'Another action sequence is running. Wait for it or say cancel current task.'
         run={'id':uuid.uuid4().hex,'created_at':time.time(),'status':'running','steps':[]}
         with _lock:_runs.append(run)
-        for piece,action in plan:
-            with _lock:
-                if run.get('cancel_requested'):
-                    run['status']='cancelled'
-                    break
-            try:
-                if action:result=execute(*action)
-                else:
-                    from assistant_commands import run_command
-                    reply=run_command(piece,computer_access,assistant_name)
-                    failed=not reply or bool(re.search(r"couldn't|could not|not find|not found|enable |invalid|please choose|tell me a|what time|already passed|unavailable|no matching",reply,re.I))
-                    result={'ok':not failed,'reply':reply or 'This action was not recognized.'}
-                with _lock:run['steps'].append({'request':piece,**result})
-                if not result['ok']:
-                    with _lock:run['status']='failed'
-                    break
-            except Exception as error:
-                with _lock:run['steps'].append({'request':piece,'ok':False,'reply':str(error)});run['status']='failed'
-                break
-        with _lock:
-            if run['status']=='running':run['status']='completed'
-            replies=[x['reply'] for x in run['steps']]
-            stopped=run['status'] in ('failed','cancelled')
-        _workflow_lock.release()
-        return ' '.join(replies)+(' Remaining steps were not run.' if stopped else '')
+        return _run_plan(run,plan,computer_access,assistant_name,channel)
     except (OSError,ValueError,RuntimeError) as error:return 'I could not complete that action: '+str(error)

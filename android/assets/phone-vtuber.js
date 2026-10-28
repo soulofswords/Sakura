@@ -1,3 +1,4 @@
+import {rendererFor,openRenderer} from './avatar-channel.js';
 import {nativeJob} from './native-jobs.js';
 const $=id=>document.getElementById(id);
 const panel=document.createElement('main');panel.id='phone-vtuber-mode';panel.className='hidden';
@@ -6,9 +7,9 @@ document.body.insertBefore(panel,$('pc-mode'));
 const button=document.createElement('button');button.id='mode-phone-vtuber';button.innerHTML='<b>VTuber · on this phone</b><br><small>Import a model and track your face and hands without a PC.</small>';$('app-modes').append(button);
 let models=[],ready=false,running=false,revision=0;
 const status=text=>$('phone-local-tracking-status').textContent=text;
-const api=()=>$('phone-tracking-avatar').contentWindow?.phoneAvatar;
+const api=()=>rendererFor($('phone-tracking-avatar'));
 function catalog(selected){models=JSON.parse(Sakura.localModels());$('phone-model-list').replaceChildren(...models.map(model=>new Option(model.name+' · '+model.format.toUpperCase(),model.id)));if(selected)$('phone-model-list').value=selected;}
-async function avatar(){const frame=$('phone-tracking-avatar');if(!frame.src||frame.src==='about:blank')frame.src='/local-viewer.html';const until=Date.now()+20000;while(!api()){if(Date.now()>until)throw Error('The model renderer did not start.');await new Promise(r=>setTimeout(r,100));}return api();}
+async function avatar(){return openRenderer($('phone-tracking-avatar'));}
 function stop(){revision++;api()?.stopTracking();running=false;$('phone-local-tracking').textContent='Start tracking';$('phone-local-tracking').setAttribute('aria-pressed','false');}
 window.sakuraStopLocalTracking=()=>{stop();if(!panel.classList.contains('hidden'))status('Tracking stopped. Tap Start tracking to resume.');};
 async function load(){stop();ready=false;const model=models.find(m=>m.id===$('phone-model-list').value);if(!model){status('Import a model first.');return;}status('Loading '+model.name+'…');try{const view=await avatar();view.pause(false);await view.load(model.url.split('/').map(encodeURIComponent).join('/'));ready=true;status(model.name+' ready. Start tracking when you want to use the camera.');}catch(error){status(error.message);}}

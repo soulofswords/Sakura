@@ -64,7 +64,17 @@ class LearnedAnswers:
 learned_answers=LearnedAnswers(BASE_DIR/'learned-answers.json')
 
 
-def learn_approved_search(question):
+def learn_approved_search(question,credentials=None):
     evidence=learned_answers.learn(question)
-    return ('\n'+evidence.text+'\nI saved this sourced answer for next time.' if evidence else
-            " Chrome is open, but Sakura cannot read the results page from the browser. I couldn't verify this from Sakura's trusted sources, so I haven't saved a guess. You can paste a source or result here and I'll check it.")
+    if evidence:return '\n'+evidence.text+'\nI saved this sourced answer for next time.'
+    # Approval applies to the exact question, including subjects beyond the
+    # small set of dedicated reference extractors. Read a public source rather
+    # than treating a launched browser as a completed lookup.
+    import agent_web
+    try:found=agent_web.lookup(question,credentials,characters=1800)
+    except (agent_web.requests.RequestException,ValueError):found=None
+    if found:
+        excerpt=' '.join(found['text'].split())[:1200]
+        return (f"\nFrom {found['title']}:\n{excerpt}\nSource: {found['url']}\n"
+                'This is a source excerpt; I have not saved it as a verified fact.')
+    return " I couldn't read a usable source for this question yet, so I haven't saved a guess. You can paste a source or result here and I'll check it."

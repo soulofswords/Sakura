@@ -1,3 +1,4 @@
+import {rendererFor} from './avatar-channel.js';
 import AvatarTracking from '/static/js/avatar-tracking.js';
 import {installButtonFeedback} from '/static/js/button-feedback.js';
 installButtonFeedback();
@@ -5,10 +6,22 @@ import {nativeJob} from './native-jobs.js';
 const $=id=>document.getElementById(id),status=message=>$('status').textContent=message;
 let connected=false,remoteTracking=false,companionTracking=false,frameBusy=false,expressions=[],active=new Set();
 let localMode=false,reconnecting=null,manualDisconnect=false,retryTimer=null,retryDelay=2000;
+let remoteCameraKey='',remoteCameraAllowed=false;
+const remoteCameraLabel=document.createElement('label'),remoteCameraSwitch=document.createElement('input');
+remoteCameraSwitch.type='checkbox';remoteCameraSwitch.id='allow-pc-camera';remoteCameraSwitch.style.width='auto';
+remoteCameraLabel.append(remoteCameraSwitch,document.createTextNode(' Allow this paired PC to start camera tracking while Sakura is open'));
+$('tracking').after(remoteCameraLabel);
+remoteCameraSwitch.onchange=()=>{
+    remoteCameraAllowed=remoteCameraSwitch.checked;
+    if(remoteCameraKey)localStorage.setItem(remoteCameraKey,String(remoteCameraAllowed));
+    if(!remoteCameraAllowed)window.stopPhoneTracking?.();
+    status(remoteCameraAllowed?'PC camera control allowed while this screen is open.':'PC camera control off. Start tracking on this phone when needed.');
+};
 const standaloneAvailable=Boolean(Sakura.localAvailable?.());
 let selectedMode=standaloneAvailable?null:'pc';
 async function reconnect(computerId,address){
     if(reconnecting)return reconnecting;
+    status('Connecting to your PC…');
     reconnecting=(async()=>{try{const data=await nativeJob('reconnectAsync',computerId||'',address||'');connectedPc(data);retryDelay=2000;localStorage.setItem('sakura-last-pc',computerId||address||'');return data;}finally{reconnecting=null;}})();return reconnecting;
 }
 function savedComputers(){try{return JSON.parse(Sakura.remembered());}catch(_){return [];}}
@@ -18,7 +31,7 @@ async function autoReconnect(forTransfer=false){
     try{await reconnect(pc.id||'',pc.address||'');}catch(error){status('PC not available yet. Saved pairing kept; retrying automatically. '+error.message);retryTimer=setTimeout(autoReconnect,retryDelay);retryDelay=Math.min(30000,retryDelay*2);}
 }
 window.sakuraEnsurePc=async()=>{if(connected)return;manualDisconnect=false;await autoReconnect(true);if(!connected)throw Error('Open the paired PC app for this one-time model transfer. Existing phone models and Local chat do not require the PC.');};
-window.sakuraResume=()=>{window.sakuraRefreshLocation?.();window.sakuraRefreshWake?.();window.sakuraRefreshWakeHistory?.();document.getElementById('local-avatar')?.contentWindow?.phoneAvatar?.pause(false);autoReconnect();};
+window.sakuraResume=()=>{window.sakuraRefreshLocation?.();window.sakuraRefreshWake?.();window.sakuraRefreshWakeHistory?.();rendererFor(document.getElementById('local-avatar'))?.pause(false);autoReconnect();};
 let localModule;
 async function selectMode(local){
     selectedMode=local?'local':'pc';localMode=local;clearTimeout(retryTimer);
@@ -33,8 +46,8 @@ $('change-mode')?.addEventListener('click',()=>{
     selectedMode=null;localMode=false;clearTimeout(retryTimer);stopPhoneVision();window.stopPhoneTracking();window.sakuraLocalVisible?.(false);
     $('pc-mode').classList.add('hidden');$('local-mode').classList.add('hidden');$('app-modes').classList.remove('hidden');$('change-mode').classList.add('hidden');
 });
-const request=(path,body)=>{const data=JSON.parse(Sakura.request(body===undefined?'GET':'POST',path,JSON.stringify(body||{})));if(data.error)throw Error(data.error);return data;};
-const command=body=>request('/command',body);
+const request=(path,body)=>nativeJob('requestAsync',body===undefined?'GET':'POST',path,JSON.stringify(body||{}));
+const command=body=>request('/command',body).catch(error=>{status(error.message);return {error:error.message};});
 let visionStream=null,visionTimer=null,cameraRevision=0;
 function stopPhoneVision(notify=true){
     cameraRevision++;
@@ -79,7 +92,7 @@ $('camera-share')?.addEventListener('click',async()=>{
             if(!connected||!visionStream||video.readyState<2)return;
             canvas.width=480;canvas.height=Math.max(1,Math.round(480*video.videoHeight/video.videoWidth));
             const context=canvas.getContext('2d');context.drawImage(video,0,0,canvas.width,canvas.height);
-            try{request('/camera',{image:canvas.toDataURL('image/jpeg',.55).split(',')[1]});}catch(error){status(error.message);}
+            void request('/camera',{image:canvas.toDataURL('image/jpeg',.55).split(',')[1]}).catch(error=>status(error.message));
             context.clearRect(0,0,canvas.width,canvas.height);
         },1000);
     }catch(error){if(revision===cameraRevision){stopPhoneVision();status(error.message);}}
@@ -123,20 +136,31 @@ $('camera').style.transform=tracker.cameraFacingMode==='user'?'scaleX(-1)':'none
 // Attach the actual MediaPipe camera video after it is opened.
 const start=tracker.start.bind(tracker);tracker.start=async()=>{await start();$('camera').srcObject=tracker.stream;};
 window.stopPhoneTracking=()=>{cameraRevision++;Sakura.stopTrackingFrames?.();const wasCompanion=companionTracking;tracker.stop();remoteTracking=false;$('camera').srcObject=null;if(wasCompanion)$('phone-camera-preview').srcObject=null;$('tracking').textContent='Start camera tracking';if(connected)try{command({type:wasCompanion?'companion-tracking-stop':'tracking-stop'});}catch(_){};companionTracking=false;if($('camera-share'))$('camera-share').textContent=$('phone-companion-camera-mode')?.value==='tracking'?'Start face tracking':'Start object recognition';};
-function connectedPc(data){if(data.error)throw Error(data.error);connected=true;manualDisconnect=false;$('pair').classList.add('hidden');$('controls').classList.remove('hidden');$('disconnect').classList.remove('hidden');status('Connected to '+data.name+' · '+data.edition);if(data.edition==='vtuber')document.querySelector('[data-tab="expression"]').click();}
+function connectedPc(data){if(data.error)throw Error(data.error);connected=true;manualDisconnect=false;
+remoteCameraKey='sakura-pc-camera:'+(data.pc_id||data.id||'');
+remoteCameraAllowed=remoteCameraKey!=='sakura-pc-camera:'&&localStorage.getItem(remoteCameraKey)==='true';remoteCameraSwitch.checked=remoteCameraAllowed;
+$('pair').classList.add('hidden');$('controls').classList.remove('hidden');$('disconnect').classList.remove('hidden');status('Connected to '+data.name+' · '+data.edition);if(data.edition==='vtuber')document.querySelector('[data-tab="expression"]').click();}
 let pairingPc=null,searching=false;
 function pcRow(label,detail,onClick){
     const button=document.createElement('button'),name=document.createElement('b'),sub=document.createElement('small');
-    name.textContent=label;sub.textContent=detail;button.append(name,document.createElement('br'),sub);button.onclick=onClick;return button;
+    button.type='button';name.textContent=label;sub.textContent=detail;button.append(name,document.createElement('br'),sub);button.onclick=onClick;return button;
 }
 function showPairForm(pc){
     pairingPc=pc;$('pair-code').classList.remove('hidden');
     $('pair-target').textContent=`Enter the 6-digit code shown on “${pc.name||'this PC'}”.`;
+    status('PC selected · enter its current 6-digit pairing code below.');
+    $('pair-code').scrollIntoView({block:'center'});
     $('code').value='';$('code').focus();
 }
 async function pairWith(address,code,button,fingerprint){
     if(!/^\d{6}$/.test(code)){status('Enter the 6-digit code shown on your PC.');return;}
+    const shown=$(button.id==='manual-connect'?'manual-fingerprint':'pair-fingerprint').value;
+    const verified=String(shown||'').replace(/[:\s-]/g,'').toLowerCase();
+    if(!/^[0-9a-f]{64}$/.test(verified)){status('Pairing cancelled. A PC-verified certificate fingerprint is required.');return;}
+    if(fingerprint&&verified!==fingerprint){status('The discovered PC fingerprint differs from the PC display. Pairing blocked.');return;}
+    fingerprint=verified;
     button.disabled=true;
+    status('Pairing with your PC…');
     try{connectedPc(await nativeJob('connectAsync',address,code,fingerprint||''));$('advanced-pair').open=false;}
     catch(error){status(error.message+' Keep the PC app open and check that Connect to Phone is on.');}
     finally{button.disabled=false;}
@@ -171,9 +195,9 @@ async function searchPcs(){
             const known=paired.has(pc.id);
             list.append(pcRow(pc.name||'Sakura',(known?'Remembered · ':'New · ')+(pc.edition||'companion'),async()=>{
                 if(!known){showPairForm(pc);return;}
-                manualDisconnect=false;list.querySelectorAll('button').forEach(b=>b.disabled=true);
-                try{await reconnect(pc.id,'');}
-                catch(error){status(error.message+' Saved pairing kept. Make sure the PC and phone are on the same network.');}
+                manualDisconnect=false;clearTimeout(retryTimer);list.querySelectorAll('button').forEach(b=>b.disabled=true);
+                try{await reconnect(pc.id,pc.https);}
+                catch(error){showPairForm(pc);status(error.message+' Enter the current PC code below to pair again.');}
                 finally{list.querySelectorAll('button').forEach(b=>b.disabled=false);}
             }));
         }
@@ -203,10 +227,10 @@ $('phone-companion-camera-facing').onchange=()=>{
 $('calibrate').onclick=()=>{try{command({type:'calibrate'});status('PC neutral pose calibrated');}catch(error){status(error.message);}};
 $('clear').onclick=()=>{try{command({type:'clear-expressions'});active.clear();renderExpressions();}catch(error){status(error.message);}};
 function renderExpressions(){const list=$('expressions');list.replaceChildren();for(const name of expressions){const button=document.createElement('button');button.textContent=name;button.classList.toggle('active',active.has(name));button.onclick=()=>{try{const enabled=!active.has(name);command({type:'expression',name,enabled});if(enabled)active.add(name);else active.delete(name);button.classList.toggle('active',enabled);}catch(error){status(error.message);}};list.append(button);}}
-$('gemini').onclick=()=>{try{request('/gemini',{key:$('key').value});$('key').value='';status('Gemini selected on the PC');}catch(error){status(error.message);}};
-$('send').onclick=()=>{const text=$('message').value.trim();if(!text)return;$('send').disabled=true;status('Sakura is thinking…');setTimeout(()=>{try{const data=request('/chat',{text});$('conversation').textContent+='You: '+text+'\nSakura: '+data.reply+'\n\n';$('message').value='';status('Connected');}catch(error){status(error.message);}finally{$('send').disabled=false;}},30);};
+$('gemini').onclick=async()=>{try{await request('/gemini',{key:$('key').value});$('key').value='';status('Gemini selected on the PC');}catch(error){status(error.message);}};
+$('send').onclick=()=>{const text=$('message').value.trim();if(!text)return;$('send').disabled=true;status('Sakura is thinking…');setTimeout(async()=>{try{const data=await request('/chat',{text});$('conversation').textContent+='You: '+text+'\nSakura: '+data.reply+'\n\n';$('message').value='';status('Connected');}catch(error){status(error.message);}finally{$('send').disabled=false;}},30);};
 let phoneStateBusy=false,lastTrackingControl=0;
-setInterval(async()=>{if(!connected||phoneStateBusy||selectedMode!=='pc')return;phoneStateBusy=true;try{const data=await nativeJob('trackingStateAsync');pcNvidiaFrames=data.tracking_face_source==='nvidia_ar';const c=data.tracking_control;if(c&&c.id!==lastTrackingControl&&c.expires*1000>Date.now()){lastTrackingControl=c.id;if(c.action==='stop')window.stopPhoneTracking();else if(c.action==='hands')tracker.setHandTracking(c.enabled===true);else if(c.action==='calibrate')$('calibrate').click();else if(c.action==='start'&&!remoteTracking&&!companionTracking)$('tracking').click();}if(data.avatar){$('avatar').src='data:image/jpeg;base64,'+data.avatar;$('avatar').style.display='block';}else $('avatar').style.display='none';const next=data.expressions||[];if(JSON.stringify(next)!==JSON.stringify(expressions)){expressions=next;active.clear();renderExpressions();}const live=(data.active_expressions||[]).filter(name=>expressions.includes(name));if(live.slice().sort().join('\n')!==[...active].filter(name=>expressions.includes(name)).sort().join('\n')){active.clear();for(const name of live)active.add(name);renderExpressions();}}catch(error){connected=false;stopPhoneVision(false);window.stopPhoneTracking();status(error.message);autoReconnect();}finally{phoneStateBusy=false;}},500);
+setInterval(async()=>{if(!connected||phoneStateBusy||selectedMode!=='pc')return;phoneStateBusy=true;try{const data=await nativeJob('trackingStateAsync');pcNvidiaFrames=data.tracking_face_source==='nvidia_ar';const c=data.tracking_control;if(c&&c.id!==lastTrackingControl&&c.expires*1000>Date.now()){lastTrackingControl=c.id;if(c.action==='stop')window.stopPhoneTracking();else if(c.action==='hands')tracker.setHandTracking(c.enabled===true);else if(c.action==='calibrate')$('calibrate').click();else if(c.action==='start'&&!remoteTracking&&!companionTracking){if(remoteCameraAllowed&&!document.hidden)$('tracking').click();else status('Your PC requested tracking. Tap Start camera tracking, or enable paired-PC camera control.');}}if(data.avatar){$('avatar').src='data:image/jpeg;base64,'+data.avatar;$('avatar').style.display='block';}else $('avatar').style.display='none';const next=data.expressions||[];if(JSON.stringify(next)!==JSON.stringify(expressions)){expressions=next;active.clear();renderExpressions();}const live=(data.active_expressions||[]).filter(name=>expressions.includes(name));if(live.slice().sort().join('\n')!==[...active].filter(name=>expressions.includes(name)).sort().join('\n')){active.clear();for(const name of live)active.add(name);renderExpressions();}}catch(error){connected=false;stopPhoneVision(false);window.stopPhoneTracking();status(error.message);autoReconnect();}finally{phoneStateBusy=false;}},500);
 if(!standaloneAvailable){$('pc-mode').classList.remove('hidden');setTimeout(autoReconnect,100);}
 
 // Explicit paired-device tools. No background clipboard polling.
@@ -218,7 +242,7 @@ for(const [id,makePayload]of Object.entries({
 }))$(''+id)?.addEventListener('click',async()=>{
  const button=$(id);if(!connected){$('pc-tools-status').textContent='Connect to your PC first.';return;}
  button.disabled=true;button.setAttribute('aria-busy','true');$('pc-tools-status').textContent='Requesting PC tool…';
- try{await new Promise(r=>setTimeout(r,30));const payload=makePayload(),data=request('/tools',payload);
+ try{await new Promise(r=>setTimeout(r,30));const payload=makePayload(),data=await request('/tools',payload);
   if(payload.action==='clipboard.read'){$('pc-clipboard').value=data.text||'';$('pc-tools-status').textContent='PC clipboard received.';}
   else $('pc-tools-status').textContent=data.reply||'Clipboard sent to PC.';
  }catch(error){$('pc-tools-status').textContent=error.message;}finally{button.disabled=false;button.removeAttribute('aria-busy');}

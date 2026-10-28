@@ -1,9 +1,9 @@
-import {installCompactCompanionControls} from './compact-companion-controls.js?v=154';
+import {installCompactCompanionControls} from './compact-companion-controls.js?v=155';
 import {installStageItems} from './stage-items.js?v=151';
 import { appendEvidence } from './response-evidence.js?v=medium103';
 import {installChatAttachments} from './chat-attachments.js?v=files105';
 import {installSystemTools} from './system-tools.js?v=metrics93';
-import {installLocalModelManager} from './local-model-manager.js?v=model-clean136';
+import {installLocalModelManager,updateLocalModelChoices} from './local-model-manager.js?v=native-choice137';
 installLocalModelManager();
 installSystemTools();
 document.getElementById('open-agent-panel')?.addEventListener('click',async()=>{
@@ -20,14 +20,14 @@ import {finishStartupPresentation} from './startup-presentation.js?v=startup106'
 import {installScreenAudio} from './screen-audio.js?v=media90';
 import {installSpoutControls} from './spout-output.js?v=instances152';
 import {installVirtualCamera} from './virtual-camera.js?v=sakura3';
-import {installMobileLink} from './mobile-link.js?v=nvidia-fixes142';
+import {installMobileLink} from './mobile-link.js?v=connected-avatar78';
 import {installCameraPreview} from './camera-preview.js?v=1';
 import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes108';
 import {installReminders} from './assistant-reminders.js?v=1';
 import {installExpressionEditor} from './expression-editor.js?v=irida101';
-import {installModelSettings} from './model-settings.js?v=mouth-tab147';
+import {installModelSettings} from './model-settings.js?v=theme-clean148';
 import {installVtuberCollab} from './vtuber-collab.js?v=collab3';
-import ModelViewer from './model-viewer.js?v=cursor-gpu6';
+import ModelViewer from './model-viewer.js?v=neutral-light116';
 import AvatarTracking from './avatar-tracking.js?v=nvidia-fixes142';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
@@ -259,23 +259,6 @@ const voiceSaveMsg      = document.getElementById('voice-save-msg');
 const themeBtn                = document.getElementById('theme-btn');
 const themePopover            = document.getElementById('theme-popover');
 const closeThemePopoverBtn    = document.getElementById('close-theme-popover');
-const envColorPicker          = document.getElementById('env-color-picker');
-const envColorHex             = document.getElementById('env-color-hex');
-const envColorPickerModal     = document.getElementById('env-color-picker-modal');
-const envColorHexModal        = document.getElementById('env-color-hex-modal');
-const envIntensitySlider      = document.getElementById('env-intensity-slider');
-const envIntensityVal         = document.getElementById('env-intensity-val');
-const envIntensitySliderModal = document.getElementById('env-intensity-slider-modal');
-const envIntensityValModal    = document.getElementById('env-intensity-val-modal');
-const envRgbToggle            = document.getElementById('env-rgb-toggle');
-const envRgbToggleModal       = document.getElementById('env-rgb-toggle-modal');
-const saveThemeBtn            = document.getElementById('save-theme-btn');
-const themeSaveMsg            = document.getElementById('theme-save-msg');
-
-let currentEnvColor = localStorage.getItem('sakura_env_color') || '#ff6ea7';
-let currentEnvIntensity = parseFloat(localStorage.getItem('sakura_env_intensity') || '1.0');
-let currentRgbBreathing = localStorage.getItem('sakura_env_rgb') === 'true';
-
 // DOM — Models Tab
 const modelCardGrid      = document.getElementById('model-card-grid');
 const refreshModelsModal = document.getElementById('refresh-models-modal');
@@ -333,14 +316,9 @@ async function scanLocalModels() {
             body: JSON.stringify({ folder: document.getElementById('ollama-models-folder').value.trim() }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
-        const options = document.getElementById('ollama-model-options');
-        options.replaceChildren();
-        data.models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.name;
-            options.appendChild(option);
-        });
-        status.textContent = data.models.length ? `Available: ${data.models.map(m => m.name).join(', ')}` : 'No local models found.';
+        updateLocalModelChoices(data);
+        const names=[...data.models.map(m=>m.name),...(data.native_models||[]).map(m=>m.label)];
+        status.textContent = names.length ? `Available: ${names.join(', ')}` : 'No local models found.';
     } catch (error) { status.textContent = error.message; }
 }
 
@@ -848,7 +826,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     viewer?.setGlossBoost(Number(document.getElementById('gloss-boost-slider').value) / 100,
         viewer?.vrm?.scene||viewer?.model,viewer?.characterLightingTarget||null);
 
-    // Read the saved character before the models list chooses an initial model.
+    // Load only the character on the first-paint path; optional device/voice
+    // discovery must not keep the window covered (Windows enumeration can stall).
+    let startupVoicesReady=Promise.resolve();
     try {
         await loadAppSettings();
         updateTransparencyShortcut();
@@ -856,24 +836,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         updateAppBrand(trackingOnly);
         document.body.classList.toggle('tracking-only', trackingOnly);
         viewer?.setVtuberTrackingMode(trackingOnly);
-        await Promise.all([
-            loadVoicesList(),
-            loadModelsList(),
-            refreshAudioDevices(),
-        ]);
+        await loadModelsList();
     } catch (err) {
         console.warn('Initial data load warning:', err);
     }
 
     // 4. Apply saved audio output device
     if (selectedSpeakerId && lipSync) lipSync.setAudioOutput(selectedSpeakerId);
-
-    // 5. Apply saved Environment Color & Aura
-    applyEnvironmentTheme(currentEnvColor, currentEnvIntensity);
-    if (currentRgbBreathing) {
-        setRgbBreathingMode(true);
-    }
-
 
     checkStatus();
     setInterval(checkStatus, 5000);
@@ -894,8 +863,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     }, 5000);
 
     await finishStartupPresentation(viewer);
+    startupVoicesReady=loadVoicesList();
+    void refreshAudioDevices();
 
     if(!trackingOnly)try{
+        await startupVoicesReady;
         const greetingGeneration=chatReplyGeneration;
         const greeting=await(await fetch('/api/assistant/greeting',{method:'POST'})).json();
         if(greeting.reply){addMessage(greeting.reply,'sakura');await ensureKokoroReady();
@@ -1016,6 +988,14 @@ function setupEvents() {
         else if(!wasTemporary)startDesktopListening(true);
     });
     installCompactCompanionControls(()=>continuousMic.enabled||nativeWake.enabled());
+    const gamePlayMode=document.getElementById('game-play-mode');
+    gamePlayMode?.addEventListener('change',async()=>{
+        const previous=currentSettings.game_play_mode||'singleplayer';
+        try{const response=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({game_play_mode:gamePlayMode.value})});
+            if(!response.ok){const data=await response.json();throw Error(data.error||'Could not save game type.');}currentSettings.game_play_mode=gamePlayMode.value;
+            if(gameActive)listeningStatus.textContent=gamePlayMode.value==='multiplayer'?'Multiplayer · say the wake phrase to address Sakura; team/game audio is context.':'Single-player · microphone listens while enabled.';
+        }catch(error){gamePlayMode.value=previous;listeningStatus.textContent=error.message;}
+    });
     setupTabs();
 
     // Custom dropdown triggers
@@ -1150,7 +1130,7 @@ function setupEvents() {
             status.textContent = 'YouTube chat + live screen + computer audio · microphone excluded';
             document.getElementById('vtuber-mode-btn').textContent = 'AI VTuber on';
         } catch (error) {
-            if(!vtuberEnabled) {aiVtuberStarting=false; restoreAiVtuberScreen(); if(vtuberResumeMic) await startDesktopListening();}
+            if(!vtuberEnabled) {aiVtuberStarting=false; restoreAiVtuberScreen(); if(vtuberResumeMic) await startDesktopListening(true);}
             status.textContent = error.message;
         }
         finally { aiVtuberStarting = false; button.disabled = false; }
@@ -1162,7 +1142,7 @@ function setupEvents() {
         restoreAiVtuberScreen();
         await fetch("/api/vtuber/disconnect", {method: "POST"}).catch(console.error);
         await screenAudio.sync();
-        if(vtuberResumeMic) await startDesktopListening();
+        if(vtuberResumeMic) await startDesktopListening(true);
         vtuberResumeMic = false;
         if (vtuberSpeaking) document.getElementById('interrupt-btn').click();
         document.getElementById('vtuber-status').textContent = 'Off';
@@ -1472,6 +1452,7 @@ function applySettingsUI(s) {
     llmProvider.value = s.llm_provider || 'ollama';
     document.getElementById('game-ollama-model').value=s.game_ollama_model||'';
     document.getElementById('game-cloud-auto').checked=s.game_cloud_auto_enabled!==false;
+    if(document.getElementById('game-play-mode'))document.getElementById('game-play-mode').value=s.game_play_mode||'singleplayer';
     document.getElementById('ollama-model').value = s.ollama_model || 'qwen3-vl:2b-instruct';
     document.getElementById('ollama-models-folder').value = s.ollama_models_folder || '';
     document.getElementById('ollama-context').value = s.ollama_context || 4096;
@@ -1520,12 +1501,7 @@ function applySettingsUI(s) {
         rvcIndexRateVal.textContent = parseFloat(rvcIndexRateSlider.value).toFixed(2);
     }
 
-    // Apply saved Environment Color & Aura
-    if (s.env_color) currentEnvColor = s.env_color;
-    if (s.env_intensity !== undefined) currentEnvIntensity = s.env_intensity;
-    if (s.env_rgb_breathing !== undefined) currentRgbBreathing = s.env_rgb_breathing;
-    applyEnvironmentTheme(currentEnvColor, currentEnvIntensity);
-    if (currentRgbBreathing) setRgbBreathingMode(true);
+
 }
 
 async function saveAppSettings() {
@@ -1575,179 +1551,10 @@ async function saveAppSettings() {
 }
 
 // ─────────────────────────── Theme & Environment System ───────────────────────────
-function hexToRgb(hex) {
-    let clean = (hex || '#ff6ea7').replace('#', '');
-    if (clean.length === 3) clean = clean.split('').map(c => c + c).join('');
-    const num = parseInt(clean, 16) || 0;
-    return {
-        r: (num >> 16) & 255,
-        g: (num >> 8) & 255,
-        b: num & 255,
-    };
-}
-
-function rgbToHsl(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h = 0, s = 0, l = (max + min) / 2;
-    if (max !== min) {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        switch (max) {
-            case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-            case g: h = ((b - r) / d + 2) / 6; break;
-            case b: h = ((r - g) / d + 4) / 6; break;
-        }
-    }
-    return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
-}
-
-function applyEnvironmentTheme(hex, intensity = 1.0, isRgbCycle = false) {
-    if (!hex) return;
-    const { r, g, b } = hexToRgb(hex);
-    const { h, s, l } = rgbToHsl(r, g, b);
-
-    // CSS variables
-    const root = document.documentElement.style;
-    root.setProperty('--sakura-pink', hex);
-    root.setProperty('--sakura-glow', `rgba(${r}, ${g}, ${b}, ${(0.45 * intensity).toFixed(2)})`);
-    root.setProperty('--panel-border', `rgba(${r}, ${g}, ${b}, ${(0.28 * intensity).toFixed(2)})`);
-    root.setProperty('--sakura-bubble', `rgba(${r}, ${g}, ${b}, ${(0.22 * intensity).toFixed(2)})`);
-
-    // Ambient background gradient
-    const bg1 = `hsl(${h}, ${Math.min(s, 40)}%, ${Math.max(8, Math.round(l * 0.22))}%)`;
-    const bg2 = `hsl(${h}, ${Math.min(s, 50)}%, 4%)`;
-    const userBubble = `hsl(${h}, ${Math.min(s, 30)}%, 14%)`;
-    root.setProperty('--bg-grad-1', bg1);
-    root.setProperty('--bg-grad-2', bg2);
-    root.setProperty('--user-bubble', userBubble);
-
-    // 3D Scene lighting
-    if (viewer && typeof viewer.setEnvironmentColor === 'function') {
-        viewer.setEnvironmentColor(hex, intensity);
-    }
-
-    if (!isRgbCycle) {
-        currentEnvColor = hex;
-        currentEnvIntensity = intensity;
-        localStorage.setItem('sakura_env_color', hex);
-        localStorage.setItem('sakura_env_intensity', intensity.toString());
-
-        // Sync inputs
-        if (envColorPicker) envColorPicker.value = hex;
-        if (envColorHex) envColorHex.textContent = hex;
-        if (envColorPickerModal) envColorPickerModal.value = hex;
-        if (envColorHexModal) envColorHexModal.textContent = hex;
-
-        const pct = Math.round(intensity * 100);
-        if (envIntensitySlider) envIntensitySlider.value = pct;
-        if (envIntensityVal) envIntensityVal.textContent = `${pct}%`;
-        if (envIntensitySliderModal) envIntensitySliderModal.value = pct;
-        if (envIntensityValModal) envIntensityValModal.textContent = `${pct}%`;
-
-        // Highlight matching preset chips
-        document.querySelectorAll('.aura-chip').forEach(chip => {
-            const chipColor = chip.dataset.color?.toLowerCase();
-            chip.classList.toggle('active', chipColor === hex.toLowerCase());
-        });
-    }
-}
-
-function setRgbBreathingMode(enabled) {
-    currentRgbBreathing = !!enabled;
-    localStorage.setItem('sakura_env_rgb', currentRgbBreathing ? 'true' : 'false');
-    if (envRgbToggle) envRgbToggle.checked = currentRgbBreathing;
-    if (envRgbToggleModal) envRgbToggleModal.checked = currentRgbBreathing;
-
-    if (viewer && typeof viewer.setRgbBreathing === 'function') {
-        viewer.setRgbBreathing(currentRgbBreathing, (cycleHex) => {
-            applyEnvironmentTheme(cycleHex, currentEnvIntensity, true);
-        });
-    }
-
-    if (!currentRgbBreathing) {
-        applyEnvironmentTheme(currentEnvColor, currentEnvIntensity, false);
-    }
-}
-
 function setupThemeEvents() {
-    // Popover open / close
-    if (themeBtn) {
-        themeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (themePopover) themePopover.classList.toggle('hidden');
-        });
-    }
-    if (closeThemePopoverBtn) {
-        closeThemePopoverBtn.addEventListener('click', () => {
-            if (themePopover) themePopover.classList.add('hidden');
-        });
-    }
-    document.addEventListener('click', (e) => {
-        if (themePopover && !themePopover.classList.contains('hidden')) {
-            if (!themePopover.contains(e.target) && e.target !== themeBtn) {
-                themePopover.classList.add('hidden');
-            }
-        }
-    });
-
-    // Real-time Color Wheel Input
-    const onColorPick = (e) => {
-        const hex = e.target.value;
-        if (currentRgbBreathing) setRgbBreathingMode(false);
-        applyEnvironmentTheme(hex, currentEnvIntensity, false);
-        save_setting_silent({ env_color: hex, env_rgb_breathing: false });
-    };
-    if (envColorPicker) envColorPicker.addEventListener('input', onColorPick);
-    if (envColorPickerModal) envColorPickerModal.addEventListener('input', onColorPick);
-
-    // Intensity Slider
-    const onIntensityChange = (e) => {
-        const intensity = parseFloat(e.target.value) / 100.0;
-        currentEnvIntensity = intensity;
-        applyEnvironmentTheme(currentEnvColor, currentEnvIntensity, false);
-        save_setting_silent({ env_intensity: intensity });
-    };
-    if (envIntensitySlider) envIntensitySlider.addEventListener('input', onIntensityChange);
-    if (envIntensitySliderModal) envIntensitySliderModal.addEventListener('input', onIntensityChange);
-
-    // RGB Breathing Toggles
-    if (envRgbToggle) {
-        envRgbToggle.addEventListener('change', (e) => {
-            setRgbBreathingMode(e.target.checked);
-            save_setting_silent({ env_rgb_breathing: e.target.checked });
-        });
-    }
-    if (envRgbToggleModal) {
-        envRgbToggleModal.addEventListener('change', (e) => {
-            setRgbBreathingMode(e.target.checked);
-            save_setting_silent({ env_rgb_breathing: e.target.checked });
-        });
-    }
-
-    // Preset Chips
-    document.querySelectorAll('.aura-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-            const color = chip.dataset.color;
-            if (color) {
-                if (currentRgbBreathing) setRgbBreathingMode(false);
-                applyEnvironmentTheme(color, currentEnvIntensity, false);
-                save_setting_silent({ env_color: color, env_rgb_breathing: false });
-            }
-        });
-    });
-
-    // Save Theme in Modal
-    if (saveThemeBtn) {
-        saveThemeBtn.addEventListener('click', async () => {
-            await save_setting_silent({
-                env_color: currentEnvColor,
-                env_intensity: currentEnvIntensity,
-                env_rgb_breathing: currentRgbBreathing,
-            });
-            flashMsg(themeSaveMsg, 'Theme saved! ✓');
-        });
-    }
+    themeBtn?.addEventListener('click',event=>{event.stopPropagation();themePopover?.classList.toggle('hidden');});
+    closeThemePopoverBtn?.addEventListener('click',()=>themePopover?.classList.add('hidden'));
+    document.addEventListener('click',event=>{if(themePopover&&!themePopover.contains(event.target)&&event.target!==themeBtn)themePopover.classList.add('hidden');});
 }
 
 // ─────────────────────────── Voice System ───────────────────────────
@@ -1890,9 +1697,10 @@ function renderRvcModelsList() {
         item.className = `rvc-model-item${m.id === currentVoiceId ? ' active' : ''}`;
         item.dataset.id = m.id;
         item.innerHTML = `
-            <span class="rmi-name">${m.name}</span>
+            <span class="rmi-name"></span>
             <span class="rmi-badge">${m.has_index ? '✓ Index' : 'No Index'}</span>
         `;
+        item.querySelector('.rmi-name').textContent = m.name;
         item.addEventListener('click', () => applyVoiceById(m.id));
         rvcModelsList.appendChild(item);
     });
@@ -2187,9 +1995,11 @@ function renderModelCards() {
         const icon = icons[m.name.toLowerCase()] || '🎎';
         card.innerHTML = `
             <div class="mc-icon">${icon}</div>
-            <div class="mc-name">${m.name}</div>
-            <div class="mc-file">${m.filename}</div>
+            <div class="mc-name"></div>
+            <div class="mc-file"></div>
         `;
+        card.querySelector('.mc-name').textContent = m.name;
+        card.querySelector('.mc-file').textContent = m.filename;
         if (m.error) { card.title = m.error; card.classList.add('invalid-model'); }
         card.addEventListener('click', async () => {
             if (m.error) { addMessage(m.error, 'sakura'); return; }
@@ -2273,6 +2083,7 @@ async function loadModelFromUrl(url, recovering = false) {
         const modelKey = decodeURIComponent(url.replace(/^\/models\//, '').split(/[?#]/, 1)[0]);
         const savedGlitchPolicy = localStorage.getItem(glitchFixStorageKey(modelKey));
         const result = await viewer.loadModel(url, {
+            lowMemory:gameActive,
             glitchFixPolicy: savedGlitchPolicy === null ? 'auto' : savedGlitchPolicy === 'true' ? 'on' : 'off',
         });
         if (!result || attempt !== modelRecoveryGeneration) return;
@@ -2349,7 +2160,7 @@ async function loadLocalPmx(file) {
     try {
         glitchModelKey = `local/${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`;
         const savedGlitchPolicy = localStorage.getItem(glitchFixStorageKey(glitchModelKey));
-        const result = await viewer.loadModel(blobUrl, {glitchFixPolicy: savedGlitchPolicy === null ? 'auto' : savedGlitchPolicy === 'true' ? 'on' : 'off'});
+        const result = await viewer.loadModel(blobUrl, {lowMemory:gameActive,glitchFixPolicy: savedGlitchPolicy === null ? 'auto' : savedGlitchPolicy === 'true' ? 'on' : 'off'});
         if (!result) return;
         addMessage(`✨ Loaded ${file.name}! Note: Put model folder in anime-assistant/models/ for full textures.`, 'sakura');
         updateGlitchFixUI();
@@ -2735,6 +2546,9 @@ async function handleSendMessage() {
                 if (generation === chatReplyGeneration)startSpeechGesture();
                 if (generation === chatReplyGeneration) addMessage(`⚠️ Speech unavailable: ${err.message}`, 'sakura');
             }
+            // A multi-step sequence is still running on the backend: report each
+            // step as it lands instead of leaving the panel silent until the end.
+            if (data.workflow?.id) void narrateWorkflow(data.workflow.id).catch(error=>console.warn('Workflow updates:',error));
             if (generation === chatReplyGeneration) hideSpeechBubble();
         } else if (data.error) {
             if (generation === chatReplyGeneration) removeTypingIndicator();
@@ -2749,6 +2563,38 @@ async function handleSendMessage() {
         if (generation === chatReplyGeneration && !lipSync?.isPlaying) viewer?.setActivity('idle');
         if (generation === chatReplyGeneration) viewer?.reactionExpressions?.stop();
     }
+}
+
+const workflowWatchers=new Map();
+window.addEventListener('pagehide',()=>{for(const controller of workflowWatchers.values())controller.abort();workflowWatchers.clear();});
+async function narrateWorkflow(id) {
+    if(workflowWatchers.has(id))return;
+    const controller=new AbortController();workflowWatchers.set(id,controller);
+    let seen=0;const pending=[];let finished=false;
+    const deadline=Date.now()+180000;
+    try{
+        while(!controller.signal.aborted&&Date.now()<deadline){
+            if(!finished){
+                const response=await fetch(`/api/assistant-tools/workflow/${encodeURIComponent(id)}`,{signal:controller.signal});
+                if(!response.ok){addMessage('The action sequence is still unconfirmed. Check Recent action results.','sakura');return;}
+                const state=await response.json();
+                for(const step of (state.steps||[]).slice(seen)){if(step.reply){addMessage(step.reply,'sakura');pending.push(step.reply);}}
+                seen=(state.steps||[]).length;finished=state.status!=='running';
+                if(state.status==='failed'||state.status==='cancelled')addMessage('The remaining steps were not run.','sakura');
+            }
+            // New user turns take priority over progress narration. Never hold
+            // chatBusy while a deterministic action runs on the server.
+            if(pending.length&&!chatBusy&&!reactionBusy&&!lipSync?.isPlaying&&!trackingOnly&&!vtuberEnabled){
+                const generation=chatReplyGeneration,line=pending.shift();
+                await speakPhrases(line,async text=>{
+                    const response=await fetch('/api/tts/speak',{signal:controller.signal,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+                    if(!response.ok)return null;return (await response.json()).audio;
+                },async audio=>{if(audio&&generation===chatReplyGeneration&&!chatBusy)await lipSync.playWithLipSync(audio);},()=>!controller.signal.aborted&&generation===chatReplyGeneration&&!chatBusy).catch(()=>{});
+            }
+            if(finished&&!pending.length)return;
+            await new Promise(resolve=>setTimeout(resolve,800));
+        }
+    }finally{workflowWatchers.delete(id);}
 }
 
 async function setGameLocalModel(active) {
@@ -2811,13 +2657,13 @@ async function leaveGameMode() {
     gameStartedScreen = false;
     const resume = gameResumeMic;
     gameResumeMic = false;
-    if (resume && !continuousMic.enabled) await startDesktopListening();
+    if (resume && !continuousMic.enabled) await startDesktopListening(true);
     if (!wasActive) return;
     listeningStatus.textContent = 'Game mode ended · your selected AI is unchanged';
 }
 
 async function checkGameMode() {
-    if (trackingOnly) return;
+    if (trackingOnly || viewer?._displayLoading || viewer?._modelSwitchQueue) return;
     if (!autoGameEnabled || autoGameBusy || !window.pywebview?.api?.game_status) return;
     autoGameBusy = true;
     try {
@@ -2847,12 +2693,16 @@ async function checkGameMode() {
         if (!screenShare.enabled) { await screenShare.toggle(); gameStartedScreen = screenShare.enabled; }
         if (!screenShare.enabled) throw new Error('Screen access was not enabled.');
         if (!autoGameEnabled) return;
-        gameReady = true;
-        if(!vtuberEnabled&&!continuousMic.enabled)await startDesktopListening();
+        // Screen reactions must not depend on microphone permission succeeding.
         reactionsEnabled = true;
         screenReactBtn.textContent = '💬 Reactions on';
         screenReactBtn.setAttribute('aria-pressed', 'true');
-        if (!gameCloudFallbackActive) listeningStatus.textContent = `Game detected: ${game.name} · ${currentSettings.llm_provider==='ollama'?currentSettings.ollama_model:currentSettings.llm_provider} · live screen/audio + microphone`;
+        screenViewBtn.textContent = '🖥️ Screen on';
+        screenViewBtn.setAttribute('aria-pressed', 'true');
+        if(!vtuberEnabled&&!continuousMic.enabled)await startDesktopListening(true);
+        gameReady = true;
+        if (!gameCloudFallbackActive) listeningStatus.textContent = `Game detected: ${game.name} · ${currentSettings.llm_provider==='ollama'?currentSettings.ollama_model:currentSettings.llm_provider} · `+
+            (continuousMic.enabled||nativeWake.enabled()?(currentSettings.game_play_mode==='multiplayer'?'Multiplayer · say the wake phrase to address Sakura':'Single-player · microphone on'):'Microphone unavailable · click Listen and check microphone permission/device');
     } catch (error) { listeningStatus.textContent = `Game mode: ${error.message}`; }
     finally { autoGameBusy = false; }
 }
@@ -2933,14 +2783,14 @@ async function pollVtuberChat() {
             reactionBusy = false;
             viewer?.reactionExpressions?.stop();
             hideSpeechBubble();
-            if (resumeMic) await startDesktopListening();
+            if (resumeMic) await startDesktopListening(true);
         }
     } catch (error) { document.getElementById('vtuber-status').textContent = error.message; }
     finally { vtuberPollBusy = false; }
 }
 
 async function reactToScreen(initialCheck = false) {
-    if (trackingOnly) return;
+    if (trackingOnly || viewer?._displayLoading || viewer?._modelSwitchQueue) return;
     const gameWatch=gameActive&&gameReady&&!initialCheck;
     if (!gameWatch&&!initialCheck && Date.now() - lastDirectReplyAt < 30000) return;
     if(gameWatch&&Date.now()-lastGameWatch<4000)return;
@@ -3007,7 +2857,7 @@ async function reactToScreen(initialCheck = false) {
         if(expressionStarted)viewer?.reactionExpressions?.stop();
         lastCoHostSpeech = Date.now();
         hideSpeechBubble();
-        if (resumeMic) await startDesktopListening();
+        if (resumeMic) await startDesktopListening(true);
     }
 }
 
@@ -3037,7 +2887,7 @@ async function reactToCamera() {
             const speech=await res.json();if(!res.ok)throw new Error(speech.error||'Speech unavailable.');return speech.audio;
         },async audio=>{if(audio)await lipSync.playWithLipSync(audio);},()=>companionCamera.enabled&&document.getElementById('companion-camera-comments').checked&&cameraGeneration===companionCamera.generation&&generation===chatReplyGeneration&&!controller.signal.aborted&&!trackingOnly&&!vtuberEnabled);
     }catch(error){if(error.name!=='AbortError'&&companionCamera.enabled)document.getElementById('companion-camera-status').textContent=error.message;}
-    finally{if(cameraExpressionStarted&&generation===chatReplyGeneration)viewer?.reactionExpressions?.stop();if(cameraReactionController===controller)cameraReactionController=null;reactionBusy=false;if(resumeMic&&!trackingOnly&&!vtuberEnabled)await startDesktopListening();}
+    finally{if(cameraExpressionStarted&&generation===chatReplyGeneration)viewer?.reactionExpressions?.stop();if(cameraReactionController===controller)cameraReactionController=null;reactionBusy=false;if(resumeMic&&!trackingOnly&&!vtuberEnabled)await startDesktopListening(true);}
 }
 
 function showSpeechBubble(text) {
@@ -3126,7 +2976,7 @@ async function sendAudioForSTT(blob, options = {}) {
             speechInputUsed=!continuous;
             // Speaker playback can reach the microphone despite browser echo cancellation.
             // Automatic listening needs explicit address while media audio is active.
-            const mediaWake = continuous && screenAudio.playbackActive();
+            const mediaWake = continuous && (gameActive ? currentSettings.game_play_mode==='multiplayer' : screenAudio.playbackActive());
             if (currentSettings.wake_word_enabled || mediaWake) {
                 const query = extractWakeCommand(raw, currentSettings.wake_word || 'hey sakura');
                 if (query !== null) {
@@ -3171,6 +3021,77 @@ function addMessage(text, sender, evidence = null) {
     // progress and UI errors are not factual AI answers and must not display
     // a misleading "Unknown" verification badge.
     if (sender === 'sakura' && evidence) appendEvidence(msg, evidence);
+    if(sender==='sakura'&&evidence?.mode_guide){
+        const guide=document.createElement('button');guide.type='button';guide.textContent='Show Friend / Teacher controls';
+        guide.onclick=()=>{
+            const event=new CustomEvent('sakura-open-conversation-mode',{cancelable:true,detail:{mode:evidence.mode_guide}});
+            window.dispatchEvent(event);
+            if(!event.defaultPrevented){guide.textContent='Return to Companion mode, then open the left speaker icon > Voice & speech';}
+        };
+        msg.appendChild(guide);
+    }
+    if(sender==='sakura'&&evidence?.agent_task?.id){
+        const task=evidence.agent_task,card=document.createElement('section');
+        const stateText=document.createElement('p'),details=document.createElement('pre'),actions=document.createElement('div');
+        details.style.cssText='white-space:pre-wrap;max-height:220px;overflow:auto;font-size:12px';
+        card.append(stateText,details,actions);msg.append(card);
+        const endpoint='/api/companion/agent-tasks/'+encodeURIComponent(task.id);
+        let stopped=false;
+        const send=async(suffix,body)=>{
+            const response=await fetch(endpoint+suffix,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            const result=await response.json();if(!response.ok)throw Error(result.error||'Task operation failed.');return result;
+        };
+        const button=(label,handler)=>{const b=document.createElement('button');b.type='button';b.textContent=label;
+            b.onclick=async()=>{for(const item of actions.children)item.disabled=true;try{await handler();}catch(error){stateText.textContent=error.message;for(const item of actions.children)item.disabled=false;}};actions.append(b);};
+        const refresh=async()=>{
+            if(stopped||!card.isConnected)return;
+            try{
+                const response=await fetch(endpoint),state=await response.json();if(!response.ok)throw Error(state.error||'Could not read task progress.');
+                stateText.textContent=state.error||('Task: '+(state.planning?'planning / running':state.run.status));
+                details.textContent=state.run.goal+'\nWorkspace: '+state.run.workspace+'\n'+(state.pending?state.pending.tool+'\n'+JSON.stringify(state.pending.arguments,null,2):state.run.summary||state.run.plan||'');
+                actions.replaceChildren();
+                if(state.pending&&!state.planning){
+                    for(const [label,approved] of [['Approve step',true],['Reject step',false]])button(label,async()=>{await send('/decide',{action:state.pending.id,approved});await refresh();});
+                }
+                if(task.schedule_minutes&&state.run.status==='completed')button('Approve repeat every '+task.schedule_minutes+' minutes',async()=>{
+                    const result=await send('/schedule',{approved:true});stopped=true;stateText.textContent='Scheduled every '+result.minutes+' minutes. Sakura must remain running.';actions.replaceChildren();
+                });
+                button('Open Agent mode',async()=>{document.getElementById('agent-mode-toggle')?.click();});
+                if(state.planning)setTimeout(refresh,1200);
+            }catch(error){stateText.textContent=error.message;}
+        };
+        setTimeout(refresh,0);
+    }
+    if(sender==='sakura'&&evidence?.command_approval){
+        const actions=document.createElement('div');
+        for(const [label,approved] of [['Approve & run',true],['Reject',false]]){
+            const button=document.createElement('button');button.type='button';button.textContent=label;
+            button.onclick=async()=>{
+                for(const item of actions.children)item.disabled=true;
+                const generation=chatReplyGeneration, controller=new AbortController();
+                const wasBusy=chatBusy;chatBusy=true;
+                try{
+                    const response=await fetch('/api/commands/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:evidence.command_approval,approved})});
+                    const result=await response.json();
+                    const line=result.reply||result.error||'The action could not be confirmed.';
+                    addMessage(line,'sakura');
+                    if(result.workflow?.id){
+                        try{
+                            await speakPhrases(line, async text=>{
+                                const speech=await fetch('/api/tts/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+                                const audio=await speech.json();
+                                if(!speech.ok)throw new Error(audio.error||'Speech is unavailable.');
+                                return audio.audio;
+                            }, async audio=>{if(audio)await lipSync.playWithLipSync(audio);}, ()=>generation===chatReplyGeneration);
+                        }catch(_){}
+                        void narrateWorkflow(result.workflow.id).catch(error=>console.warn('Workflow updates:',error));
+                    }
+                }catch(_){addMessage('The action result could not be confirmed. Check before trying again.','sakura');}
+                finally{if(!wasBusy)chatBusy=false;}
+            };actions.append(button);
+        }msg.append(actions);
+    }
+
     messagesEl.appendChild(msg);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -3846,7 +3767,7 @@ function setupAvatarTracking() {
             if(!response.ok) throw new Error(data.error || 'Could not restore AI.');
             viewer.setVtuberTrackingMode(false);
             setUI(false); status.textContent='Tracking off · assistant restored';
-            if(resumeMic && document.body.classList.contains('desktop-companion')) await startDesktopListening();
+            if(resumeMic && document.body.classList.contains('desktop-companion')) await startDesktopListening(true);
         } catch(error) { status.textContent=error.message; }
         finally { switching=false; start.disabled=false; stop.disabled=false; }
     });

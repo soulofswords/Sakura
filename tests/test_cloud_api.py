@@ -60,7 +60,7 @@ class CloudTests(unittest.TestCase):
                 post.assert_not_called()
 
     def test_settings_detect_route_save_and_redact(self):
-        from fastapi.testclient import TestClient
+        from local_client import TestClient
         with tempfile.TemporaryDirectory() as folder,patch.object(app,'SETTINGS_FILE',Path(folder)/'settings.json'),patch.object(credentials,'CLOUD_KEY_FILE',Path(folder)/'keys.bin'),patch.object(credentials,'KEY_FILE',Path(folder)/'gemini.bin'):
             model=LLM(Path(folder)/'memory.json')
             with patch.object(app,'llm',model),patch.object(app,'tts',None):

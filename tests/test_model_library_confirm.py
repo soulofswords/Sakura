@@ -12,6 +12,7 @@ from model_library_confirm import CONFIRM_ENDPOINT, USER_ENDPOINT, router, verif
 from model_library_config import SUPABASE_PUBLISHABLE_KEY
 
 HASH = 'sF4d2sG7hJ0kL9pQrT3vW6xZ1cB5nM8a'
+OTHER = 'zQ8mK3tR7pL2wN6xF9vB4jH1cD5sGa0b'
 CODE = '123456'
 SESSION = 'sess-' + 'x' * 40
 FIELD = re.compile(r'name="reset_id" type="hidden" value="([^"]+)"')
@@ -47,6 +48,11 @@ def updated(email='tester@example.com'):
     return Response(200, {'id': 'u1', 'aud': 'authenticated', 'email': email})
 
 
+def spent():
+    """What Auth really answers a recovery link it no longer accepts: one 403 for used and stale alike."""
+    return Response(403, {'code': 403, 'error_code': 'otp_expired', 'msg': 'Email link is invalid or has expired'})
+
+
 class Transport:
     def __init__(self, reply=None, error=None, put_reply=None):
         self.calls = []
@@ -78,7 +84,25 @@ def client(local=True, form_local=True, transport=None):
     return TestClient(app)
 
 
-class Verify(unittest.TestCase):
+def put_calls(transport):
+    return [call for call in transport.calls if call['method'] == 'PUT']
+
+
+class Isolated(unittest.TestCase):
+    """The pending slot table is process state, so each test needs a clean one.
+
+    A reset link opened by an earlier test would otherwise still be waiting for the same address
+    and the same token, which no real machine ever does.
+    """
+
+    def setUp(self):
+        self.addCleanup(model_library_confirm._pending.clear)
+        self.addCleanup(model_library_confirm._held_by_token.clear)
+        model_library_confirm._pending.clear()
+        model_library_confirm._held_by_token.clear()
+
+
+class Verify(Isolated):
     def test_link_token_is_posted_as_a_hash_with_the_publishable_key(self):
         transport = Transport()
         self.assertEqual(verify(HASH, transport), 'confirmed')
@@ -134,7 +158,7 @@ class Verify(unittest.TestCase):
         self.assertTrue(reply.closed)
 
 
-class Route(unittest.TestCase):
+class Route(Isolated):
     def test_a_link_with_a_good_token_confirms_in_the_users_own_words(self):
         transport = Transport()
         response = client(transport=transport).get('/api/model-library/confirm?confirmation_token=' + HASH)
@@ -228,7 +252,7 @@ def open_form(transport=None, **guard):
     return probe, page
 
 
-class Recover(unittest.TestCase):
+class Recover(Isolated):
     def test_a_recovery_link_is_spent_as_a_recovery_type_hash(self):
         transport = Transport(reply=recovered())
         _, page = open_form(transport)
@@ -277,7 +301,8 @@ class Recover(unittest.TestCase):
         self.assertIn('<script nonce="' + nonce(first) + '">', first.text)
         self.assertTrue(nonce(first))
         self.assertNotEqual(nonce(first), nonce(second), 'A nonce may not be reused across responses.')
-        plain = client(transport=Transport()).get('/api/model-library/reset?recovery_token=' + HASH)
+        # A link this process never verified has no session to fall back on, so it stays a plain page.
+        plain = client(transport=Transport()).get('/api/model-library/reset?recovery_token=' + OTHER)
         self.assertNotIn('<form', plain.text)
         self.assertEqual(nonce(plain), '', 'A page without the form runs no script at all.')
 
@@ -318,14 +343,11 @@ class Recover(unittest.TestCase):
         self.assertEqual(transport.calls, [])
 
 
-class Reset(unittest.TestCase):
+class Reset(Isolated):
     def submit(self, probe, identifier, password='FreshPassw0rd!', confirm=None):
         return probe.post('/api/model-library/reset', data={
             'reset_id': identifier, 'password': password,
             'confirm': password if confirm is None else confirm})
-
-    def put_calls(self, transport):
-        return [call for call in transport.calls if call['method'] == 'PUT']
 
     def test_the_new_password_reaches_auth_with_the_recovered_session(self):
         transport = Transport(reply=recovered())
@@ -334,10 +356,10 @@ class Reset(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('Your password is changed.', response.text)
         self.assertNotIn('FreshPassw0rd!', response.text)
-        self.assertEqual(len(self.put_calls(transport)), 1)
-        self.assertEqual(self.put_calls(transport)[0]['url'], USER_ENDPOINT)
-        self.assertEqual(self.put_calls(transport)[0]['json'], {'password': 'FreshPassw0rd!'})
-        self.assertEqual(self.put_calls(transport)[0]['headers'], {'apikey': SUPABASE_PUBLISHABLE_KEY,
+        self.assertEqual(len(put_calls(transport)), 1)
+        self.assertEqual(put_calls(transport)[0]['url'], USER_ENDPOINT)
+        self.assertEqual(put_calls(transport)[0]['json'], {'password': 'FreshPassw0rd!'})
+        self.assertEqual(put_calls(transport)[0]['headers'], {'apikey': SUPABASE_PUBLISHABLE_KEY,
                                                                   'Authorization': 'Bearer ' + SESSION})
 
     def test_a_short_or_mismatched_password_never_reaches_auth(self):
@@ -347,7 +369,7 @@ class Reset(unittest.TestCase):
                 probe, page = open_form(transport)
                 response = self.submit(probe, FIELD.search(page.text).group(1), **case)
                 self.assertEqual(response.status_code, 400)
-                self.assertEqual(self.put_calls(transport), [])
+                self.assertEqual(put_calls(transport), [])
 
     def test_a_rejected_password_leaves_the_link_usable_for_one_more_try(self):
         transport = Transport(reply=recovered(), put_reply=Response(422, {'error_code': 'weak_password'}))
@@ -358,7 +380,23 @@ class Reset(unittest.TestCase):
         self.assertIn('not strong enough', first.text)
         self.assertIn('name="password"', first.text)
         self.submit(probe, identifier)
-        self.assertEqual(len(self.put_calls(transport)), 2)
+        self.assertEqual(len(put_calls(transport)), 2)
+
+    def test_same_password_and_temporary_provider_errors_keep_browser_form_usable(self):
+        for reply, message in ((Response(422, {'error_code': 'same_password'}), 'already set'),
+                               (Response(429), 'temporarily unavailable'),
+                               (Response(503), 'temporarily unavailable')):
+            with self.subTest(status=reply.status_code):
+                transport = Transport(reply=recovered(), put_reply=reply)
+                probe, page = open_form(transport)
+                identifier = FIELD.search(page.text).group(1)
+                first = self.submit(probe, identifier)
+                self.assertIn(message, first.text)
+                self.assertEqual(FIELD.search(first.text).group(1), identifier)
+                self.assertNotIn('FreshPassw0rd!', first.text)
+                transport.put_reply = updated()
+                self.assertEqual(self.submit(probe, identifier).status_code, 200)
+                self.assertIn('already been used', self.submit(probe, identifier).text)
 
     def test_the_link_sets_a_password_once(self):
         transport = Transport(reply=recovered())
@@ -368,7 +406,7 @@ class Reset(unittest.TestCase):
         again = self.submit(probe, identifier)
         self.assertEqual(again.status_code, 400)
         self.assertIn('already been used or has gone stale', again.text)
-        self.assertEqual(len(self.put_calls(transport)), 1)
+        self.assertEqual(len(put_calls(transport)), 1)
 
     def test_a_made_up_slot_is_expired_before_the_network(self):
         for identifier in ('', 'short', 'x' * 200, SESSION):
@@ -378,7 +416,7 @@ class Reset(unittest.TestCase):
                 response = self.submit(probe, identifier)
                 self.assertEqual(response.status_code, 400)
                 self.assertIn('already been used or has gone stale', response.text)
-                self.assertEqual(self.put_calls(transport), [])
+                self.assertEqual(put_calls(transport), [])
 
     def test_an_unreachable_service_says_so_and_keeps_the_slot(self):
         transport = Transport(reply=recovered())
@@ -390,7 +428,7 @@ class Reset(unittest.TestCase):
         self.assertIn('could not reach its account service', response.text)
         transport.error = None
         self.submit(probe, identifier)
-        self.assertEqual(len(self.put_calls(transport)), 2)
+        self.assertEqual(len(put_calls(transport)), 2)
 
     def test_a_form_driven_by_another_website_cannot_change_a_password(self):
         transport = Transport(reply=recovered())
@@ -398,7 +436,133 @@ class Reset(unittest.TestCase):
         response = self.submit(probe, FIELD.search(page.text).group(1))
         self.assertEqual(response.status_code, 403)
         self.assertIn('Only this computer', response.text)
-        self.assertEqual(self.put_calls(transport), [])
+        self.assertEqual(put_calls(transport), [])
+
+    def test_a_link_the_reader_opens_twice_still_ends_with_a_new_password(self):
+        # A mail scanner, a second tab or a back-button visit all re-open the same link. Auth answers
+        # a spent link with the same 403 it gives a stale one, so the refusal is not a diagnosis - the
+        # session this process already exchanged for that exact token is.
+        transport = Transport(reply=recovered())
+        probe = client(transport=transport)
+        probe.get('/api/model-library/reset?recovery_token=' + HASH)
+        transport.reply = spent()
+        again = probe.get('/api/model-library/reset?recovery_token=' + HASH)
+        self.assertEqual(again.status_code, 200)
+        self.assertIn('Choose a new password.', again.text)
+        self.assertNotIn('no longer works', again.text)
+        self.assertEqual(len(put_calls(transport)), 0)
+        response = self.submit(probe, FIELD.search(again.text).group(1))
+        self.assertIn('Your password is changed.', response.text)
+        self.assertEqual(len(put_calls(transport)), 1)
+
+    def test_a_link_spent_before_this_server_saw_it_still_says_used(self):
+        # Handing the reader back a form is only honest when this process really does hold a
+        # session; otherwise "no longer works" is the truth and no form may appear.
+        transport = Transport(reply=recovered())
+        probe = client(transport=transport)
+        transport.reply = spent()
+        response = probe.get('/api/model-library/reset?recovery_token=' + HASH)
+        self.assertIn('That reset link no longer works.', response.text)
+        self.assertNotIn('name="reset_id"', response.text)
+
+    def test_a_service_that_does_not_answer_does_not_hand_back_a_held_session(self):
+        # A network failure says nothing about the token, so the refusal stays what it is and the
+        # reader is told the truth instead of being invited to submit a password into a dead link.
+        transport = Transport(reply=recovered())
+        probe = client(transport=transport)
+        probe.get('/api/model-library/reset?recovery_token=' + HASH)
+        transport.error = requests.ConnectionError()
+        again = probe.get('/api/model-library/reset?recovery_token=' + HASH)
+        self.assertEqual(again.status_code, 503)
+        self.assertNotIn('name="reset_id"', again.text)
+        transport.error = None
+
+
+class FinishInApp(Isolated):
+    """The same reset, finished from Sakura's own panel instead of the browser tab."""
+
+    def finish(self, probe, email='tester@example.com', password='FreshPassw0rd!', confirm=None):
+        return probe.post('/api/model-library/finish-reset', json={
+            'reset_id': model_library_confirm.pending_for_email(email), 'password': password, 'confirm': password if confirm is None else confirm})
+
+    def test_a_verified_link_can_be_finished_inside_sakura(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        response = self.finish(probe)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'ok': True, 'message': 'Your password is changed. Sign in to Sakura with your new password.'})
+        self.assertEqual(len(put_calls(transport)), 1)
+        self.assertEqual(put_calls(transport)[0]['json'], {'password': 'FreshPassw0rd!'})
+        self.assertEqual(put_calls(transport)[0]['headers']['Authorization'], 'Bearer ' + SESSION)
+
+    def test_the_password_is_never_echoed_back_to_the_panel(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        self.assertNotIn('FreshPassw0rd!', self.finish(probe).text)
+
+    def test_only_the_address_the_link_was_sent_to_can_use_it(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        response = self.finish(probe, email='someone.else@example.com')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No reset link is waiting for that address', response.json()['error'])
+        self.assertEqual(put_calls(transport), [])
+        self.assertTrue(model_library_confirm.reset_pending('tester@example.com'),
+                        'Refusing another address must not spend the waiting link.')
+
+    def test_the_address_is_matched_whichever_way_the_user_typed_it(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        self.assertEqual(self.finish(probe, email='TESTER@Example.com').status_code, 200)
+
+    def test_a_typo_uses_up_nothing_and_leaves_the_link_waiting(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        for case in ({'password': 'short'}, {'password': 'FreshPassw0rd!', 'confirm': 'FreshPassw00d!'}):
+            with self.subTest(**case):
+                response = self.finish(probe, **case)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(put_calls(transport), [])
+        self.assertEqual(self.finish(probe).status_code, 200)
+
+    def test_a_finished_link_cannot_be_used_for_a_second_password(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        self.assertEqual(self.finish(probe).status_code, 200)
+        self.assertEqual(self.finish(probe).status_code, 400)
+        self.assertEqual(len(put_calls(transport)), 1)
+
+    def test_same_password_and_provider_outage_allow_in_app_retry(self):
+        for reply, message in ((Response(422, {'error_code': 'same_password'}), 'already set'),
+                               (Response(429), 'temporarily unavailable'),
+                               (Response(502), 'temporarily unavailable')):
+            with self.subTest(status=reply.status_code):
+                transport = Transport(reply=recovered(), put_reply=reply)
+                probe, _ = open_form(transport)
+                first = self.finish(probe)
+                self.assertIn(message, first.json()['error'])
+                self.assertTrue(model_library_confirm.reset_pending('tester@example.com'))
+                transport.put_reply = updated()
+                self.assertEqual(self.finish(probe).status_code, 200)
+                self.assertFalse(model_library_confirm.reset_pending('tester@example.com'))
+
+    def test_a_page_on_another_website_cannot_finish_a_reset(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport, form_local=False)
+        response = self.finish(probe)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('Only this computer', response.json()['error'])
+        self.assertEqual(put_calls(transport), [])
+
+    def test_a_body_that_is_not_a_json_object_is_refused_without_a_call(self):
+        transport = Transport(reply=recovered())
+        probe, _ = open_form(transport)
+        for body in ('"a string"', '[1,2]', 'null'):
+            with self.subTest(body=body):
+                response = probe.post('/api/model-library/finish-reset', content=body.encode(),
+                                      headers={'Content-Type': 'application/json'})
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(put_calls(transport), [])
 
 
 class SetPassword(unittest.TestCase):
@@ -445,11 +609,7 @@ class SetPassword(unittest.TestCase):
             SESSION, 'FreshPassw0rd!', 'tester@example.com', same), 'done')
 
 
-class Slots(unittest.TestCase):
-    def setUp(self):
-        model_library_confirm._pending.clear()
-        self.addCleanup(model_library_confirm._pending.clear)
-
+class Slots(Isolated):
     def test_a_slot_hands_back_its_session_exactly_once(self):
         identifier = model_library_confirm.hold(SESSION, 'tester@example.com')
         session, until, email = model_library_confirm.take(identifier)
@@ -496,7 +656,7 @@ class Slots(unittest.TestCase):
         self.assertTrue(model_library_confirm.reset_pending('tester@example.com'))
 
 
-class Wiring(unittest.TestCase):
+class Wiring(Isolated):
     def test_the_page_answers_get_and_refuses_to_become_an_api(self):
         app = FastAPI()
         app.include_router(router(lambda request: True, lambda request: True, transport=Transport()))

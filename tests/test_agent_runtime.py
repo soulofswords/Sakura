@@ -26,6 +26,16 @@ class AgentTests(unittest.TestCase):
         result=self.runtime.decide(action['id'],True)
         self.assertEqual(result['action']['result']['text'],'Private engineering CV')
         with self.assertRaises(ValueError):self.runtime.decide(action['id'],True)
+    def test_auto_approval_is_limited_to_observing_tools(self):
+        """Delegation calls _decide directly, so the guard cannot trust its caller."""
+        action=self.action('files.write',{'path':'Draft.md','content':'# Notes'})
+        with self.assertRaises(ValueError):self.runtime._decide(action['id'],True,auto=True)
+        self.assertFalse((self.root/'Draft.md').exists())
+        self.assertEqual(self.runtime.state(self.run['id'])['steps'][-1]['status'],'pending')
+        self.runtime.decide(action['id'],False)
+        (self.root/'notes.txt').write_text('read only',encoding='utf-8')
+        read=self.action('files.read',{'path':'notes.txt'})
+        self.assertEqual(self.runtime._decide(read['id'],True,auto=True)['action']['status'],'completed')
     def test_docx_write_waits_for_approval_and_preserves_existing_files(self):
         output=self.root/'CV - Sakura Draft.docx'
         action=self.action('files.write',{'path':output.name,'content':'# Candidate\n## Experience\n- Improved service reliability.'})

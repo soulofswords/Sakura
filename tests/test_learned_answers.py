@@ -14,6 +14,17 @@ def sourced():
 
 
 class LearnedAnswerTests(unittest.TestCase):
+    def test_approved_search_reads_general_source_when_dedicated_lookup_has_no_answer(self):
+        from learned_answers import learn_approved_search
+        found={'title':'Reference','text':'A readable public explanation.',
+               'url':'https://example.org/reference'}
+        with patch('learned_answers.learned_answers.learn',return_value=None),patch('agent_web.lookup',return_value=found) as lookup:
+            reply=learn_approved_search('How does an induction motor work?',('key','model',''))
+        lookup.assert_called_once_with('How does an induction motor work?',('key','model',''),characters=1800)
+        self.assertIn(found['text'],reply)
+        self.assertIn(found['url'],reply)
+        self.assertIn('not saved',reply)
+
     def test_approved_gpu_search_reads_source_and_remembers_paraphrased_question(self):
         page='<table><tr><th></th><th>GeForce RTX 5060 Ti</th><th>GeForce RTX 5060</th></tr><tr><td>Standard Memory Config</td><td>16 GB / 8 GB GDDR7</td><td>8 GB GDDR7</td></tr></table>'
         import factual_grounding

@@ -9,8 +9,8 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 
-def run_command(text, computer_access=False, assistant_name="Sakura"):
-    from assistant_reminders import reminders
+def normalize(text, assistant_name="Sakura"):
+    """Speech/name cleanup shared by command routing and background sequences."""
     command = re.sub(r"\s+", " ", text.lower().replace("’", "'")).strip().rstrip('.!?')
     command = re.sub(r'\bu\b', 'you', command)
     name = re.escape(str(assistant_name).lower().strip() or 'sakura')
@@ -26,13 +26,24 @@ def run_command(text, computer_access=False, assistant_name="Sakura"):
         if command == previous:
             break
     command = re.sub(r'[, ]+please$', '', command).strip().rstrip('.!?')
-    command = re.sub(r'\byou tube\b', 'youtube', command)
+    return re.sub(r'\byou tube\b', 'youtube', command)
+
+
+def background_sequence(text, computer_access=False, assistant_name="Sakura", channel="desktop"):
+    """Start an explicit multi-step sequence without blocking the reply. None when it is not one."""
+    from assistant_tools import start_sequence
+    return start_sequence(normalize(text, assistant_name), computer_access, assistant_name, channel)
+
+
+def run_command(text, computer_access=False, assistant_name="Sakura", channel="desktop"):
+    from assistant_reminders import reminders
+    command = normalize(text, assistant_name)
     from calendar_chat import calendar_command
-    calendar_reply=calendar_command(command)
+    calendar_reply=calendar_command(command,channel)
     if calendar_reply is not None:return calendar_reply
     # Use the same speech/name normalization for local utilities as app commands.
     from assistant_tools import handle_command
-    tool_reply=handle_command(command,computer_access,assistant_name)
+    tool_reply=handle_command(command,computer_access,assistant_name,channel)
     if tool_reply is not None:return tool_reply
     reminder_reply = reminders.command(command)
     if reminder_reply is not None:

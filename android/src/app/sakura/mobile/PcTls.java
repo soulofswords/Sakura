@@ -54,9 +54,9 @@ final class PcTls {
   @Override public void checkServerTrusted(X509Certificate[] chain,String authType)throws CertificateException{
    if(chain==null||chain.length==0)throw new CertificateException("The PC presented no certificate.");
    chain[0].checkValidity();
-   // An empty pin is only used while pairing; the pairing response must then
-   // name the certificate that was just presented, and that value is pinned.
-   if(!pin.isEmpty()&&!pin.equals(fingerprint(chain[0])))throw new CertificateException("This PC's certificate does not match the phone's saved pairing.");
+   // First pairing requires a fingerprint verified on the PC. Missing pins
+   // and changed certificates are refused before any code or token is sent.
+   if(!pin.matches("[0-9a-f]{64}")||!pin.equals(fingerprint(chain[0])))throw new CertificateException("This PC's certificate does not match the phone's saved pairing.");
   }
   @Override public X509Certificate[] getAcceptedIssuers(){return new X509Certificate[0];}
  }

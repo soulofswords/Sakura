@@ -8,7 +8,7 @@ def response(data,status=200):
 class DiagnosticTests(unittest.TestCase):
     def test_discovery_endpoint_uses_only_selected_provider_and_never_saves_key(self):
         import app
-        from fastapi.testclient import TestClient
+        from local_client import TestClient
         with patch.object(app.app.state,'tracking_only',False,create=True),patch('cloud_diagnostics.discover',return_value=['gpt-4.1-mini']) as discover,patch.object(app,'save_settings') as save:
             result=TestClient(app.app).post('/api/llm/models',json={'provider':'openai','api_key':'private-unsaved-example'})
             self.assertEqual(result.status_code,200,result.text);self.assertEqual(result.json()['models'],['gpt-4.1-mini'])

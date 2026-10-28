@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import app
-from fastapi.testclient import TestClient
+from local_client import TestClient
 
 
 class VoiceUploadTests(unittest.TestCase):
@@ -76,11 +76,13 @@ class InstallerOriginTests(unittest.TestCase):
                 headers['origin'] = origin
             if site:
                 headers['sec-fetch-site'] = site
-            return app._started_locally(Mock(headers=headers))
-        self.assertTrue(guard('http://127.0.0.1:8000'))
-        self.assertTrue(guard('http://localhost:8000'))
-        self.assertTrue(guard('http://[::1]:8000'))
-        self.assertTrue(guard())                      # the desktop window sends no Origin
+            from starlette.requests import Request
+            return app._started_locally(Request({'type':'http','scheme':'http','path':'/','query_string':b'','server':('127.0.0.1',8766),'client':('127.0.0.1',1234),'headers':[(k.encode(),v.encode()) for k,v in headers.items()]}))
+        self.assertFalse(guard('http://127.0.0.1:8000'))
+        self.assertTrue(guard('http://127.0.0.1:8766'))
+        self.assertFalse(guard('http://localhost:8000'))
+        self.assertFalse(guard('http://[::1]:8000'))
+        self.assertFalse(guard())                      # the desktop window sends no Origin
         self.assertTrue(guard(site='same-origin'))
         self.assertFalse(guard('http://evil.example'))
         self.assertFalse(guard('https://accounts.google.com'))

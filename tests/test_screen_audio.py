@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, Mock
 import numpy as np
-from fastapi.testclient import TestClient
+from local_client import TestClient
 import app
 from screen_audio import ScreenAudio, capture
 from llm import LLM

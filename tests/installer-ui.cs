@@ -8,6 +8,12 @@ static class InstallerUiCheck {
   Application.EnableVisualStyles();
   var type=Assembly.LoadFrom(args[0]).GetType("Installer",true);
   using(var form=(Form)Activator.CreateInstance(type,Private,null,new object[0],null)) {
+   var cuda=(ComboBox)type.GetField("cudaOptions",Private).GetValue(form);
+   var cudaStatus=(Label)type.GetField("cudaStatus",Private).GetValue(form);
+   Require(cuda.Items.Count==2&&cuda.SelectedIndex==0,"CUDA must be optional and skipped by default");
+   Require(cuda.Items[1].ToString().Contains("670 MB"),"CUDA download size is missing");
+   cuda.SelectedIndex=1;Require(cuda.SelectedIndex==1,"CUDA installation cannot be selected");
+   Require(form.ClientRectangle.Contains(cuda.Bounds)&&cuda.Bottom<=cudaStatus.Top,"CUDA option outside installer or overlapping detection status");
    var destination=(TextBox)type.GetField("destination",Private).GetValue(form);
    var browse=(Button)type.GetField("browse",Private).GetValue(form);
    var launch=(CheckBox)type.GetField("launch",Private).GetValue(form);

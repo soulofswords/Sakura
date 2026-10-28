@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
 import uuid
+import re
 import zipfile
 from model_rig_validation import pmx_bone_names, validate_humanoid_names, validate_vrm_glb
 
@@ -16,7 +17,17 @@ def safe_path(name):
     return Path(*path.parts)
 
 
-def import_package(root, files, model_format="auto"):
+def model_folder_name(root, kind, label, identifier=''):
+    label=re.sub(r'[<>:"/\\|?*\x00-\x1f]', '-', str(label)).strip(' .-')[:90].rstrip(' .') or 'Model'
+    if label.split('.')[0].upper() in {'CON','PRN','AUX','NUL',*[f'COM{i}' for i in range(1,10)],*[f'LPT{i}' for i in range(1,10)]}:label='Model '+label
+    if not (root/kind/label).exists():return label
+    suffix=re.sub('[^A-Za-z0-9_-]','',str(identifier))[-12:] or uuid.uuid4().hex[:8]
+    name=label+' '+suffix
+    while (root/kind/name).exists():name=label+' '+uuid.uuid4().hex[:8]
+    return name
+
+
+def import_package(root, files, model_format="auto", display_name='', identifier=''):
     if model_format not in {"auto", "pmx", "vrm", "live2d"}:
         raise ValueError("Choose PMX, VRM, or Live2D.")
     root = Path(root)
@@ -64,7 +75,11 @@ def import_package(root, files, model_format="auto"):
                         raise ValueError(f'Live2D asset is missing: {reference}')
                 if (descriptor.parent / safe_path(required[0])).read_bytes()[:4] != b'MOC3':
                     raise ValueError('Live2D MOC3 file is invalid.')
-            name = 'import-' + uuid.uuid4().hex[:10]
+            descriptor=live2d[0]
+            inferred=descriptor.name[:-len('.model3.json')]
+            if inferred.lower() in ('model','avatar','character') and descriptor.parent!=stage:inferred=descriptor.parent.name
+            label=str(display_name).replace('\\','/').split('/')[-1].strip() or inferred
+            name = model_folder_name(root,'live2d',label,identifier)
             destination = root / 'live2d' / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(stage, destination)
@@ -84,9 +99,13 @@ def import_package(root, files, model_format="auto"):
                 raise ValueError(f'{model.name} is not a valid PMX file.')
             else:
                 validate_humanoid_names(pmx_bone_names(model.read_bytes()), model.name)
-        name = 'import-' + uuid.uuid4().hex[:10]
         published = []
         for kind in sorted({model.suffix.lower().lstrip('.') for model in models}):
+            first=next(model for model in models if model.suffix.lower()=='.'+kind)
+            inferred=first.stem
+            if inferred.lower() in ('model','avatar','character') and first.parent!=stage:inferred=first.parent.name
+            label=str(display_name).replace('\\','/').split('/')[-1].strip() or inferred
+            name=model_folder_name(root,kind,label,identifier)
             destination = root / kind / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             def ignore_other_models(directory, names):

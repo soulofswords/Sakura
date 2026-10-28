@@ -48,7 +48,7 @@ class KokoroSpeechTests(unittest.TestCase):
         self.assertFalse(any(name.startswith(('Sakura/models/','Sakura/voices/')) for name in names))
 
     def test_tracking_product_can_prepare_local_chat_reader_speech_but_not_ai(self):
-        from fastapi.testclient import TestClient
+        from local_client import TestClient
         previous=getattr(server.app.state,'tracking_only',False)
         server.app.state.tracking_only=True
         try:

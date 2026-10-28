@@ -25,8 +25,6 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
     for(const id of ['character-glow-slider','light-angle-slider','light-elevation-slider','gloss-boost-slider']){
         const group=document.getElementById(id)?.closest('.slider-group');if(group)lighting.append(group);
     }
-    const envPicker=document.getElementById('env-color-picker');
-    if(envPicker)installColorDial(envPicker,document.getElementById('env-color-dial'));
     const backgroundPicker=document.getElementById('obs-background-color');
     if(backgroundPicker)installColorDial(backgroundPicker,document.getElementById('obs-background-dial'));
     const mouth=installMouthSettings(getViewer,getModelKey,getMic);

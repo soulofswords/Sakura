@@ -1,7 +1,7 @@
 import HeadPoseFilter from './head-pose-filter.js?v=1';
 export function installMobileLink(getViewer,getTracker,onReply,openSettings){
     const toggle=document.getElementById('phone-link-enabled'),status=document.getElementById('phone-link-status');
-    let enabled=false,busy=false,remote=false,remoteKind='',filter=new HeadPoseFilter(),lastState=0,lastRemoteFrame=0;
+    let enabled=false,phoneConnected=false,busy=false,remote=false,remoteKind='',filter=new HeadPoseFilter(),lastState=0,lastRemoteFrame=0,panelRevision=0,lastPanelRead=0;
     const devices=document.getElementById('phone-link-devices');
     const address=document.getElementById('phone-link-address');
     if(address&&!document.getElementById('phone-link-advanced')){
@@ -10,35 +10,50 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
         const label=document.querySelector('label[for="phone-link-address"]'),copy=document.getElementById('phone-link-copy-address');
         address.before(advanced);if(label)advanced.append(label);advanced.append(address);if(copy)advanced.append(copy);
     }
-    const show=data=>{enabled=!!data.enabled;toggle.checked=enabled;
+    const show=data=>{panelRevision++;if(data.error){status.textContent='Phone link: '+data.error;return;}
+        enabled=!!data.enabled;phoneConnected=enabled&&(data.devices||[]).some(device=>device.connected===true);toggle.checked=enabled;
         document.getElementById('phone-link-address').value=enabled?(data.addresses||[])[0]||'':'';
         const fingerprint=document.getElementById('phone-link-fingerprint');
-        if(fingerprint){fingerprint.hidden=!(enabled&&data.fingerprint);fingerprint.textContent=fingerprint.hidden?'':'Certificate fingerprint '+data.fingerprint.replace(/(.{4})/g,'$1 ').trim();}
+        if(fingerprint){fingerprint.hidden=!(enabled&&data.fingerprint);fingerprint.dataset.value=fingerprint.hidden?'':data.fingerprint;fingerprint.textContent=fingerprint.hidden?'':'Certificate fingerprint '+data.fingerprint.replace(/(.{4})/g,'$1 ').trim();}
+        const copyFingerprint=document.getElementById('phone-link-copy-fingerprint');if(copyFingerprint)copyFingerprint.disabled=!(enabled&&data.fingerprint);
         document.getElementById('phone-link-code').value=enabled?data.code||'':'';
         for(const kind of ['address','code'])document.getElementById('phone-link-copy-'+kind).disabled=!document.getElementById('phone-link-'+kind).value;
         if(devices){
             devices.replaceChildren();
             for(const device of data.devices||[]){
                 const row=document.createElement('div'),label=document.createElement('span'),forget=document.createElement('button');
-                row.className='camera-phone-row';label.textContent=device.name+' · '+(device.connected?'Connected':'Remembered');
+                row.className='camera-phone-row';label.textContent=device.name+' · '+(device.connected?'Connected':device.pairable?'Remembered':'Old pairing · choose New device');
                 forget.textContent='Forget';forget.onclick=async()=>{try{show(await(await fetch('/api/mobile/link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({forget:device.id})})).json());}catch(error){status.textContent=error.message;}};
                 row.append(label,forget);devices.append(row);
             }
             if(!(data.devices||[]).length)devices.textContent='No remembered phones. Choose New device to pair your Android phone.';
         }
+        // A dead code and an unreachable PC both feel like "it just doesn't connect",
+        // so say which half of the path has never happened, and how far the phone got.
+        const how=data.contact_kind==='probe'?' by its discovery search only; no pairing request has arrived yet':data.contact_kind==='request'?' with a pairing or tracking request':'';
+        const reached=' · '+(data.contact_age==null
+            ?'Your phone has not reached this PC since Sakura started.'
+            :`Your phone reached this PC ${data.contact_age} second${data.contact_age===1?'':'s'} ago from ${data.contact_host}${how}.`);
         status.textContent=enabled
-        ?`On Sakura Mobile, choose Connect to PC → “${data.name||'Sakura'}”, then enter the pairing code below. Both devices must be on the same Wi-Fi. The code is valid for 5 minutes.`:'Phone connection off';};
-    for(const kind of ['address','code'])document.getElementById('phone-link-copy-'+kind).onclick=async()=>{
-        const input=document.getElementById('phone-link-'+kind);if(!input.value)return;
+        ?((data.code
+            ?`On Sakura Mobile, choose Connect to PC → “${data.name||'Sakura'}”, then enter the pairing code below. Both devices must be on the same Wi-Fi. The code is valid for 5 minutes.`
+            :'That pairing code has been used or has expired. Choose New device for a fresh code, then enter it on the phone within 5 minutes.')+reached)
+        :'Phone connection off';};
+    for(const kind of ['address','code','fingerprint']){const copyButton=document.getElementById('phone-link-copy-'+kind);if(!copyButton)continue;copyButton.onclick=async()=>{
+        const input=document.getElementById('phone-link-'+kind);const text=kind==='fingerprint'?input.dataset.value:input.value;if(!text)return;
+        const select=()=>{if(input.select){input.focus();input.select();}else{const range=document.createRange();range.selectNodeContents(input);getSelection().removeAllRanges();getSelection().addRange(range);}};
         try{
             let copied=false;
-            if(window.pywebview?.api?.copy_text){try{copied=!!(await window.pywebview.api.copy_text(input.value))?.copied;}catch(_){} }
-            if(!copied&&navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(input.value);copied=true;}catch(_){} }
-            if(!copied){input.focus();input.select();if(!document.execCommand('copy'))throw Error('Select the text and press Ctrl+C.');}
-            status.textContent=kind==='address'?'Connection link copied.':'Pairing code copied.';
-        }catch(error){input.focus();input.select();status.textContent='Copy unavailable. Press Ctrl+C on the selected text.';}
-    };
-    fetch('/api/mobile/link').then(r=>r.json()).then(show).catch(()=>{});
+            if(window.pywebview?.api?.copy_text){try{copied=!!(await window.pywebview.api.copy_text(text))?.copied;}catch(_){} }
+            if(!copied&&navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);copied=true;}catch(_){} }
+            if(!copied){select();if(!document.execCommand('copy'))throw Error('Select the text and press Ctrl+C.');}
+            status.textContent=kind==='address'?'Connection link copied.':kind==='fingerprint'?'Certificate fingerprint copied.':'Pairing code copied.';
+        }catch(error){select();status.textContent='Copy unavailable. Press Ctrl+C on the selected text.';}
+    };}
+    // Both halves of the panel move on their own — a code dies five minutes after Sakura
+    // started whether or not anyone has clicked since — so re-read it while it is on screen.
+    const refreshPanel=()=>{const seen=panelRevision;fetch('/api/mobile/link').then(r=>r.json()).then(data=>{if(seen===panelRevision)show(data);}).catch(()=>{});};
+    fetch('/api/mobile/link').then(r=>r.json()).then(show).catch(()=>{status.textContent='Phone link: Sakura could not read the link state from this computer. Reload Sakura.';});
     document.getElementById('phone-link-existing')?.addEventListener('click',async()=>{
         if(devices)devices.hidden=false;
         try{show(await(await fetch('/api/mobile/link')).json());}catch(error){status.textContent=error.message;}
@@ -50,13 +65,25 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
             status.textContent+=' · Enter this code on your new phone.';
         }catch(error){status.textContent=error.message;}
     });
-    toggle.onchange=async()=>{try{show(await(await fetch('/api/mobile/link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:toggle.checked})})).json());}
+    const linkPost=async body=>show(await(await fetch('/api/mobile/link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json());
+    toggle.onchange=async()=>{try{await linkPost({enabled:toggle.checked});}
         catch(error){status.textContent=error.message;toggle.checked=enabled;}};
-    const connectPhone=()=>{
+    const connectPhone=async()=>{
         document.getElementById('tracking-modal')?.classList.add('hidden');
-        openSettings();document.querySelector('.tab-btn[data-tab="general"]')?.click();
-        if(!enabled){toggle.checked=true;toggle.dispatchEvent(new Event('change'));}
-        toggle.scrollIntoView({block:'center'});
+        const route=typeof CustomEvent==='function'?new CustomEvent('sakura-open-phone-panel',{cancelable:true}):null;
+        if(route)window.dispatchEvent(route);
+        if(!route?.defaultPrevented){openSettings();document.querySelector('.tab-btn[data-tab="general"]')?.click();}
+        // The digits already in the box are whatever boot minted, usually five minutes
+        // ago and already refused by /pair, so trust the server's answer, not the DOM,
+        // and make a live code here rather than telling them to go hunting for a button.
+        try{
+            if(!enabled)await linkPost({enabled:true});
+            const data=await(await fetch('/api/mobile/link')).json();
+            if(data.code)show(data);else await linkPost({new:true});
+        }catch(error){status.textContent='Phone link: '+error.message;}
+        // The pairing code sits below the switch, so centre the code rather than the
+        // toggle or the panel opens with the one thing they came for out of sight.
+        (document.getElementById('phone-link-code')||toggle).scrollIntoView({block:'center'});
     };
     for(const id of ['connect-phone-btn','tracking-connect-phone-btn','settings-connect-phone-btn'])document.getElementById(id)?.addEventListener('click',connectPhone);
     let remoteSamples=0,remoteStarted=0;
@@ -95,17 +122,18 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
     async function poll(){
         if(!enabled||busy||!getViewer())return;
         busy=true;const viewer=getViewer();
+        if(status.offsetParent&&performance.now()-lastPanelRead>3000){lastPanelRead=performance.now();refreshPanel();}
         if(getTracker())getTracker().remoteActive=remote;
         try{
             if(performance.now()-lastState>1500){
                 const names=viewer.allMorphNames||[];
                 state={edition:window.SAKURA_EDITION||'companion',expressions:names,
                     active_expressions:[...(viewer.manualExpressions?.keys()||[])].filter(name=>names.includes(name)),
-                    model:viewer.lastModelUrl||'',tracking:remote,tracking_face_source:getTracker()?.faceSource||'webcam',avatar:viewer.model&&!remote?viewer.captureAvatar():null};lastState=performance.now();
+                    model:viewer.lastModelUrl||'',tracking:remote,tracking_face_source:getTracker()?.faceSource||'webcam',avatar:phoneConnected&&viewer.model&&!remote?viewer.captureAvatar():null};lastState=performance.now();
             }
             const response=await fetch('/api/mobile/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)});
             if(!response.ok)return;
-            const data=await response.json();if(!data.enabled){enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
+            const data=await response.json();phoneConnected=data.connected===true;if(!data.enabled){enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
             for(const command of data.commands||[]){
                 if(command.type==='request-model'){
                     void import('./mobile-model-transfer.js?v=phone-touch73').then(module=>module.openMobileModelTransfer(command.request_id)).catch(error=>{status.textContent=error.message;});

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import time
 import unittest
 import tempfile
@@ -172,6 +173,31 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get('/state')).status_code,401)
         await self.pair();self.assertEqual((await self.client.get('/state')).status_code,200)
         self.link.stop();self.assertEqual((await self.client.get('/state')).status_code,403)
+    async def test_a_code_the_phone_will_refuse_is_never_offered_as_live(self):
+        self.assertEqual(self.link.info()['code'],'123456')
+        self.link.code_expires=time.time()-1
+        info=self.link.info();self.assertEqual(info['code'],'');self.assertTrue(info['code_expired'])
+        self.assertEqual((await self.client.post('/pair',json={'code':'123456'})).status_code,401)
+        self.link.code_expires=time.time()+300
+        await self.pair()
+        info=self.link.info();self.assertEqual(info['code'],'');self.assertTrue(info['code_expired'])
+    async def test_the_panel_can_tell_a_refused_code_from_a_phone_that_never_arrived(self):
+        self.assertIsNone(self.link.info()['contact_age'])
+        self.assertEqual((await self.client.post('/pair',json={'code':'000000'})).status_code,401)
+        refused=self.link.info()
+        self.assertEqual((refused['contact_age'],refused['contact_kind'],refused['contact_host']),(None,'',''))
+        idle=MobileLink(Path(self.directory.name)/'idle.json');idle.enabled=True
+        self.assertIsNone(idle.info()['contact_age'])
+        self.assertIsNotNone(idle.discovery_reply(b'sakura-discover-v1','192.168.1.100','192.168.1.103'))
+        searching=idle.info()
+        self.assertEqual((searching['contact_age'],searching['contact_kind'],searching['contact_host']),(None,'',''))
+    async def test_this_pc_answering_its_own_probe_is_not_reported_as_a_phone(self):
+        link=MobileLink(self.store);link.enabled=True;link.own_addresses={'192.168.1.100'}
+        self.assertIsNotNone(link.discovery_reply(b'sakura-discover-v1','192.168.1.100','192.168.1.100'))
+        self.assertIsNone(link.info()['contact_age'])
+        self.assertIsNotNone(link.discovery_reply(b'sakura-discover-v1','192.168.1.100','192.168.1.103'))
+        arrived=link.info()
+        self.assertEqual((arrived['contact_age'],arrived['contact_kind'],arrived['contact_host']),(None,'',''))
     async def test_commands_are_limited_to_current_expressions(self):
         await self.pair();self.link.poll({'expressions':['Smile'],'edition':'vtuber'})
         self.assertEqual((await self.client.post('/command',json={'type':'expression','name':'Smile'})).status_code,200)
@@ -237,9 +263,23 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
         device=self.link.devices['test-phone']
         self.assertAlmostEqual(device['expires_at']-device['last_seen'],30*86400,delta=60)
         self.assertEqual((await self.client.post('/pair',json={'code':'123456'})).status_code,401)
+        self.assertTrue(self.link.info()['devices'][0]['pairable'])
         device['expires_at']=time.time()-1;self.link.save_devices()
+        self.assertFalse(self.link.info()['devices'][0]['pairable'])
         restarted=MobileLink(self.store);restarted.enabled=True
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=restarted.api,client=('192.168.1.22',1000)),base_url='http://pc',headers={'Authorization':'Bearer '+token}) as client:
+            self.assertEqual((await client.get('/state')).status_code,401)
+
+    async def test_a_pairing_saved_without_an_expiry_is_not_offered_as_reusable(self):
+        # Phones paired before pair() stamped expires_at sit in real stores today. Their
+        # token hash matches, so guard() reaches the expiry check with no value and treats
+        # them as spent; the panel has to say so instead of showing a tappable "Remembered".
+        token='legacy-phone-token'
+        self.store.write_text(json.dumps({'old-phone':{'name':'Xiaomi 24053PY09I',
+            'token_hash':hashlib.sha256(token.encode()).hexdigest(),'last_seen':time.time()}}),encoding='utf-8')
+        link=MobileLink(self.store);link.enabled=True
+        self.assertEqual(link.info()['devices'][0]['pairable'],False)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=link.api,client=('192.168.1.22',1000)),base_url='http://pc',headers={'Authorization':'Bearer '+token}) as client:
             self.assertEqual((await client.get('/state')).status_code,401)
 
     async def test_discovery_answers_a_probe_with_the_bound_address(self):
@@ -258,7 +298,7 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
     async def test_discovery_probe_flood_cannot_starve_the_link(self):
         for _ in range(10):self.assertIsNotNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
         self.assertIsNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
-        self.link.beacon_replies=[stamp-1.1 for stamp in self.link.beacon_replies]
+        self.link.beacon_replies=[(peer,stamp-1.1) for peer,stamp in self.link.beacon_replies]
         self.assertIsNotNone(self.link.discovery_reply(b'sakura-discover-v1','192.168.1.103'))
 
     async def test_discovery_only_advertises_private_network_addresses(self):

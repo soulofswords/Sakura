@@ -4,18 +4,27 @@ const assert = require('node:assert/strict');
 (async () => {
  const browser = await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
  try {
-  const page = await browser.newPage(); let requests = [], connected = false;
+  const page = await browser.newPage(); let requests = [], connected = false, resetPending = false, rejectSame = true;
+  await page.clock.install();
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.route('**/*', async route => {
    const url = new URL(route.request().url());
    if(url.pathname === '/')return route.fulfill({contentType:'text/html',body:`<!doctype html><button id="refresh-models" onclick="window.refreshed=(window.refreshed||0)+1">Refresh models</button><div data-studio-content="models"><section class="studio-card"><h3>Import a character</h3><div data-studio-port="imports"><button>Upload PMX</button><button>Upload VRM</button><button>Upload Live2D</button></div><p>Import hint</p></section></div><div data-companion-content="character"><section class="studio-card"><div data-companion-port="imports"></div><p>Import hint</p></section></div><script type="module" src="/library.js"></script>`});
    if(url.pathname === '/library.js')return route.fulfill({contentType:'application/javascript',body:await fs.readFile('static/js/model-library.js','utf8')});
    requests.push(url.pathname);
+   if(url.pathname.endsWith('/preview'))return route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=','base64')});
    if(url.pathname.endsWith('/connection'))return route.fulfill({json:{configured:connected,url:'https://library.example.com',cloud:'https://library.example.com'}});
-   if(url.pathname.endsWith('/account/signin')) { connected = true; return route.fulfill({json:{ok:true}}); }
-   if(url.pathname.endsWith('/account/recover'))return route.fulfill({json:{reset_sent:true,message:'If that email has a Sakura account, a reset link is on its way.'}});
+   if(url.pathname.endsWith('/account/signin')) {
+    if(resetPending)return route.fulfill({status:400,json:{error:'Your verified reset is waiting.',reset_pending:true,reset_id:"verified-reset-slot"}});
+    connected = true; return route.fulfill({json:{ok:true}});
+   }
+   if(url.pathname.endsWith('/account/recover'))return route.fulfill({json:{reset_sent:true,message:'If that email has a Sakura account, a reset link is on its way. Open the link on this computer.'}});
+   if(url.pathname.endsWith('/finish-reset')) {
+    if(rejectSame){rejectSame=false;return route.fulfill({status:400,json:{error:'That password is already set. Choose a different new password here.'}});}
+    resetPending=false;return route.fulfill({json:{ok:true,message:'Your password is changed. Sign in with your new password.'}});
+   }
    if(url.pathname.endsWith('/install'))return route.fulfill({json:{ok:true,models:['live2d/download/model.model3.json']}});
-   return route.fulfill({json:{models:[{id:'example',name:'<img src=x onerror=alert(1)>',format:'live2d',bytes:1048576,installed:false},{id:'pmx-example',name:'PMX character',format:'pmx',bytes:1048576,installed:false},{id:'vrm-example',name:'VRM character',format:'vrm',bytes:1048576,installed:false}]}});
+   return route.fulfill({json:{models:[{id:'example',name:'<img src=x onerror=alert(1)>',format:'live2d',bytes:1048576,installed:false,preview:true},{id:'pmx-example',name:'PMX character',format:'pmx',bytes:1048576,installed:false},{id:'vrm-example',name:'VRM character',format:'vrm',bytes:1048576,installed:false}]}});
   });
   await page.goto('http://localhost/');
   await page.locator('[data-cloud-library]').first().waitFor({state:'attached'});
@@ -26,6 +35,7 @@ const assert = require('node:assert/strict');
   assert.equal(await studio.getByRole('button',{name:'Upload PMX',exact:true}).count(),1);
   for(const format of ['pmx','vrm','live2d'])assert.equal(await studio.locator('.studio-card').first().locator(`[data-library-format="${format}"]`).count(),1,'Cloud buttons belong beside the original upload controls.');
   await studio.locator('[data-library-format="live2d"]').click();
+  assert.equal(await card.locator('[data-library-browse]').isVisible(),false,'The gallery only opens after sign-in.');
   const requestsBeforeInvalid = requests.length;
   await card.locator('[data-library-signup]').click();
   await card.getByText('Enter a valid email address first.',{exact:true}).waitFor();
@@ -53,7 +63,14 @@ const assert = require('node:assert/strict');
   await card.getByRole('button',{name:'Download',exact:true}).waitFor();
   assert.equal(await card.locator('[data-library-password]').inputValue(),'');
   assert.equal(await card.locator('[data-library-password]').getAttribute('type'),'password','A revealed password must not stay plain on screen once the form clears.');
-  assert.equal(await card.locator('[data-library-results] img').count(),0,'Catalogue names must render as text.');
+  assert.equal(await card.locator('[data-library-results] img').count(),1,'Only the trusted preview element may create an image; catalogue names stay text.');
+  assert.equal(await card.locator('[data-library-results] img').getAttribute('src'),'/api/model-library/models/example/preview');
+  const beforePick=requests.filter(path=>path.endsWith('/install')).length;
+  await card.locator('.cloud-character-pick').click();
+  assert.equal(await card.locator('.cloud-character-pick').getAttribute('aria-pressed'),'true');
+  assert.equal(requests.filter(path=>path.endsWith('/install')).length,beforePick,'Selecting a preview must not download the full model.');
+  const dimensions=await card.locator('.cloud-character-image').evaluate(element=>({width:element.clientWidth,height:element.clientHeight}));
+  assert.ok(Math.abs(dimensions.width-dimensions.height)<=1,'Character previews are square.');
   assert.equal(await card.locator('[data-library-results]').textContent().then(text=>text.includes('PMX character')),false,'Live2D import excludes other formats.');
   await card.getByRole('button',{name:'Download',exact:true}).click();
   await card.getByRole('button',{name:'Installed',exact:true}).waitFor();
@@ -64,6 +81,7 @@ const assert = require('node:assert/strict');
   assert.ok((await card.locator('[data-library-destination]').textContent()).includes('models/pmx/'));
   await studio.locator('[data-library-format="vrm"]').click();
   await card.getByText('VRM character · VRM · 1.0 MB',{exact:true}).waitFor();
+  await card.getByText('1 VRM cloud characters available.',{exact:true}).waitFor();
   assert.ok((await card.locator('[data-library-destination]').textContent()).includes('models/vrm/'));
   await card.locator('[data-library-account]').evaluate(element => element.open = true);
   const recoverCalls = requests.length;
@@ -71,8 +89,36 @@ const assert = require('node:assert/strict');
   await page.waitForFunction(() => document.querySelector('[data-library-status]')?.textContent.includes('reset link is on its way'));
   assert.equal(requests.length,recoverCalls+1,'Forgot password sends exactly one request.');
   assert.ok((await card.locator('[data-library-status]').textContent()).includes('Open the link on this computer'),'The reset email is useless unless the user knows where the link lands.');
+  resetPending=true;
+  await card.locator('[data-library-account]').evaluate(element => element.open = true);
+  await page.clock.fastForward(250);
+  await card.locator('[data-library-password]').scrollIntoViewIfNeeded();
+  assert.equal(await card.locator('[data-library-password]').isVisible(),true,
+   JSON.stringify(await card.locator('[data-library-password]').evaluate(el=>{const rows=[];for(let p=el;p;p=p.parentElement)rows.push({tag:p.tagName,hidden:p.hidden,open:p.open,display:getComputedStyle(p).display});return rows;})));
+  await card.locator('[data-library-password]').waitFor({state:'visible'});
+  await card.locator('[data-library-password]').fill('old-password');
+  await card.locator('[data-library-signin]').click();
+  await card.locator('[data-library-finish-box]').waitFor({state:'visible'});
+  await card.locator('[data-library-new]').fill('new-password');
+  await card.locator('[data-library-new-repeat]').fill('new-password');
+  await card.locator('[data-library-finish]').click();
+  await card.getByText('That password is already set. Choose a different new password here.',{exact:true}).waitFor();
+  assert.equal(await card.locator('[data-library-finish-box]').isVisible(),true);
+  await card.locator('[data-library-new]').fill('different-password');
+  await card.locator('[data-library-new-repeat]').fill('different-password');
+  await card.locator('[data-library-finish]').click();
+  await card.getByText('Your password is changed. Sign in with your new password.',{exact:true}).waitFor();
+  assert.equal(await card.locator('[data-library-finish-box]').isVisible(),false);
+  assert.equal(await card.locator('[data-library-new]').inputValue(),'');
+  const beforeAutomatic=requests.filter(path=>path.endsWith('/models')).length;
+  await page.clock.fastForward(60001);
+  await page.waitForFunction(()=>document.querySelector('[data-library-refresh]')?.disabled===false);
+  assert.ok(requests.filter(path=>path.endsWith('/models')).length>beforeAutomatic,'An open signed-in gallery automatically refreshes new cloud entries.');
   await studio.locator('[data-library-format="vrm"]').click();
   assert.equal(await card.isVisible(),false,'Repeated format click closes the cloud panel.');
+  const beforeClosed=requests.filter(path=>path.endsWith('/models')).length;
+  await page.clock.fastForward(60001);
+  assert.equal(requests.filter(path=>path.endsWith('/models')).length,beforeClosed,'A closed cloud gallery does not poll the service.');
   assert.equal(await page.locator('[data-cloud-library]').count(),2,'Both studio modes get the same library.');
   assert.deepEqual(errors,[]);
   console.log('PASS: cloud-only sign-in, account flow, safe names, download and selector refresh.');

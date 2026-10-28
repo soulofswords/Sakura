@@ -16,7 +16,7 @@
         if(!choices.includes(value))return;
         mode=value;try{localStorage.setItem('sakura_ui_theme',mode);}catch(_){}
         apply();
-        document.querySelectorAll('iframe').forEach(frame=>{try{frame.contentWindow.postMessage({type:'sakura-appearance',mode},location.origin);}catch(_){}});
+        document.querySelectorAll('iframe').forEach(frame=>{try{frame.contentWindow.postMessage({type:'sakura-appearance',mode},'https://models.sakura.invalid');}catch(_){}});
     }
     function picker(){
         const section=document.createElement('section');section.className='mobile-appearance';section.setAttribute('aria-label','Appearance');
@@ -31,7 +31,9 @@
     system.addEventListener('change',()=>{if(mode==='system')apply();});
     window.addEventListener('focus',()=>{if(mode==='system')apply();});
     window.addEventListener('storage',event=>{if(event.key==='sakura_ui_theme'&&choices.includes(event.newValue)){mode=event.newValue;apply();}});
-    window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data?.type==='sakura-appearance'&&choices.includes(event.data.mode)){mode=event.data.mode;apply();}});
+    window.addEventListener('message',event=>{if(event.origin==='https://appassets.androidplatform.net'&&event.source===parent&&event.data?.type==='sakura-appearance'&&choices.includes(event.data.mode)){mode=event.data.mode;apply();}});
+    // A renderer created after the picker changed still receives the current choice.
+    window.addEventListener('message',event=>{if(event.origin==='https://models.sakura.invalid'&&event.data?.type==='avatar-ready'&&[...document.querySelectorAll('iframe')].some(frame=>frame.contentWindow===event.source))event.source.postMessage({type:'sakura-appearance',mode},event.origin);});
     document.addEventListener('DOMContentLoaded',()=>{
         if(!document.getElementById('app-modes'))return; // Avatar iframe has no controls.
         const home=picker();home.id='mobile-appearance-home';document.getElementById('app-modes').before(home);

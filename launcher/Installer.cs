@@ -22,6 +22,8 @@ sealed class Installer : Form {
  static readonly string[] LocalLabels=new string[]{"Cloud API key — skip local AI download","Qwen3-VL 2B (Vision) — 8 GB RAM / 4 GB VRAM recommended","Qwen3-VL 4B (Vision) — 16 GB RAM / 8 GB VRAM recommended","Qwen 3.8 27B (Vision) — 48 GB RAM / 24 GB VRAM recommended","Gemma 3 4B (Vision) — 16 GB RAM / 8 GB VRAM recommended","Gemma 3 12B (Vision) — 32 GB RAM / 16 GB VRAM recommended","Gemma 3 27B (Vision) — 48 GB RAM / 24 GB VRAM recommended","Qwen 3.5 4B (Vision) — 16 GB RAM / 8 GB VRAM recommended","Qwen 3.5 9B (Vision) — 32 GB RAM / 16 GB VRAM recommended"};
  readonly TextBox destination;
  readonly ComboBox mode;
+ readonly ComboBox cudaOptions;
+ readonly Label cudaStatus;
  readonly Label status;
  readonly ProgressBar progress;
  readonly Button install;
@@ -31,7 +33,7 @@ sealed class Installer : Form {
  bool installing;
  bool completed;
  internal Installer() {
-  Text="Install Sakura Companion";ClientSize=new Size(620,420);StartPosition=FormStartPosition.CenterScreen;
+  Text="Install Sakura Companion";ClientSize=new Size(620,545);StartPosition=FormStartPosition.CenterScreen;
   BackColor=Color.FromArgb(12,15,26);ForeColor=Color.White;Font=new Font("Segoe UI",11);
   FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;
   Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -46,14 +48,44 @@ sealed class Installer : Form {
   Controls.Add(new Label {Text="Optional local AI (downloads after installation)",Location=new Point(30,206),Size=new Size(560,28)});
   mode=new ComboBox {Location=new Point(30,239),Size=new Size(560,30),DropDownStyle=ComboBoxStyle.DropDownList};
   mode.Items.AddRange(LocalLabels);mode.DropDownWidth=850;mode.SelectedIndex=0;Controls.Add(mode);
-  status=new Label {Text=InstallationStatus(destination.Text),Location=new Point(30,283),Size=new Size(560,35)};Controls.Add(status);
-  destination.TextChanged+=(s,e)=>status.Text=InstallationStatus(destination.Text);
-  desktopShortcut=new CheckBox {Text="Create desktop shortcut",Checked=true,Location=new Point(30,320),Size=new Size(280,27)};Controls.Add(desktopShortcut);
-  launch=new CheckBox {Text="Launch after installation",Checked=true,Location=new Point(320,320),Size=new Size(270,27)};Controls.Add(launch);
-  progress=new ProgressBar {Location=new Point(30,370),Size=new Size(385,20)};Controls.Add(progress);
-  install=new Button {Text="Install",Location=new Point(438,364),Size=new Size(152,36)};Controls.Add(install);
+  Controls.Add(new Label {Name="cuda-heading",Text="Optional NVIDIA CUDA acceleration",Location=new Point(30,280),Size=new Size(560,26)});
+  cudaOptions=new ComboBox {Location=new Point(30,309),Size=new Size(560,30),DropDownStyle=ComboBoxStyle.DropDownList};
+  cudaOptions.Items.AddRange(new object[]{"Skip CUDA setup / keep existing installation","Download CUDA inference engine + runtime (~670 MB max)"});cudaOptions.SelectedIndex=0;Controls.Add(cudaOptions);
+  cudaStatus=new Label {Text=CudaStatus(destination.Text),Location=new Point(30,345),Size=new Size(560,55),Font=new Font("Segoe UI",9)};Controls.Add(cudaStatus);
+  status=new Label {Text=InstallationStatus(destination.Text),Location=new Point(30,405),Size=new Size(560,35)};Controls.Add(status);
+  destination.TextChanged+=(s,e)=>{status.Text=InstallationStatus(destination.Text);cudaStatus.Text=CudaStatus(destination.Text);};
+  desktopShortcut=new CheckBox {Text="Create desktop shortcut",Checked=true,Location=new Point(30,445),Size=new Size(280,27)};Controls.Add(desktopShortcut);
+  launch=new CheckBox {Text="Launch after installation",Checked=true,Location=new Point(320,445),Size=new Size(270,27)};Controls.Add(launch);
+  progress=new ProgressBar {Location=new Point(30,495),Size=new Size(385,20)};Controls.Add(progress);
+  install=new Button {Text="Install",Location=new Point(438,489),Size=new Size(152,36)};Controls.Add(install);
   install.Click+=async(s,e)=>await RunInstall();
   FormClosing+=(s,e)=>{if(installing)e.Cancel=true;};
+ }
+ internal static bool HasCudaRuntime(string target) {
+  string root=Path.Combine(target,"Sakura","desktop-profile","agent-local-ai","runtime-cuda");
+  return File.Exists(Path.Combine(root,"llama-server.exe"))&&File.Exists(Path.Combine(root,"ggml-cuda.dll"));
+ }
+ internal static string CudaStatus(string target) {
+  if(HasCudaRuntime(target))return "Sakura CUDA runtime detected. Leave Skip selected to keep it. No download is required.";
+  string toolkit=Environment.GetEnvironmentVariable("CUDA_PATH");
+  if(!string.IsNullOrEmpty(toolkit)&&Directory.Exists(toolkit))return "CUDA Toolkit detected (runtime DLL download can be skipped). Sakura's optional inference engine has its own runtime DLLs. Download only if you need that engine.";
+  return "Optional: requires an NVIDIA GPU and a CUDA 12.4-compatible driver. The full CUDA Toolkit is not needed. Skip keeps CPU/Vulkan available.";
+ }
+ static void InstallCuda(string target,Action<string,int?> report) {
+  string project=Path.Combine(target,"Sakura"),python=Path.Combine(project,"runtime","python.exe");
+  var info=new ProcessStartInfo(python,"-u -c \"import cuda_setup; raise SystemExit(cuda_setup.main())\"") {
+   WorkingDirectory=project,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+  info.EnvironmentVariables["PYTHONUTF8"]="1";
+  using(var process=new Process {StartInfo=info}) {
+   process.ErrorDataReceived+=(sender,e)=>{};
+   process.Start();process.BeginErrorReadLine();string line;
+   while((line=process.StandardOutput.ReadLine())!=null) {
+    try {var item=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);
+     report(Convert.ToString(item["message"]),item.ContainsKey("percent")&&item["percent"]!=null?(int?)Convert.ToInt32(item["percent"]):null);
+    }catch(ArgumentException){}catch(InvalidOperationException){}
+   }
+   process.WaitForExit();if(process.ExitCode!=0)throw new IOException("CUDA setup did not complete. Retry later from Agent > Local AI.");
+  }
  }
  void BrowseDestination() {
   using(var dialog=new FolderBrowserDialog {Description="Choose the Sakura Companion installation folder",ShowNewFolderButton=true}) {
@@ -208,7 +240,7 @@ sealed class Installer : Form {
  async Task RunInstall() {
   if(completed){Close();return;}
   string target;try{target=Path.GetFullPath(destination.Text);}catch(Exception error){status.Text=error.Message;return;}
-  installing=true;install.Enabled=false;mode.Enabled=false;destination.Enabled=false;browse.Enabled=false;launch.Enabled=false;desktopShortcut.Enabled=false;
+  installing=true;cudaOptions.Enabled=false;install.Enabled=false;mode.Enabled=false;destination.Enabled=false;browse.Enabled=false;launch.Enabled=false;desktopShortcut.Enabled=false;
   int local=mode.SelectedIndex;
   string resultStatus=InstallationStatus(target);
   try {
@@ -223,12 +255,17 @@ sealed class Installer : Form {
     key.SetValue("Publisher","SoulOfSwords");
     key.SetValue("DisplayIcon",exe);key.SetValue("UninstallString","\""+Path.Combine(target,"Sakura","Uninstall.exe")+"\"");
    }
+   if(cudaOptions.SelectedIndex==1&&!HasCudaRuntime(target)) {
+    try {status.Text="Installing optional CUDA acceleration…";
+     await Task.Run(()=>InstallCuda(target,(message,value)=>BeginInvoke((Action)(()=>{status.Text=message;if(value.HasValue)progress.Value=Math.Max(0,Math.Min(100,value.Value));}))));
+    }catch(Exception cudaError){MessageBox.Show(this,"Sakura was installed. Optional CUDA setup failed: "+cudaError.Message,"CUDA setup",MessageBoxButtons.OK,MessageBoxIcon.Information);}
+   }
    status.Text=resultStatus;
    if(local>0)Process.Start(new ProcessStartInfo(exe,"--setup-local "+LocalIds[local-1]){WorkingDirectory=target});
    else if(launch.Checked)Process.Start(new ProcessStartInfo(exe){WorkingDirectory=target});
    FinishInstallation();
   }catch(Exception error){status.Text="Installation failed: "+error.Message;install.Enabled=true;mode.Enabled=true;destination.Enabled=true;browse.Enabled=true;launch.Enabled=true;desktopShortcut.Enabled=true;}
-  finally{installing=false;}
+  finally{installing=false;cudaOptions.Enabled=true;}
  }
  [STAThread] static int Main(string[] args) {
   if(args.Length==2&&args[0]=="--test-install"){try{Extract(args[1]);return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}}

@@ -6,9 +6,17 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  assert.equal(await page.locator('html').getAttribute('data-ui-theme'),'light');
  await page.locator('#mobile-appearance-home select').selectOption('dark');assert.equal(await page.locator('html').getAttribute('data-ui-theme'),'dark');
  assert.equal(await page.locator('#local-stage-panel select[data-mobile-appearance]').inputValue(),'dark');
- await page.evaluate(()=>{document.getElementById('local-avatar').src='/local-viewer.html';});
- await page.waitForFunction(()=>document.getElementById('local-avatar').contentDocument?.documentElement.dataset.uiTheme==='dark');
- await page.locator('#mobile-appearance-home select').selectOption('light');await page.waitForFunction(()=>document.getElementById('local-avatar').contentDocument?.documentElement.dataset.uiTheme==='light');
+ await page.route('https://models.sakura.invalid/**',route=>{
+  const path=new URL(route.request().url()).pathname;
+  if(path==='/local-viewer.html')return route.fulfill({contentType:'text/html',body:fs.readFileSync('android/assets/local-viewer.html','utf8').replace(/<script type="module"[^>]*>[\s\S]*?<\/script>/g,'')+'<script>parent.postMessage({type:"avatar-ready"},"http://mobile.test");</script>'});
+  if(path==='/mobile-appearance.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync('android/assets/mobile-appearance.js','utf8').replaceAll('https://appassets.androidplatform.net','http://mobile.test')});
+  return route.fulfill({path:'android/assets'+path});
+ });
+ await page.evaluate(()=>{document.getElementById('local-avatar').src='https://models.sakura.invalid/local-viewer.html';});
+ await page.frameLocator('#local-avatar').locator('html').waitFor({state:'attached'});
+ const renderer=page.frames().find(frame=>frame.url().startsWith('https://models.sakura.invalid'));
+ await renderer.waitForFunction(()=>document.documentElement.dataset.uiTheme==='dark');
+ await page.locator('#mobile-appearance-home select').selectOption('light');await renderer.waitForFunction(()=>document.documentElement.dataset.uiTheme==='light');
  await page.reload();assert.equal(await page.locator('#mobile-appearance-home select').inputValue(),'light');
  await page.locator('#mobile-appearance-home select').selectOption('system');await page.emulateMedia({colorScheme:'dark'});await page.waitForFunction(()=>document.documentElement.dataset.uiTheme==='dark');
  for(const width of [320,390,768]){await page.setViewportSize({width,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Appearance stays within the phone viewport');}

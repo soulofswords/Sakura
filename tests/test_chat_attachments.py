@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import Mock,patch
 
-from fastapi.testclient import TestClient
+from local_client import TestClient
 from PIL import Image
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject,DictionaryObject,NameObject

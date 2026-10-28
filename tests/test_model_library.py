@@ -66,7 +66,7 @@ class ModelLibraryTests(unittest.TestCase):
         self.write_catalogue()
         self.web = TestClient(create_app(self.store, self.members))
         self.addCleanup(self.web.close)
-        self.client = ModelLibrary(self.root / 'models', lambda: {'url': 'http://localhost', 'token': TOKEN}, Transport(self.web))
+        self.client = ModelLibrary(self.root / 'models', lambda: {'url': 'http://localhost', 'token': TOKEN}, Transport(self.web), allow_loopback=True)
 
     def write_catalogue(self, digest=None):
         entry = {'id': 'live2d-test', 'name': 'Test character', 'format': 'live2d', 'bytes': len(self.blob),
@@ -75,13 +75,23 @@ class ModelLibraryTests(unittest.TestCase):
         (self.store / 'live2d-test.zip').write_bytes(self.blob)
 
     def test_anonymous_download_and_catalogue_are_private(self):
-        for path in ('/v1/models', '/v1/models/live2d-test/package', '/catalogue.json', '/docs'):
+        for path in ('/v1/models', '/v1/models/live2d-test/package', '/v1/models/live2d-test/preview', '/catalogue.json', '/docs'):
             self.assertEqual(401, self.web.get(path).status_code)
         self.assertEqual(401, self.web.get('/v1/models?token=' + TOKEN).status_code)
+
+    def test_preview_catalogue_and_download_do_not_expose_storage_paths(self):
+        from PIL import Image
+        catalogue=json.loads((self.store/'catalogue.json').read_text())
+        catalogue['models'][0]['preview']=True
+        (self.store/'catalogue.json').write_text(json.dumps(catalogue))
+        Image.new('RGB',(32,32),'blue').save(self.store/'live2d-test.webp',format='WEBP')
+        self.assertTrue(self.client.catalogue()['models'][0]['preview'])
+        self.assertEqual(self.client.preview('live2d-test'),(self.store/'live2d-test.webp').read_bytes())
 
     def test_real_download_validates_imports_and_does_not_overwrite_edits(self):
         self.assertFalse(self.client.catalogue()['models'][0]['installed'])
         result = self.client.install('live2d-test')
+        self.assertEqual(Path(result['models'][0]).parts[1],'Test character')
         descriptor = self.root / 'models' / result['models'][0]
         self.assertTrue(descriptor.is_file())
         self.assertTrue((descriptor.parent / 'tex/0.png').is_file())
@@ -231,9 +241,12 @@ class ModelLibraryTests(unittest.TestCase):
             with TestClient(app) as client:
                 response = client.post('/api/model-library/account/signin', json={'email': 'Tester@Example.com', 'password': 'password-for-test'})
             self.assertEqual(400, response.status_code)
-            text = response.json()['error']
+            body = response.json()
+            text = body['error']
             self.assertIn('incorrect', text)
-            self.assertIn('not been finished yet', text)
+            self.assertNotIn('reset_pending', body)
+            self.assertNotIn('reset_id', body)
+            self.assertNotIn(identifier, response.text)
             self.assertNotIn('private provider detail', response.text)
         finally:
             take(identifier)
@@ -250,7 +263,8 @@ class ModelLibraryTests(unittest.TestCase):
         with TestClient(app) as client:
             response = client.post('/api/model-library/account/signin', json={'email': 'tester@example.com', 'password': 'password-for-test'})
         self.assertEqual(400, response.status_code)
-        self.assertNotIn('finished', response.json()['error'])
+        self.assertFalse(response.json().get('reset_pending'))
+        self.assertNotIn('reset link', response.json()['error'])
 
     @patch('model_library.requests.post')
     def test_custom_library_answer_without_a_session_is_not_called_a_password_problem(self, post):
@@ -264,12 +278,13 @@ class ModelLibraryTests(unittest.TestCase):
             with TestClient(app) as client:
                 response = client.post('/api/model-library/account/signin', json={'url': 'https://library.example.com', 'email': 'tester@example.com', 'password': 'password-for-test'})
         self.assertEqual(400, response.status_code)
-        self.assertIn('without a session', response.json()['error'])
+        self.assertIn('official Sakura library', response.json()['error'])
+        post.assert_not_called()
         self.assertNotIn('email confirmation', response.text)
         self.assertEqual(saved, [])
 
     @patch('model_library.requests.post')
-    def test_custom_library_answer_with_an_incomplete_session_blames_the_library_not_the_user(self, post):
+    def test_official_library_answer_with_an_incomplete_session_blames_the_library_not_the_user(self, post):
         from fastapi import FastAPI
         from model_library import router
         for answer in ({'access_token': 'a-session-token-' + 'b' * 24},
@@ -282,7 +297,7 @@ class ModelLibraryTests(unittest.TestCase):
                     app = FastAPI()
                     app.include_router(router(self.root / 'models', lambda request: True))
                     with TestClient(app) as client:
-                        response = client.post('/api/model-library/account/signin', json={'url': 'https://library.example.com', 'email': 'tester@example.com', 'password': 'password-for-test'})
+                        response = client.post('/api/model-library/account/signin', json={'url': LIBRARY_URL, 'email': 'tester@example.com', 'password': 'password-for-test'})
                 self.assertEqual(400, response.status_code)
                 self.assertIn('incomplete session', response.json()['error'])
                 self.assertIn('library address', response.json()['error'])
@@ -290,7 +305,7 @@ class ModelLibraryTests(unittest.TestCase):
 
     @patch('model_library.ModelLibrary.catalogue', return_value={'models': []})
     @patch('model_library.requests.post')
-    def test_custom_library_answer_with_a_full_session_still_signs_in(self, post, catalogue):
+    def test_official_library_answer_with_a_full_session_still_signs_in(self, post, catalogue):
         from fastapi import FastAPI
         from model_library import router
         post.return_value.__enter__.return_value = Mock(status_code=200, json=lambda: {
@@ -300,7 +315,7 @@ class ModelLibraryTests(unittest.TestCase):
             app = FastAPI()
             app.include_router(router(self.root / 'models', lambda request: True))
             with TestClient(app) as client:
-                response = client.post('/api/model-library/account/signin', json={'url': 'https://library.example.com/', 'email': 'tester@example.com', 'password': 'password-for-test'})
+                response = client.post('/api/model-library/account/signin', json={'url': LIBRARY_URL, 'email': 'tester@example.com', 'password': 'password-for-test'})
         self.assertEqual(200, response.status_code)
         self.assertEqual('a-session-token-' + 'b' * 24, saved[0][1]['token'])
         self.assertTrue(saved[0][1]['expires_at'] > time.time())
@@ -398,7 +413,9 @@ class ModelLibraryTests(unittest.TestCase):
                 response = client.post('/api/model-library/account/signin',
                                        json={'url': 'https://library.example.com', 'email': 'tester@example.com', 'password': 'password-for-test'})
         self.assertEqual(400, response.status_code)
-        self.assertIn('access code', response.json()['error'])
+        self.assertIn('official Sakura library', response.json()['error'])
+        post.assert_not_called()
+        catalogue.assert_not_called()
         self.assertEqual(saved, [])
 
 

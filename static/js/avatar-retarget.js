@@ -107,6 +107,7 @@ export default class AvatarRetarget {
     }
     bind() {
         this.root = this.viewer.model;
+        this.iridaRig = !!this.root?.getObjectByName('Breast_L_C1') && !!this.root?.getObjectByName('Bip001 L Finger0');
         this.fingers = [];
         if (!this.root) return;
         const names = ['Thumb', 'Index', 'Middle', 'Ring', 'Little'];
@@ -340,6 +341,10 @@ export default class AvatarRetarget {
                 const difference=Math.atan2(Math.sin(target[axis]-state[axis]),Math.cos(target[axis]-state[axis]));
                 state[axis]+=difference*rotationAlpha;
             }
+            if((key==='leftEye'||key==='rightEye')&&this.viewer.limitEyeRotation){
+                const bounded=this.viewer.limitEyeRotation(state.x,state.y);
+                state.x=bounded.pitch;state.y=bounded.yaw;
+            }
             entry.bone.quaternion.setFromEuler(new THREE.Euler(entry.rest.x+state.x,entry.rest.y+state.y,entry.rest.z+state.z,entry.rest.order));
         };
         const range = clamp(options.range ?? 1, 0, 2);
@@ -450,6 +455,7 @@ export default class AvatarRetarget {
                 }
                 this.palms[side]=null;
                 this.handTargets[side]=null;
+                if(this.armPoles)this.armPoles[side]=null;
             }
             if(poseArmValid && indices.every(i=>poseWorld[i] && [poseWorld[i].x,poseWorld[i].y,poseWorld[i].z].every(Number.isFinite)) && bones[side+'Wrist']) {
                 this.root.updateMatrixWorld(true);
@@ -517,7 +523,65 @@ export default class AvatarRetarget {
             }
         }
     }
+    _solveIridaArm(side,target,alpha,elbowTarget,rangeOverride=null) {
+        const bones=this.viewer.animationBones;
+        const upper=bones[side+'Arm'],lower=bones[side+'Elbow'],hand=bones[side+'Wrist'];
+        if(!upper||!lower||!hand||!target?.toArray().every(Number.isFinite))return;
+        // This rig's clavicles also carry the upper chest. Unrestricted CCD
+        // rotates that skin to reach the wrist, producing the armpit stretch.
+        const shoulder=bones[side+'Shoulder'];
+        if(shoulder?.rest)shoulder.bone.quaternion.setFromEuler(shoulder.rest);
+        const previous=[upper.bone.quaternion.clone(),lower.bone.quaternion.clone()];
+        for(const entry of [upper,lower])entry.bone.quaternion.setFromEuler(entry.trackingRest||entry.rest);
+        this.root.updateMatrixWorld(true);
+        const start=upper.bone.getWorldPosition(new THREE.Vector3());
+        const elbow=lower.bone.getWorldPosition(new THREE.Vector3());
+        const wrist=hand.bone.getWorldPosition(new THREE.Vector3());
+        const a=start.distanceTo(elbow),b=elbow.distanceTo(wrist);
+        if(!(a>1e-6&&b>1e-6))return;
+        const range=clamp(rangeOverride??this.viewer.trackingOptions?.handRange??1.3,.5,2);
+        const requested=start.clone().add(target.clone().sub(start).multiplyScalar(range));
+        this.handTargets ||= {};
+        if(!this.handTargets[side])this.handTargets[side]=requested.clone();
+        else this.handTargets[side].lerp(requested,alpha);
+        const direction=this.handTargets[side].clone().sub(start);
+        const distance=clamp(direction.length(),Math.max(Math.abs(a-b)+Math.min(a,b)*.05,Math.sqrt(a*a+b*b+2*a*b*Math.cos(2.4))),(a+b)*.985);
+        if(direction.lengthSq()<1e-10)direction.copy(wrist).sub(start);
+        direction.normalize();
+        const destination=start.clone().addScaledVector(direction,distance);
+        const rootRotation=this.root.getWorldQuaternion(new THREE.Quaternion());
+        const pole=elbowTarget?.toArray().every(Number.isFinite)
+            ?elbowTarget.clone().sub(start)
+            :new THREE.Vector3(side==='left'?.85:-.85,-.25,-.35).applyQuaternion(rootRotation);
+        pole.addScaledVector(direction,-pole.dot(direction));
+        if(pole.lengthSq()<1e-8){pole.set(0,0,-1).applyQuaternion(rootRotation);pole.addScaledVector(direction,-pole.dot(direction));}
+        pole.normalize();
+        this.armPoles ||= {};
+        if(!this.armPoles[side])this.armPoles[side]=pole.clone();
+        else this.armPoles[side].lerp(pole,Math.max(.15,alpha)).normalize();
+        pole.copy(this.armPoles[side]).addScaledVector(direction,-this.armPoles[side].dot(direction)).normalize();
+        const along=(a*a-b*b+distance*distance)/(2*distance);
+        const height=Math.sqrt(Math.max(0,a*a-along*along));
+        const bend=start.clone().addScaledVector(direction,along).addScaledVector(pole,height);
+        const aim=(entry,effector,point)=>{
+            this.root.updateMatrixWorld(true);
+            const origin=entry.bone.getWorldPosition(new THREE.Vector3());
+            const from=effector.getWorldPosition(new THREE.Vector3()).sub(origin).normalize();
+            const to=point.clone().sub(origin).normalize();
+            const correction=new THREE.Quaternion().setFromUnitVectors(from,to);
+            const world=entry.bone.getWorldQuaternion(new THREE.Quaternion());
+            const parent=entry.bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+            entry.bone.quaternion.copy(parent.multiply(correction.multiply(world)));
+        };
+        aim(upper,lower.bone,bend);aim(lower,hand.bone,destination);
+        for(const [i,entry]of [upper,lower].entries()){
+            const solved=entry.bone.quaternion.clone();entry.bone.quaternion.copy(previous[i]).slerp(solved,alpha);
+        }
+        this.root.updateMatrixWorld(true);
+    }
+
     solveArm(side,target,alpha,elbowTarget=null) {
+        if(this.iridaRig)return this._solveIridaArm(side,target,alpha,elbowTarget);
         const bones=this.viewer.animationBones;
         const end=bones[side+'Wrist']?.bone;
         if(!end) return;

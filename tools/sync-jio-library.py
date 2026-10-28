@@ -1,0 +1,69 @@
+"""Owner command: publish model folders added to Jio's existing PMX game tree.
+
+Run on this publisher PC; never bundled or enabled on tester machines.
+"""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import requests
+from jio_library_owner import private_directory,account_id,JioConnection
+
+ROOT=Path(__file__).resolve().parents[1]
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--inventory-only',action='store_true')
+    parser.add_argument('--require-lock',action='store_true',help='Fail rather than report success when another owner workflow holds the lock.')
+    args=parser.parse_args()
+    if account_id()!='primary' and not (private_directory()/'server-enabled.json').is_file():raise ValueError('Second-account server routing must be deployed and verified before publication.')
+    directory=private_directory('pmx');directory.mkdir(exist_ok=True)
+    if sys.platform=='win32':
+        import msvcrt
+        sync_lock=(directory/'jio-sync.lock').open('a+b');sync_lock.seek(0);sync_lock.write(b'1');sync_lock.flush();sync_lock.seek(0)
+        try:msvcrt.locking(sync_lock.fileno(),msvcrt.LK_NBLCK,1)
+        except OSError:
+            if args.require_lock:raise ValueError('Another owner library sync is already running.') from None
+            print('A library sync is already running; this check was skipped.',flush=True);return
+    def run(arguments,env=None):
+        result=subprocess.run(arguments,cwd=ROOT,env=env)
+        if result.returncode:raise ValueError('Owner library sync stopped. Review the preceding error; existing models were kept.')
+    python=sys.executable
+    command=[python,'tools/sync-jio-pmx-sources.py']
+    if not args.inventory_only:command.append('--prepare')
+    run(command)
+    if args.inventory_only:return
+    environment=os.environ.copy();environment['SAKURA_LIBRARY_PREVIEW_PMX_ROOT']=str(directory/'jio-source')
+    # Use a dedicated child process and close it after preview generation.
+    try:
+        if requests.get('http://127.0.0.1:8796/static/library-audit.html',timeout=2).status_code==200:
+            raise ValueError('A library preview server is already running. Close that owner preview job before syncing a different source tree.')
+    except requests.RequestException:pass
+    server=subprocess.Popen([python,'tools/library-preview-server.py'],cwd=ROOT,env=environment,
+                             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    try:
+        ready=False
+        for _ in range(30):
+            try:
+                if requests.get('http://127.0.0.1:8796/static/library-audit.html',timeout=1).status_code==200:ready=True;break
+            except requests.RequestException:pass
+            time.sleep(.2)
+        if not ready:raise ValueError('Owner preview server did not start.')
+        run(['node','tools/render-pmx-library-previews.cjs',str(directory),'--stream-publish'],env=environment)
+    finally:
+        server.terminate();server.wait(timeout=10)
+    run([python,'tools/upload-library-jio.py','--directory',str(directory),'--remote-folder','PMX/Sakura library packages','--workers','3'])
+    run([python,'tools/publish-library-jio.py','--directory',str(directory),'--configure'])
+    if account_id()!='primary' and JioConnection().store.load().get('folder_name')=='PMX':
+        print('PMX-only storage account synced.',flush=True);return
+    run([python,'tools/sync-jio-live2d-sources.py'])
+    live2d=private_directory()
+    run([python,'tools/upload-library-jio.py','--directory',str(live2d),'--workers','3'])
+    run([python,'tools/publish-library-jio.py','--directory',str(live2d)])
+    print('Jio PMX and Live2D libraries synced. Signed-in galleries refresh within one minute.',flush=True)
+
+
+if __name__=='__main__':main()

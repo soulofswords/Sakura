@@ -23,6 +23,8 @@
 !/tools/*.py
 !/tools/*.cjs
 !/tools/*.js
+!/tools/model-library-schema.sql
+!/tools/model-library-jio.sql
 !/tools/*.ps1
 !/tools/*.bat
 !/tests/
@@ -65,6 +67,11 @@
 **/agent-connections.tmp
 **/agent-task-history.json
 **/agent-task-history.tmp
+**/agent-automations.json
+**/agent-automations.tmp
+**/agent-local-ai/
+**/.library-publisher.bin
+**/.library-publisher.tmp
 **/steam-shortcuts.json
 **/reminders.json
 **/reminders.tmp
@@ -87,3 +94,6 @@ native/sakura-camera/source.zip
 !/docs/user-guides/
 !/docs/user-guides/*.md
 !/docs/user-guides/*.html
+
+**/agent-learning.json
+**/agent-learning.tmp

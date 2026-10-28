@@ -56,7 +56,7 @@ class SpeechFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(speech_notice('response_regular.mp3'))
 
     async def test_offline_selection_saves_and_restores_through_settings_api(self):
-        from fastapi.testclient import TestClient
+        from local_client import TestClient
         choices=[{'id':'system_en_zira','system_name':'Microsoft Zira','gender':'Female','language':'English'},
                  {'id':'system_en_heera','system_name':'Microsoft Heera','gender':'Female','language':'English'}]
         voice=TextToSpeech()

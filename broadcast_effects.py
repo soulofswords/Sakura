@@ -111,7 +111,10 @@ def _connection():
     for config in Connections().all().values():
         if config.get('transport')!='http':continue
         url=str(config.get('url',''))
-        if re.search(r'broadcast',str(config.get('name','')),re.I) or ':18100' in url or url.rstrip('/').endswith('/gateway'):
+        from urllib.parse import urlsplit
+        try:parsed=urlsplit(url);trusted=parsed.scheme=='http' and parsed.hostname in ('127.0.0.1','localhost','::1') and parsed.port==18100 and parsed.path.rstrip('/')=='/gateway' and not parsed.username and not parsed.password
+        except ValueError:trusted=False
+        if trusted:
             return config
     return None
 

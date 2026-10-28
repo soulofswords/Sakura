@@ -15,8 +15,8 @@ class ProductEditionTests(unittest.IsolatedAsyncioTestCase):
     async def test_vtuber_cannot_call_chat_or_local_download(self):
         import httpx
         with patch.object(app,'EDITION','vtuber'):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url='http://test') as client:
-                for path in ['/api/chat','/api/local-model/install','/api/ollama/models','/api/vtuber/reply']:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url=f'http://127.0.0.1:{app.gui_server.port}',headers={'origin':f'http://127.0.0.1:{app.gui_server.port}'}) as client:
+                for path in ['/api/chat','/api/local-model/install','/api/ollama/models','/api/vtuber/reply','/api/agent/runs','/api/companion/agent-tasks/example']:
                     result=await client.post(path,json={})
                     self.assertEqual(result.status_code,409)
                     self.assertNotIn('AI',result.text)
@@ -27,6 +27,18 @@ class ProductEditionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.get_settings()['product_edition'],'companion')
 
 class ProductTemplateTests(unittest.TestCase):
+    def test_vtuber_startup_does_not_import_agent_runtime(self):
+        import subprocess,sys
+        root=Path(__file__).resolve().parents[1]
+        check=("import sys;sys.path.insert(0, '.');import product;product.EDITION='vtuber';"
+               "sys.modules['agent_api']=None;sys.modules['agent_runtime']=None;sys.modules['llm']=None;"
+               "import app;assert app.llm is None;"
+               "assert not any(getattr(route,'path','').startswith('/api/agent') for route in app.app.routes);"
+               "print('VTUBER_NO_AGENT_OR_LLM')")
+        result=subprocess.run([sys.executable,'-I','-c',check],cwd=root,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('VTUBER_NO_AGENT_OR_LLM',result.stdout)
+
     def test_release_templates(self):
         spec=importlib.util.spec_from_file_location('split_builder',Path('tools/build-split-installers.py'))
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

@@ -2,8 +2,25 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const THREE=require('../static/vendor/three/build/three.cjs');
 const context=vm.createContext({console,TextDecoder});
 vm.runInContext(fs.readFileSync('static/vendor/three/examples/jsm/libs/mmdparser.module.js','utf8').replace('export { MMDParser, CharsetEncoder, Parser };','globalThis.Parser=Parser;'),context);
-const bytes=fs.readFileSync('models/pmx/arknights endfield/Chen Qianyu/Chen Qianyu.pmx');
-const data=new context.Parser().parsePmx(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),true);
+const file='models/pmx/arknights endfield/Chen Qianyu/Chen Qianyu.pmx';
+let data;
+if(fs.existsSync(file)){
+ const bytes=fs.readFileSync(file);data=new context.Parser().parsePmx(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),true);
+}else{
+ // Reproducible Japanese PMX bone metadata; no owner's character is required.
+ data={bones:[]};
+ const add=(name,parentIndex,position)=>{data.bones.push({name,parentIndex,position});return data.bones.length-1;};
+ for(const [prefix,sign] of [['左',1],['右',-1]]){
+  const shoulder=add(prefix+'肩',-1,[sign,10,0]);
+  const arm=add(prefix+'腕',shoulder,[sign*2,10,0]);
+  const elbow=add(prefix+'ひじ',arm,[sign*4,9.5,.1]);
+  const wrist=add(prefix+'手首',elbow,[sign*6,9,.2]);
+  ['親指','人指','中指','薬指','小指'].forEach((finger,i)=>{
+   let parent=wrist;
+   for(let segment=0;segment<3;segment++)parent=add(prefix+finger+(i===0?segment:segment+1),parent,[sign*(6.3+segment*.3),9+(i-2)*.15,.3+segment*.12+(i-2)*.05]);
+  });
+ }
+}
 const source=fs.readFileSync('static/js/avatar-retarget.js','utf8').replace(/import \* as THREE from 'three';/,'')
     .replace(/export function /g,'function ').replace('export default class AvatarRetarget','class AvatarRetarget');
 const Retarget=new Function('THREE',source+';return AvatarRetarget;')(THREE);
@@ -34,4 +51,4 @@ for(const side of ['left','right']) {
     assert(wrist.quaternion.angleTo(settled)<1e-5,'real PMX rig does not accumulate wrist/arm rotation');
     assert(Object.values(entries).every(e=>e.bone.quaternion.toArray().every(Number.isFinite)));
 }
-console.log('PASS: real Chen Qianyu PMX arm chains reach forward on both sides and remain stable under repeated stationary targets');
+console.log('PASS: PMX arm chains reach forward on both sides and remain stable under repeated stationary targets');

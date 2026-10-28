@@ -1,3 +1,4 @@
+import {rendererFor,openRenderer} from './avatar-channel.js';
 import {wakeSettings} from './phone-wake.js';
 import {modelStage} from './phone-stage.js';
 import {nativeJob} from './native-jobs.js';
@@ -30,15 +31,8 @@ function store(){history=history.slice(-20);localStorage.setItem('sakura-local-h
 function refreshWakeHistory(){if(busy||!Sakura.wakeHistory)return;try{const data=JSON.parse(Sakura.wakeHistory());if(data.updated_at>Number(localStorage.getItem('sakura-local-history-time')||0)&&Array.isArray(data.messages)){history=data.messages.filter(m=>['user','assistant'].includes(m.role)&&typeof m.content==='string').slice(-20);localStorage.setItem('sakura-local-history',JSON.stringify(history));localStorage.setItem('sakura-local-history-time',String(data.updated_at));renderHistory();}}catch(_){}}
 window.sakuraRefreshWakeHistory=refreshWakeHistory;
 window.sakuraWakeCommand=text=>{if($('local-mode').classList.contains('hidden')||!modelReady||busy||callActive)return false;$('local-message').value=String(text).slice(0,10000);$('local-send').click();return true;};
-function avatar(){return $('local-avatar').contentWindow?.phoneAvatar;}
-async function readyAvatar(){
-    if(!$('local-avatar').getAttribute('src'))$('local-avatar').src='/local-viewer.html';
-    const start=Date.now();while(!avatar()){
-        if($('local-avatar').contentWindow?.phoneAvatarError)throw Error($('local-avatar').contentWindow.phoneAvatarError);
-        if(Date.now()-start>30000)throw Error('Model renderer did not start. Update Android System WebView.');
-        await new Promise(resolve=>setTimeout(resolve,100));
-    }return avatar();
-}
+function avatar(){return rendererFor($('local-avatar'));}
+async function readyAvatar(){return openRenderer($('local-avatar'));}
 async function loadSelected(){const entry=models.find(m=>m.id===$('local-models').value);modelReady=false;stage.loaded(false);gate();if(!entry)return;status('Loading '+entry.name+'…');try{const view=await readyAvatar();await view.load(entry.url.split('/').map(encodeURIComponent).join('/'));localStorage.setItem('sakura-local-model',entry.id);modelReady=true;stage.loaded(true);status(entry.name+' · '+entry.format.toUpperCase());}catch(error){status(error.message);}finally{gate();}}
 function catalog(selected){models=JSON.parse(Sakura.localModels());const options=models.filter(m=>m.format===$('local-format').value);$('local-models').replaceChildren(...options.map(m=>{const option=document.createElement('option');option.value=m.id;option.textContent=m.name;return option;}));if(options.some(m=>m.id===selected))$('local-models').value=selected;}
 const config=readConfig();$('local-provider').value=config.provider;$('local-model-id').value=config.model;$('local-voice').value=config.voice;$('local-address').value=config.address;$('local-news-area').value=config.news_area||'';

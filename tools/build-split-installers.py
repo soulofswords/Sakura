@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -48,7 +49,7 @@ def edition_sources(edition,stage):
  static string PythonPath(string project){foreach(string candidate in new[]{Path.Combine(project,"venv","Scripts","python.exe"),Path.Combine(project,"runtime","python.exe")})if(File.Exists(candidate))return candidate;return "";}
 '''+source[end:]
         source=source.replace('LocalModelDialog.Python(project)','PythonPath(project)')
-        begin=source.index('    if(args.Length>0&&args[0]=="--setup-local")');end=source.index('    string key;',begin)
+        begin=source.index('    if(args.Length>0&&args[0]=="--setup-local")');end=source.index('    string key',begin)
         source=source[:begin]+source[end:]
     (stage/'Launcher.cs').write_text(source,encoding='utf-8')
     startup=(BASE/'launcher/StartupDialog.cs').read_text(encoding='utf-8-sig')
@@ -67,6 +68,9 @@ def edition_sources(edition,stage):
             source=source.replace('Optional local AI (downloads after installation)','Face tracking, hand tracking and streaming tools')
             source=replace(source,'mode.Items.AddRange(LocalLabels);' if name=='Installer.cs' else 'voice profiles', 'mode.Items.AddRange(new object[]{"VTuber tracking and model library"});' if name=='Installer.cs' else 'voice profiles')
             if name=='Installer.cs':
+                source=source.replace('  FormClosing+=', '''  cudaOptions.Visible=false;cudaStatus.Visible=false;Controls["cuda-heading"].Visible=false;
+  status.Top-=125;desktopShortcut.Top-=125;launch.Top-=125;progress.Top-=125;install.Top-=125;ClientSize=new System.Drawing.Size(620,420);
+  FormClosing+=''')
                 source=replace(source,'if(local>0)Process.Start(new ProcessStartInfo(exe,"--setup-local "+LocalIds[local-1]){WorkingDirectory=target});\n   else if(launch.Checked)','if(launch.Checked)')
         if name=='Installer.cs':
             # Do not allow one product's update to overwrite the other product.
@@ -77,7 +81,7 @@ def edition_sources(edition,stage):
     html=(BASE/'static/index.html').read_text(encoding='utf-8-sig')
     if edition=='vtuber':
         parser=VTuberHtml();parser.feed(html);html=''.join(parser.output)
-        html=html.replace('<title>Sakura — Anime  Assistant</title>','<title>Sakura VTuber</title>')
+        html=re.sub(r'<title>[^<]*</title>','<title>Sakura VTuber</title>',html,count=1)
         rules='''#dance-btn,#dance-style,#dance-stop-btn,#chat-panel,#speech-bubble,#screen-view-btn,#screen-react-btn,#clear-memory-btn,#interrupt-btn,#vtuber-mode-btn,#auto-game-btn,#continuous-mic-btn,#tracking-restore-ai,#status-dot,#screen-audio-group,[data-tab="ai"],[data-tab="assistant"],#tab-ai,#tab-assistant{display:none!important}'''
     else:
         rules=''
@@ -140,6 +144,8 @@ def build_edition(edition,output,work):
     return builder,display
 
 def main():
+    # unittest subprocesses need the same test-helper path that pytest supplies.
+    os.environ['PYTHONPATH']=os.pathsep.join([str(BASE),str(BASE/'tests'),os.environ.get('PYTHONPATH','')])
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,default=Path('C:/AI/Installer ready'));parser.add_argument('--edition',choices=['both','vtuber','companion'],default='both')
     args=parser.parse_args();reports=args.output/'split-build-reports';reports.mkdir(parents=True,exist_ok=True)
     root=BASE/'tools/edition-work';root.mkdir(exist_ok=True)

@@ -1,5 +1,13 @@
 # Sakura cloud character library
 
+Current hosted storage is **JioAICloud**, serving 209 Live2D and 362 PMX character
+packages. PMX browsing is game → character with animated turntable previews.
+The Jio adapter has passed real signed-in download/import checks for both formats.
+See [Jio model publishing](jio-model-publishing.md) for adding characters to the
+existing source folders, the private package-folder purpose and owner sync command.
+Drive-specific publisher instructions below are retained as historical tooling;
+the deleted Drive destination and its scheduled publisher remain disabled.
+
 ## Implemented in source
 
 The Models panel in standalone VTuber, Companion and Companion VTuber gets a
@@ -7,10 +15,29 @@ Cloud import PMX, Cloud import VRM and Cloud import Live2D button beside its loc
 upload controls. Nothing contacts the catalogue or opens account fields until the
 user selects one of those cloud buttons. The panel filters to the chosen format;
 remembered sessions open the matching catalogue without asking the user to sign
-in again. Local model import and use are unchanged.
+in again. Local model import and selection handlers are preserved.
 Downloaded characters enter the existing PMX / VRM / Live2D selectors. The existing
 Send model to mobile action can transfer installed characters to a paired phone.
 Direct Android cloud browsing is not implemented by this desktop change.
+
+Cloud characters use a searchable grid of square preview cards. Selecting a card
+highlights it; Download installs the package and refreshes its existing format
+selector. The gallery is hidden until a cloud-import button is opened and the
+user signs in. PMX/VRM cards display looping 360-degree renders, while Live2D cards
+use a supplied portrait. Missing previews show the model's folder name rather than
+broken images. Local PMX, VRM and Live2D buttons remain separate.
+
+Each local format button now opens a folder browser with a search box above the
+cards. Folder navigation follows the existing model paths; searching spans all
+folders of that format. Leaf cards select through the original native selector's
+change event. Live2D uses its portrait PNG or the folder name; PMX/VRM thumbnails
+render in one isolated preview frame, which rotates on hover. The shared frame
+stays in place instead of being reparented, preventing iframe reloads during hover.
+
+Previews are authenticated raster assets served through the local app proxy;
+storage IDs and owner tokens never become image URLs in the browser. The service
+uses `/v1/models/{id}/preview` and a bounded WebP response. Animated WebP turntables
+avoid loading multiple full 3D scenes while the user is tracking or streaming.
 
 The client downloads only packages listed by the authenticated service, verifies
 exact size and SHA256, and passes them to the existing staged model importer.
@@ -36,6 +63,65 @@ Alternatively provide a short-lived owner Drive access token in the environment
 variable SAKURA_LIBRARY_DRIVE_ACCESS_TOKEN. Never place it in an app, APK, source
 file, command argument, screenshot or chat. No Drive writes or sharing changes
 are made by this tool. Output is local; running it is not internet publication.
+
+The Live2D exporter writes `<id>.webp` beside each ZIP, preferring preview/portrait/
+thumbnail PNGs and excluding all texture files referenced by `.model3.json`.
+If no portrait exists, supply one before publication; an atlas is not a preview.
+For a PMX or VRM character served by the owner's local Sakura app, render a loop:
+
+    node tools/render-library-turntable.cjs "vrm/character.vrm" "private-model-library/character.webp"
+
+This renders 48 angles with physics/idle animation stopped, and writes a six-second
+loop. It does not modify the model or its saved settings. Test renders were checked
+against real local PMX and VRM models; those private models were not published.
+
+Before publishing previews on the hosted service, re-run
+`tools/model-library-schema.sql` to add the two optional preview columns, deploy
+the updated `tools/model-library-edge.js`, and set `preview_storage_path` or
+`preview_drive_file_id` for each published model. Upload `<id>.webp` as a separate
+private asset. The catalogue returns only `preview: true`, never either private
+storage location. Existing packages without a preview still install normally.
+
+## Automatic owner publishing
+
+Current owner setup is paused: the owner deleted the generated Drive destination
+and selected JioAICloud instead. The Windows task is disabled, the owner publish
+endpoint returns 410, and the old Drive-backed catalogue rows are unpublished
+(retained for migration). Do not re-enable Drive uploads without confirming the
+destination with the owner. All 209 prepared packages remain locally available.
+`F:/AI/assistant/Sakura Jio Upload` contains only packages, preview images and a
+credential-free catalogue, ready for a manual Jio folder upload. Jio storage or
+private automatic delivery is not configured or claimed to work yet.
+
+The owner PC has a limited-user, hidden Windows task named `Sakura Library
+Publisher`. It checks every 15 minutes and after the owner's Windows sign-in,
+running `tools/sync-library-drive.py`. This is not installed on testers' PCs and
+is not included as an enabled service in release installers. The owner PC must
+be on, signed into Windows, and online; this is not a cloud-side ZIP builder.
+
+Each pass inventories the approved Drive folder, prepares new folders, uploads
+validated packages and portraits into a separate private app-created Drive folder,
+then publishes their metadata through the owner-only endpoint. Failed preparation
+is retried on the next pass. Completed packages, uploads and publications are
+checkpointed outside the repository in `F:/AI/assistant/private-model-library`.
+`publisher-sync.log` records scheduled runs. Existing characters are not uploaded
+again, and downloaded user edits are never overwritten.
+
+Only the original source reads use the owner's local Workspace authorization.
+The server holds a separate `drive.file` grant for publisher-created files,
+encrypted in Supabase Vault. It cannot read the owner's Gmail or Calendar.
+The catalogue publisher has a distinct random owner proof stored with Windows
+DPAPI; only its hash is deployed. Its endpoint accepts bounded Live2D catalogue
+records, not arbitrary SQL or commands. Neither credential ships with clients.
+
+Clients refresh an open, signed-in cloud gallery once a minute, pause refreshes
+during a download, and never download new models automatically. Adding source
+folders therefore does not force downloads or sign-in prompts on testers.
+
+Preparation safely deduplicates identical Drive texture copies (matching checksum
+and size), while conflicting duplicates remain errors. An omitted model3 descriptor
+can be reconstructed only with exactly one MOC and an unambiguous texture directory;
+this changes only the prepared copy, never the source Drive folder.
 
 The public folder currently contains Workshop-named models. Source availability
 does not grant redistribution rights: retain creator attribution and establish
@@ -114,12 +200,35 @@ form ships no script and no `script-src`.
 
 Spending the link is not the reset. Opening the emailed page only proves the token, so
 the account keeps answering the old password until that page's form is submitted, and
-the recovery reply says so. If a sign-in is refused while a verified link still waits
-for that address, the error adds that the new password is not live yet, because from the
-sign-in box an unfinished reset is indistinguishable from a wrong password. The slot
-remembers the address Auth named in the recovery session, so it only ever speaks for that
-address, and `PUT /auth/v1/user` may report success only when Auth answers with an
-updated user object for the same email.
+the recovery reply says so. Auth consumes the token on that first open, so a mail
+scanner, a second tab or the back button used to leave the reader staring at a dead page
+while the verified session was still sitting in this process, and Auth answers a link it
+has already spent with the same `otp_expired` 403 it gives a link that went stale, so the
+refusal carries no diagnosis worth acting on. The slot table therefore also remembers the
+link token, and re-opening a link this server already verified hands back that held
+session and a fresh id. A token it never verified still gets the dead page, because then
+nothing really is waiting to be finished, and a link that could not be reached at all is
+never answered with a form either.
+
+The held session is offered inside Sakura too, so a browser tab nobody submits cannot
+lose the password. If a sign-in is refused while a verified link still waits for that
+address, the reply carries `reset_pending` and says the new password is not live yet,
+because from the sign-in box an unfinished reset is indistinguishable from a wrong
+password; the panel reads that flag and reveals a two-field Set new password box that
+posts to `POST /api/model-library/finish-reset`. That route keeps the stricter
+`_started_locally` guard, claims the live slot by the casefolded address Auth named, and
+runs the same length, mismatch and `PUT /auth/v1/user` path as the page's own form, so a
+typo returns the slot and a change that lands consumes it. It answers with one plain
+sentence and never with the provider's detail or the password. A slot only ever speaks for
+the address it was held for, and `PUT /auth/v1/user` may report success only when Auth
+answers with an updated user object for the same email.
+
+An Auth `same_password` refusal means the submitted password is already set; it does
+not prove a new change happened. Both forms explain this and preserve the waiting
+session so the user can choose a different password. HTTP 429 and server errors also
+keep the form usable until its original deadline. Successful changes remain single-use.
+`tools/sync-model-library.py` copies both library modules and the confirmation/reset
+module, and attaches both routers without replacing unrelated application changes.
 
 For initial non-public smoke tests an optional SAKURA_LIBRARY_MEMBERS file maps
 tester labels to SHA256 hashes of random access codes of at least 32 characters.
@@ -144,8 +253,9 @@ The owner approved deployment and the sakura-library Edge Function is now deploy
 at https://gclwwyznseuuixnbwpyz.supabase.co/functions/v1/sakura-library.
 A live unauthenticated GET to /v1/models returned HTTP 401 with the function's
 own `Sign into Sakura first.` response, confirming the deployed handler executes.
-No model files are published yet. Successful real-user sign-in and package
-download still need email sender configuration and prepared model packages.
+No model files are published yet. Email delivery and both reset paths were subsequently
+verified by the owner and Qoder. Publishing prepared model packages and testing an
+authenticated package download remain separate deployment steps.
 
 Source setup scripts are tools/model-library-schema.sql and
 tools/model-library-edge.js. The library function verifies the user with Supabase

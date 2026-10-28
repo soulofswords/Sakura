@@ -4,12 +4,12 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  await page.route('http://phone.test/**',route=>route.fulfill({contentType:'text/html',body:fs.readFileSync('android/assets/index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')}));
  await page.goto('http://phone.test/');
  await page.evaluate(()=>{
-  window.calls=[];window.streams=[];window.holdCamera=false;
+  window.calls=[];window.streams=[];window.holdCamera=false;window.pcState={expressions:[]};
   HTMLMediaElement.prototype.play=async()=>{};
   window.makeStream=()=>{const canvas=document.createElement('canvas');canvas.width=480;canvas.height=360;const stream=canvas.captureStream(30);streams.push(stream);return stream;};
   Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>{if(holdCamera)await new Promise(r=>window.releaseCamera=r);return makeStream();}}});
   window.Sakura={localAvailable:()=>false,remembered:()=>JSON.stringify([{id:'pc',address:'pc'}]),request:(method,path,body)=>{calls.push([path,JSON.parse(body)]);return '{"ok":true}';},stopTrackingFrames:()=>{},localModels:()=>'[]'};
-  window.nativeJob=async method=>method==='reconnectAsync'?{name:'Test PC',edition:'companion'}:method==='discoverAsync'?{computers:[]}:{expressions:[]};
+  window.nativeJob=async(method,...args)=>{if(method==='requestAsync'){calls.push([args[1],JSON.parse(args[2])]);return {ok:true};}return method==='reconnectAsync'?{name:'Test PC',edition:'companion',pc_id:'test-pc'}:method==='discoverAsync'?{computers:[]}:window.pcState;};
   window.installButtonFeedback=()=>{};
   window.AvatarTracking=class{constructor(viewer){this.viewer=viewer;}async start(){this.stream=makeStream();this.viewer.setUserTracking(true);}stop(){this.stream?.getTracks().forEach(t=>t.stop());this.viewer.setUserTracking(false);}setHandTracking(){}};
  });
@@ -28,6 +28,17 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  await page.waitForFunction(()=>!document.getElementById('camera-share').disabled);
  assert.equal(await page.evaluate(()=>streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))),true,'A delayed permission result cannot restart the old camera mode');
  await page.click('#camera-share');await page.waitForFunction(()=>document.getElementById('camera-share').textContent==='Stop face tracking');
+ await page.click('#camera-share');
+ const before=await page.evaluate(()=>streams.length);
+ await page.evaluate(()=>{pcState.tracking_control={id:'remote-1',action:'start',expires:Date.now()/1000+30};});
+ await page.waitForFunction(()=>document.getElementById('status').textContent.includes('Your PC requested tracking'));
+ assert.equal(await page.evaluate(()=>streams.length),before,'Remote camera start is denied by default');
+ await page.click('[data-tab="vtuber"]');
+ await page.check('#allow-pc-camera');
+ await page.evaluate(()=>{pcState.tracking_control={id:'remote-2',action:'start',expires:Date.now()/1000+30};});
+ await page.waitForFunction(n=>streams.length>n,before);
+ await page.uncheck('#allow-pc-camera');
+ assert.equal(await page.evaluate(()=>streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))),true,'Revoking permission stops remote tracking');
  await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));
  assert.equal(await page.evaluate(()=>streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))),true,'Leaving releases camera and tracking');
  console.log('PASS: Companion recognition/tracking switch releases previous camera, cancels delayed starts, and cleans up on exit.');

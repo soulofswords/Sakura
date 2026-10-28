@@ -1,3 +1,4 @@
+from local_client import local_request
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,11 +49,11 @@ class PerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(address_text('Change the master volume.','maam'),'Change the master volume.')
         with patch.object(app,'get_settings',return_value={'user_address':'maam'}),patch.object(app.app.state,'tracking_only',False,create=True):
             result=await app.assistant_greeting();self.assertIn('Ma’am',result['reply'])
-        result=await app.update_app_settings(Mock(headers={}),{'user_address':'invalid'})
+        result=await app.update_app_settings(local_request(),{'user_address':'invalid'})
         self.assertEqual(result.status_code,400)
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(app,'SETTINGS_FILE',Path(folder)/'settings.json'),patch.object(app,'llm',Mock()),patch.object(app,'tts',None),patch.object(app,'public_settings',side_effect=lambda value:value):
-                result=await app.update_app_settings(Mock(headers={}),{'user_address':'maam'})
+                result=await app.update_app_settings(local_request(),{'user_address':'maam'})
                 self.assertTrue(result['ok']);self.assertEqual(app.get_settings()['user_address'],'maam')
                 self.assertEqual(app.llm.user_address,'maam')
 

@@ -1,7 +1,7 @@
 import json
 import unittest
 from pathlib import Path
-from fastapi.testclient import TestClient
+from local_client import TestClient
 from app import app
 
 class TextureReferenceTests(unittest.TestCase):

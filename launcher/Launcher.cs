@@ -97,9 +97,10 @@ static class Launcher {
    if(!File.Exists(checkPython)||!File.Exists(Path.Combine(project,script)))Environment.ExitCode=1;
    return;
   }
+  bool windowsStartup=args.Length==1&&args[0]=="--windows-startup";
   bool created; using(var mutex=new Mutex(true,"Local\\SakuraLauncher_"+title.Replace(" ","_"),out created)) {
    if(!created && title!="Sakura VTuber"){
-    if(!FocusExisting(title))MessageBox.Show(title+" is starting. Please wait a moment, then open it again to bring it forward.",title);
+    if(!FocusExisting(title)&&!windowsStartup)MessageBox.Show(title+" is starting. Please wait a moment, then open it again to bring it forward.",title);
     return;
    }
    try {
@@ -108,7 +109,7 @@ static class Launcher {
     if(args.Length>0&&args[0]=="--setup-local") {
      using(var setup=new LocalModelDialog(project,args.Length>1?args[1]:null))setup.ShowDialog();return;
     }
-    string key; string mode=ChooseMode(project,out key); if(mode==null)return;
+    string key=""; string mode=windowsStartup?"resume":ChooseMode(project,out key); if(mode==null)return;
     python=BrandedPython(python);
     // Start from Sakura's working directory just like a direct successful run.
     // The native window receives Sakura's own AppUserModelID and icon in

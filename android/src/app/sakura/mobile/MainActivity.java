@@ -23,7 +23,7 @@ public class MainActivity extends Activity {
  private static java.lang.ref.WeakReference<MainActivity> current=new java.lang.ref.WeakReference<>(null);
  private volatile boolean assistantReady;private String wakePermissionId;private boolean wakePermissionPending;
  static boolean deliverWakeCommand(String text){MainActivity a=current.get();if(a==null||!a.phoneForeground||!a.assistantReady||WakeService.uiBusy)return false;java.util.concurrent.CountDownLatch ready=new java.util.concurrent.CountDownLatch(1);java.util.concurrent.atomic.AtomicBoolean accepted=new java.util.concurrent.atomic.AtomicBoolean();a.runOnUiThread(()->{if(!a.phoneForeground||!a.assistantReady){ready.countDown();return;}a.web.evaluateJavascript("window.sakuraWakeCommand?.("+JSONObject.quote(text)+")==true",result->{accepted.set("true".equals(result));ready.countDown();});});try{ready.await(2,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException ignored){Thread.currentThread().interrupt();}return accepted.get();}
- private String wakeState(){try{android.content.SharedPreferences p=getSharedPreferences("paired-pcs",0);return new JSONObject().put("download_active",WakeAssets.downloading).put("download_status",WakeAssets.downloadStatus).put("download_bytes",new File(getCacheDir(),"wake-model.download").length()).put("installed",WakeAssets.ready(this)).put("enabled",WakeService.live!=null&&!WakeService.live.stopped).put("phrase",p.getString("wake-phrase","hey sakura")).put("status",p.getString("wake-status","Wake phrase off")).toString();}catch(Exception error){return "{}";}}
+ private String wakeState(){try{android.content.SharedPreferences p=getSharedPreferences("paired-pcs",0);return new JSONObject().put("download_active",WakeAssets.downloading.get()).put("download_status",WakeAssets.downloadStatus).put("download_bytes",new File(getCacheDir(),"wake-model.download").length()).put("installed",WakeAssets.ready(this)).put("enabled",WakeService.live!=null&&!WakeService.live.stopped).put("phrase",p.getString("wake-phrase","hey sakura")).put("status",p.getString("wake-status","Wake phrase off")).toString();}catch(Exception error){return "{}";}}
  private void startWake(String id){try{if(!phoneForeground)throw new Exception("Open Sakura before enabling the wake microphone.");if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new Exception("Microphone permission is required.");if(!getSystemService(android.app.NotificationManager.class).areNotificationsEnabled())throw new Exception("Enable Sakura notifications in Android settings so the wake listener has a visible Stop control.");microphone.stop();WakeService.manual=false;startForegroundService(new Intent(this,WakeService.class).setAction("START"));web.postDelayed(()->new Bridge().complete(id,wakeState()),300);}catch(Exception error){try{new Bridge().complete(id,new JSONObject().put("error",error.getMessage()).toString());}catch(Exception ignored){}}}
 
  private PhoneMicrophone microphone;private boolean modelFullscreen;private int microphoneGeneration;private boolean dictationPending;private String modelImportJob;
@@ -35,7 +35,8 @@ public class MainActivity extends Activity {
  void callState(boolean active){if(active&&microphone!=null)runOnUiThread(()->{microphone.stop();microphone.state(false,"Call in progress · microphone off");});if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraCallState?.("+active+")",null));}
  void phoneNotice(String text){if(web!=null)web.post(()->web.evaluateJavascript("window.sakuraPhoneNotice?.("+JSONObject.quote(text)+")",null));}
  void requestCall(String person){if(localAvailable&&calls!=null)calls.request(person);}
- private WebView web; private volatile String base="",token="",pin="",lastFingerprint=""; private PermissionRequest cameraRequest;
+ private WebView web; private volatile String base="",token="",pin=""; private PermissionRequest cameraRequest;
+ private volatile boolean rendererCameraAllowed;
  private PhoneTrackingSender trackingSender;
  private synchronized void stopTrackingSender(){if(trackingSender!=null){trackingSender.close();trackingSender=null;}}
  @Override public void onCreate(Bundle state){
@@ -43,12 +44,20 @@ public class MainActivity extends Activity {
   web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);
   web.getSettings().setMediaPlaybackRequiresUserGesture(false);
   web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);
-  web.addJavascriptInterface(new Bridge(),"Sakura");
+  final NativeGateway gateway=new NativeGateway(new Bridge());
+  web.addJavascriptInterface(gateway,"_SakuraGateway");
   web.setWebViewClient(new WebViewClient(){
-   @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){return !"appassets.androidplatform.net".equals(request.getUrl().getHost());}
+   @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){return request.isForMainFrame() ? !"https://appassets.androidplatform.net/index.html".equals(request.getUrl().toString()) : !"https://models.sakura.invalid/local-viewer.html".equals(request.getUrl().toString());}
    @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){
-    if(!"appassets.androidplatform.net".equals(request.getUrl().getHost()))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
-    String path=request.getUrl().getPath().substring(1);if(path.contains(".."))return null;
+    if(!"https".equals(request.getUrl().getScheme())||request.getUrl().getPort()!=-1||!("appassets.androidplatform.net".equals(request.getUrl().getHost())||"models.sakura.invalid".equals(request.getUrl().getHost())))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
+    String path=request.getUrl().getPath().substring(1);
+    boolean controls="appassets.androidplatform.net".equals(request.getUrl().getHost());
+    if(path.contains("..")||(path.equals("index.html")&&(!controls||!request.isForMainFrame()))||(path.equals("local-viewer.html")&&controls))return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",null,new ByteArrayInputStream(new byte[0]));
+    if(path.equals("index.html"))try{
+     ByteArrayOutputStream html=new ByteArrayOutputStream();try(InputStream input=getAssets().open(path)){byte[] bytes=new byte[8192];int n;while((n=input.read(bytes))!=-1)html.write(bytes,0,n);}
+     String page=html.toString("UTF-8").replace("<head>","<head>"+gateway.bootstrap());
+     return new WebResourceResponse("text/html","UTF-8",200,"OK",securityHeaders(true),new ByteArrayInputStream(page.getBytes("UTF-8")));
+    }catch(Exception error){return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));}
     try{
      if(path.startsWith("models/")||path.startsWith("local-audio/")){
       File root=new File(getFilesDir(),path.startsWith("models/")?"models":"audio"),file=new File(root,path.substring(path.indexOf('/')+1));
@@ -60,18 +69,26 @@ public class MainActivity extends Activity {
      if(path.startsWith("api/"))return new WebResourceResponse("application/json","UTF-8",404,"Not available",null,new ByteArrayInputStream("{}".getBytes("UTF-8")));
     }catch(Exception error){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new ByteArrayInputStream(new byte[0]));}
     String mime=path.endsWith(".css")?"text/css":path.endsWith(".wasm")?"application/wasm":path.endsWith(".js")||path.endsWith(".mjs")?"application/javascript":path.endsWith(".html")?"text/html":path.endsWith(".png")?"image/png":"application/octet-stream";
-    try{return new WebResourceResponse(mime,"UTF-8",getAssets().open(path));}catch(IOException error){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new ByteArrayInputStream(new byte[0]));}
+    try{return new WebResourceResponse(mime,"UTF-8",200,"OK",securityHeaders(controls),getAssets().open(path));}catch(IOException error){return new WebResourceResponse("text/plain","UTF-8",404,"Not found",null,new ByteArrayInputStream(new byte[0]));}
    }
   });
   web.setWebChromeClient(new WebChromeClient(){@Override public void onPermissionRequest(PermissionRequest request){runOnUiThread(()->{
-   if(!"appassets.androidplatform.net".equals(request.getOrigin().getHost())){request.deny();return;}
+   if(!phoneForeground||!"https".equals(request.getOrigin().getScheme())||!("appassets.androidplatform.net".equals(request.getOrigin().getHost())||("models.sakura.invalid".equals(request.getOrigin().getHost())&&rendererCameraAllowed))){request.deny();return;}
    cameraRequest=request;if(checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)grantCamera();else requestPermissions(new String[]{Manifest.permission.CAMERA},1);
   });}});
   web.loadUrl("https://appassets.androidplatform.net/index.html");
  }
- private void grantCamera(){if(cameraRequest!=null){cameraRequest.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});cameraRequest=null;}}
+ private static java.util.Map<String,String> securityHeaders(boolean controls){
+  java.util.Map<String,String> headers=new java.util.HashMap<>();
+  headers.put("X-Content-Type-Options","nosniff");
+  if(controls)headers.put("Cache-Control","no-store");
+  headers.put("Content-Security-Policy","default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; frame-src "+(controls?"https://models.sakura.invalid":"'none'")+"; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors "+(controls?"'none'":"https://appassets.androidplatform.net"));
+  return headers;
+ }
+ private void grantCamera(){if(cameraRequest!=null){if(phoneForeground&&(!"models.sakura.invalid".equals(cameraRequest.getOrigin().getHost())||rendererCameraAllowed))cameraRequest.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});else cameraRequest.deny();cameraRequest=null;}}
  @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==7){wakePermissionPending=false;String id=wakePermissionId;wakePermissionId=null;if(id!=null)startWake(id);return;}if(code==6){if(microphone!=null)microphone.permissionResult();return;}if(code==5){if(locations!=null)locations.permissionsResult();return;}if(code==3){if(calls!=null)calls.permissions();return;}if(code==1&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)grantCamera();else if(cameraRequest!=null){cameraRequest.deny();cameraRequest=null;}}
  class Bridge {
+  @JavascriptInterface public void rendererCamera(boolean enabled){rendererCameraAllowed=enabled&&phoneForeground;}
   @JavascriptInterface public void submitTrackingFrame(String body){
    if(!phoneForeground||body.length()>180000||base.isEmpty()||token.isEmpty())return;
    synchronized(MainActivity.this){if(trackingSender==null)trackingSender=new PhoneTrackingSender(frame->{
@@ -86,9 +103,9 @@ public class MainActivity extends Activity {
    catch(Exception e){modelImportJob=null;complete(id,error(e));}
   });}
   @JavascriptInterface public boolean systemDarkAppearance(){return (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;}
-  private void complete(String id,String result){web.post(()->web.evaluateJavascript("window.sakuraNativeReply?.("+JSONObject.quote(id)+","+result+")",null));}
+  private void complete(String id,String result){web.post(()->web.evaluateJavascript(NativeReplies.script(id,result),null));}
   @JavascriptInterface public String wakeState(){return MainActivity.this.wakeState();}
-  @JavascriptInterface public void installWakePack(String id){new Thread(()->{try{if(WakeAssets.downloading)throw new Exception("A wake pack download is already running.");WakeAssets.downloading=true;WakeAssets.install(MainActivity.this,message->{WakeAssets.downloadStatus=message;});WakeAssets.downloadStatus="Wake pack ready";complete(id,MainActivity.this.wakeState());}catch(Exception error){WakeAssets.downloadStatus=error.getMessage();complete(id,error(error));}finally{WakeAssets.downloading=false;}}).start();}
+  @JavascriptInterface public void installWakePack(String id){if(!WakeAssets.downloading.compareAndSet(false,true)){complete(id,error(new Exception("A wake pack download is already running.")));return;}new Thread(()->{try{WakeAssets.install(MainActivity.this,message->{WakeAssets.downloadStatus=message;});WakeAssets.downloadStatus="Wake pack ready";complete(id,MainActivity.this.wakeState());}catch(Exception error){WakeAssets.downloadStatus=error.getMessage();complete(id,error(error));}finally{WakeAssets.downloading.set(false);}}).start();}
   @JavascriptInterface public void setWake(String id,boolean enabled,String phrase){runOnUiThread(()->{try{
    if(!enabled){stopService(new Intent(MainActivity.this,WakeService.class));web.postDelayed(()->complete(id,MainActivity.this.wakeState()),200);return;}
    if(!phoneForeground)throw new Exception("Open Sakura to enable background listening.");
@@ -99,7 +116,7 @@ public class MainActivity extends Activity {
    if(!missing.isEmpty()){wakePermissionId=id;wakePermissionPending=true;requestPermissions(missing.toArray(new String[0]),7);}else startWake(id);
   }catch(Exception error){complete(id,error(error));}});}
   @JavascriptInterface public void setAssistantState(boolean ready,boolean busy){assistantReady=ready;WakeService.busy(busy);}
-  @JavascriptInterface public void syncWakeHistory(String history){try{JSONArray messages=new JSONArray(history);if(history.length()>100000||messages.length()>20)return;prefs().edit().putString("wake-history",history).putLong("wake-history-time",System.currentTimeMillis()).apply();}catch(Exception ignored){}}
+  @JavascriptInterface public void syncWakeHistory(String history){try{if(history==null||history.length()>100000)return;JSONArray messages=new JSONArray(history);if(messages.length()>20)return;prefs().edit().putString("wake-history",history).putLong("wake-history-time",System.currentTimeMillis()).apply();}catch(Exception ignored){}}
   @JavascriptInterface public String wakeHistory(){try{return new JSONObject().put("messages",new JSONArray(prefs().getString("wake-history","[]"))).put("updated_at",prefs().getLong("wake-history-time",0)).toString();}catch(Exception error){return "{}";}}
   @JavascriptInterface public void setModelFullscreen(boolean enabled){if(localAvailable)runOnUiThread(()->fullscreen(enabled));}
   @JavascriptInterface public void setMicrophone(boolean enabled){if(!localAvailable)return;runOnUiThread(()->{final int request=++microphoneGeneration;if(!enabled){microphone.stop();microphone.state(false,"Microphone off");return;}if(calls!=null&&calls.inCall()){microphone.state(false,"Sakura is muted during your call.");return;}WakeService.pauseManual(true);new Thread(()->{long end=android.os.SystemClock.elapsedRealtime()+2000;while(WakeService.recording()&&android.os.SystemClock.elapsedRealtime()<end)try{Thread.sleep(20);}catch(InterruptedException ignored){}runOnUiThread(()->{if(request==microphoneGeneration&&phoneForeground)microphone.start();else if(request==microphoneGeneration)WakeService.pauseManual(false);});}).start();});}
@@ -161,7 +178,7 @@ public class MainActivity extends Activity {
   @JavascriptInterface public void cancelModelTransfer(String id,String requestId){new Thread(()->{try{if(!localAvailable)throw new Exception("Local mode unavailable.");complete(id,call("POST","/command",new JSONObject().put("type","cancel-model").put("request_id",requestId).toString()));}catch(Exception error){complete(id,error(error));}}).start();}
   @JavascriptInterface public void connectAsync(String id,String address,String code,String fingerprint){new Thread(()->complete(id,connect(address,code,fingerprint))).start();}
   @JavascriptInterface public void reconnectAsync(String id,String computerId,String address){new Thread(()->complete(id,reconnect(computerId,address))).start();}
-  @JavascriptInterface public void discoverAsync(String id){new Thread(()->{try{complete(id,new JSONObject().put("computers",discover(1800)).toString());}catch(Exception error){complete(id,error(error));}},"SakuraDiscover").start();}
+  @JavascriptInterface public void discoverAsync(String id){new Thread(()->{try{complete(id,new JSONObject().put("computers",discover(3600)).toString());}catch(Exception error){complete(id,error(error));}},"SakuraDiscover").start();}
   private SharedPreferences prefs(){return getSharedPreferences("paired-pcs",MODE_PRIVATE);}
   private SecretKey pairingKey()throws Exception{
    KeyStore store=KeyStore.getInstance("AndroidKeyStore");store.load(null);
@@ -176,7 +193,7 @@ public class MainActivity extends Activity {
    if(!"https".equals(uri.getScheme())||host==null||!host.matches("[0-9.]+"))throw new Exception("Enter the encrypted PC link shown in Sakura settings.");
    if(!InetAddress.getByName(host).isSiteLocalAddress())throw new Exception("Use a private home-network address.");
    String candidate=fingerprint==null?"":fingerprint.toLowerCase(java.util.Locale.ROOT);
-   if(!candidate.isEmpty()&&!candidate.matches("[0-9a-f]{64}"))throw new Exception("That PC's certificate fingerprint is invalid.");
+   if(!candidate.matches("[0-9a-f]{64}"))throw new Exception("That PC's certificate fingerprint is invalid.");
    base="https://"+host+":"+(uri.getPort()>0?uri.getPort():8771);pin=candidate;token="";
   }
   @JavascriptInterface public String remembered(){return prefs().getString("computers","[]");}
@@ -191,25 +208,62 @@ public class MainActivity extends Activity {
     for(java.net.InterfaceAddress binding:nic.getInterfaceAddresses()){InetAddress address=binding.getAddress();
      if(!(address instanceof Inet4Address)||address.isLoopbackAddress()||!address.isSiteLocalAddress())continue;
      InetAddress broadcast=binding.getBroadcast();if(broadcast!=null)targets.add(broadcast.getHostAddress());}}
+   android.net.wifi.WifiManager.MulticastLock reception=null;
    DatagramSocket socket=new DatagramSocket();socket.setBroadcast(true);
    java.util.LinkedHashMap<String,JSONObject> found=new java.util.LinkedHashMap<>();
    try{
+    // A lock this device refuses to grant must not cost the user the whole search.
+    try{
+     android.net.wifi.WifiManager wifi=(android.net.wifi.WifiManager)getApplicationContext().getSystemService(android.content.Context.WIFI_SERVICE);
+     if(wifi!=null){reception=wifi.createMulticastLock("SakuraPcDiscovery");reception.setReferenceCounted(false);reception.acquire();}
+    }catch(Exception unheld){reception=null;}
     byte[] magic="sakura-discover-v1".getBytes("UTF-8");
-    for(String target:targets)try{socket.send(new DatagramPacket(magic,magic.length,InetAddress.getByName(target),8770));}catch(IOException ignored){}
-    socket.setSoTimeout(300);byte[] buffer=new byte[2048];long deadline=System.currentTimeMillis()+patienceMillis;
-    while(System.currentTimeMillis()<deadline){
-     try{DatagramPacket packet=new DatagramPacket(buffer,buffer.length);socket.receive(packet);
-      JSONObject reply=new JSONObject(new String(packet.getData(),0,packet.getLength(),"UTF-8"));
-      if(!"sakura".equals(reply.optString("service")))continue;
-      String identity=reply.optString("id");
-      URI endpoint=new URI(reply.optString("https"));
-      if(identity.matches("[0-9a-f]{32}")&&reply.optString("fingerprint").matches("[0-9a-f]{64}")&&"https".equals(endpoint.getScheme())&&packet.getAddress().isSiteLocalAddress()
-         &&packet.getAddress().getHostAddress().equals(endpoint.getHost())&&endpoint.getPort()>0&&endpoint.getPort()<=65535
-         &&endpoint.getRawUserInfo()==null&&(endpoint.getPath()==null||endpoint.getPath().isEmpty())&&endpoint.getQuery()==null&&endpoint.getFragment()==null)found.put(identity,reply);
-     }catch(SocketTimeoutException slow){}catch(Exception ignored){}
+    socket.setSoTimeout(250);byte[] buffer=new byte[2048];long deadline=android.os.SystemClock.elapsedRealtime()+patienceMillis,nextProbe=0;
+    while(android.os.SystemClock.elapsedRealtime()<deadline){
+     if(android.os.SystemClock.elapsedRealtime()>=nextProbe){
+      for(String target:targets)try{socket.send(new DatagramPacket(magic,magic.length,InetAddress.getByName(target),8770));}catch(IOException ignored){}
+      nextProbe=android.os.SystemClock.elapsedRealtime()+700;
+     }
+     harvest(socket,buffer,found);
     }
-   }finally{socket.close();}
+    if(found.isEmpty()){
+     // A router that will not relay a wireless client's broadcast still forwards a unicast
+     // probe, so an empty list earns one sweep of the phone's own subnet before giving up.
+     for(String host:subnetHosts())try{socket.send(new DatagramPacket(magic,magic.length,InetAddress.getByName(host),8770));}catch(IOException ignored){}
+     long swept=android.os.SystemClock.elapsedRealtime()+patienceMillis;
+     while(android.os.SystemClock.elapsedRealtime()<swept)harvest(socket,buffer,found);
+    }
+   }finally{socket.close();if(reception!=null&&reception.isHeld())reception.release();}
    JSONArray list=new JSONArray();for(JSONObject reply:found.values())list.put(reply);return list;
+  }
+  // One bounded read; the caller owns the deadline and calls this until it expires.
+  private void harvest(DatagramSocket socket,byte[]buffer,java.util.LinkedHashMap<String,JSONObject> found){
+   try{DatagramPacket packet=new DatagramPacket(buffer,buffer.length);socket.receive(packet);
+    JSONObject reply=new JSONObject(new String(packet.getData(),0,packet.getLength(),"UTF-8"));
+    if(!"sakura".equals(reply.optString("service")))return;
+    String identity=reply.optString("id");
+    URI endpoint=new URI(reply.optString("https"));
+    if(identity.matches("[0-9a-f]{32}")&&reply.optString("fingerprint").matches("[0-9a-f]{64}")&&"https".equals(endpoint.getScheme())&&packet.getAddress().isSiteLocalAddress()
+       &&packet.getAddress().getHostAddress().equals(endpoint.getHost())&&endpoint.getPort()>0&&endpoint.getPort()<=65535
+       &&endpoint.getRawUserInfo()==null&&(endpoint.getPath()==null||endpoint.getPath().isEmpty())&&endpoint.getQuery()==null&&endpoint.getFragment()==null)found.put(identity,reply);
+   }catch(SocketTimeoutException slow){}catch(Exception ignored){}
+  }
+  // Every usable host on the phone's own subnet, skipping subnets too wide to walk.
+  private java.util.List<String> subnetHosts()throws Exception{
+   java.util.List<String> hosts=new java.util.ArrayList<>();
+   java.util.Enumeration<NetworkInterface> interfaces=NetworkInterface.getNetworkInterfaces();
+   while(interfaces.hasMoreElements()){NetworkInterface nic=interfaces.nextElement();
+    if(!nic.isUp()||nic.isLoopback())continue;
+    for(java.net.InterfaceAddress binding:nic.getInterfaceAddresses()){InetAddress address=binding.getAddress();
+     if(!(address instanceof Inet4Address)||address.isLoopbackAddress()||!address.isSiteLocalAddress())continue;
+     int prefix=binding.getNetworkPrefixLength();if(prefix<24||prefix>30)continue;
+     byte[] raw=address.getAddress();
+     int mine=(raw[0]&0xFF)<<24|(raw[1]&0xFF)<<16|(raw[2]&0xFF)<<8|(raw[3]&0xFF);
+     int base=mine&-1<<(32-prefix),last=base|~(-1<<(32-prefix));
+     for(int candidate=base+1;candidate<last&&hosts.size()<512;candidate++){
+      if(candidate==mine)continue;
+      hosts.add((candidate>>24&0xFF)+"."+(candidate>>16&0xFF)+"."+(candidate>>8&0xFF)+"."+(candidate&0xFF));}}}
+   return hosts;
   }
   private JSONObject authenticate(String address,String credential,String expectedId,String fingerprint)throws Exception{
    setAddress(address,fingerprint);
@@ -218,6 +272,7 @@ public class MainActivity extends Activity {
    for(byte b:random)challenge.append(String.format(java.util.Locale.ROOT,"%02x",b&255));String nonce=challenge.toString();
    // No bearer token is sent until the PC proves possession of the paired secret.
    JSONObject proof=new JSONObject(call("POST","/identity-proof",new JSONObject().put("device_id",prefs().getString("device-id","")).put("endpoint",base).put("nonce",nonce).toString()));
+   if(proof.has("error"))throw new Exception(proof.optString("error","The saved pairing was refused."));
    if(!base.equals(proof.optString("endpoint"))||!PhoneIdentity.verify(secret,expectedId,proof.optString("pc_id"),base,nonce,proof.optString("nonce"),proof.optString("proof")))throw new Exception("PC identity verification failed. Pair again if the PC was reset.");
    token=secret;
    JSONObject state=new JSONObject(call("GET","/state","{}"));
@@ -234,7 +289,7 @@ public class MainActivity extends Activity {
    saveComputers(list);
    return new JSONObject().put("name",record.optString("name","Sakura")).put("edition",state.optString("edition","companion")).toString();
   }
-  @JavascriptInterface public String reconnect(String computerId,String address){
+  public synchronized String reconnect(String computerId,String address){
    try{JSONArray list=computers();JSONObject record=null;
     for(int i=0;i<list.length();i++){JSONObject pc=list.getJSONObject(i);
      if(!computerId.isEmpty()&&computerId.equals(pc.optString("id"))){record=pc;break;}
@@ -249,22 +304,24 @@ public class MainActivity extends Activity {
     for(String candidate:candidates){
      if(candidate==null||candidate.isEmpty())continue;
      try{return accepted(list,record,authenticate(candidate,credential,record.optString("id",""),fingerprint),candidate);}catch(Exception offline){token="";}}
-    JSONArray found=discover(1800);
+    JSONArray found=discover(3600);String refusal="";
     for(int i=0;i<found.length();i++){JSONObject beacon=found.getJSONObject(i);
      if(!record.optString("id","").isEmpty()&&!record.getString("id").equals(beacon.optString("id")))continue;
      try{JSONObject state=authenticate(beacon.getString("https"),credential,record.optString("id",""),fingerprint);
       if(!state.optString("pc_id","").equals(beacon.optString("id")))throw new Exception("That PC is not the one this phone paired with.");
       return accepted(list,record,state,beacon.getString("https"));
-     }catch(Exception refused){token="";}}
+     }catch(Exception refused){token="";refusal=refused.getMessage()==null?"The saved pairing was refused.":refused.getMessage();}}
+    if(!refusal.isEmpty())return new JSONObject().put("error","Sakura was found, but reconnect failed: "+refusal+" Use New device and the PC's current pairing code if this pairing is old.").toString();
     token="";return new JSONObject().put("error","Sakura was not found on this network. Turn on Connect to Phone in PC Settings, then try again.").toString();
    }catch(Exception error){token="";return error(error);}
   }
-  @JavascriptInterface public String connect(String address,String code,String fingerprint){
+  public synchronized String connect(String address,String code,String fingerprint){
    try{setAddress(address,fingerprint);String id=prefs().getString("device-id","");if(id.isEmpty()){id=java.util.UUID.randomUUID().toString();prefs().edit().putString("device-id",id).apply();}
     String response=call("POST","/pair",new JSONObject().put("code",code).put("device_id",id).put("device_name",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL).toString());JSONObject data=new JSONObject(response);
+    if(!data.has("token"))throw new IOException("Pairing was refused. Check the current pairing code.");
     if(data.has("token")){
      String advertised=data.optString("fingerprint","");
-     if(!advertised.matches("[0-9a-f]{64}")||!advertised.equals(lastFingerprint))throw new Exception("The PC did not prove the certificate it presented. Pair again.");
+     if(!advertised.matches("[0-9a-f]{64}")||!advertised.equals(pin))throw new Exception("The PC did not prove the certificate it presented. Pair again.");
      if(!pin.isEmpty()&&!pin.equals(advertised))throw new Exception("The PC's certificate changed since it was found. Check your Wi-Fi and try again.");
      pin=advertised;token=data.getString("token");String identity=data.optString("id","");JSONArray old=computers(),list=new JSONArray();
      for(int i=0;i<old.length();i++){JSONObject pc=old.getJSONObject(i);if(!identity.isEmpty()&&identity.equals(pc.optString("id")))continue;if(!base.equals(pc.optString("address")))list.put(pc);}
@@ -272,7 +329,7 @@ public class MainActivity extends Activity {
      if(!identity.isEmpty())saved.put("id",identity);
      list.put(saved);saveComputers(list);}
     return response;
-   }catch(Exception error){pin="";return error(error);}
+   }catch(Exception error){stopTrackingSender();base="";token="";pin="";return error(error);}
   }
   @JavascriptInterface public void trackingStateAsync(String id){new Thread(()->{try{complete(id,call("GET","/state","{}"));}catch(Exception e){complete(id,error(e));}},"SakuraTrackingState").start();}
   @JavascriptInterface public void trackingFrameAsync(String id,String body){
@@ -281,31 +338,36 @@ public class MainActivity extends Activity {
     complete(id,call("POST","/frame",body));
    }catch(Exception error){complete(id,error(error));}},"SakuraTrackingUpload").start();
   }
-  @JavascriptInterface public String request(String method,String path,String body){
+  @JavascriptInterface public void requestAsync(String id,String method,String path,String body){
+   new Thread(()->complete(id,request(method,path,body)),"SakuraPcRequest").start();
+  }
+  private String request(String method,String path,String body){
     if(!path.matches("/(state|command|frame|camera|chat|gemini|tools)"))return "{\"error\":\"Unsupported request\"}";
    try{return call(method,path,body);}catch(Exception error){return error(error);}
   }
   private String call(String method,String path,String body)throws Exception{
-   if(base.isEmpty())throw new Exception("Connect to your PC first.");
-   HttpURLConnection connection=(HttpURLConnection)new URL(base+path).openConnection();connection.setInstanceFollowRedirects(false);
-   if(connection instanceof javax.net.ssl.HttpsURLConnection){javax.net.ssl.HttpsURLConnection secure=(javax.net.ssl.HttpsURLConnection)connection;secure.setSSLSocketFactory(PcTls.factory(pin));secure.setHostnameVerifier(PcTls.verifier());}
+   final String requestBase,requestPin,requestToken;
+   synchronized(this){requestBase=base;requestPin=pin;requestToken=token;}
+   if(requestBase.isEmpty())throw new Exception("Connect to your PC first.");
+   HttpURLConnection connection=(HttpURLConnection)new URL(requestBase+path).openConnection();connection.setInstanceFollowRedirects(false);
+   if(connection instanceof javax.net.ssl.HttpsURLConnection){javax.net.ssl.HttpsURLConnection secure=(javax.net.ssl.HttpsURLConnection)connection;secure.setSSLSocketFactory(PcTls.factory(requestPin));secure.setHostnameVerifier(PcTls.verifier());}
    connection.setConnectTimeout(path.equals("/frame")?1000:5000);connection.setReadTimeout(path.equals("/frame")?1000:path.equals("/chat")?120000:10000);connection.setRequestMethod(method);
-   connection.setRequestProperty("Content-Type","application/json");if(!token.isEmpty())connection.setRequestProperty("Authorization","Bearer "+token);
+   connection.setRequestProperty("Content-Type","application/json");if(!requestToken.isEmpty())connection.setRequestProperty("Authorization","Bearer "+requestToken);
    try{if(method.equals("POST")){connection.setDoOutput(true);try(OutputStream output=connection.getOutputStream()){output.write(body.getBytes("UTF-8"));}}
     int status=connection.getResponseCode();
     if(connection instanceof javax.net.ssl.HttpsURLConnection){
-     lastFingerprint=PcTls.presented(connection);
-     if(!pin.isEmpty()&&!pin.equals(lastFingerprint))throw new IOException("The PC's certificate does not match the saved pairing. Check your Wi-Fi.");
+     String presentedFingerprint=PcTls.presented(connection);
+     if(!requestPin.equals(presentedFingerprint))throw new IOException("The PC's certificate does not match the saved pairing. Check your Wi-Fi.");
     }
     InputStream input=status<400?connection.getInputStream():connection.getErrorStream();if(input==null)throw new IOException("PC connection failed.");
     ByteArrayOutputStream output=new ByteArrayOutputStream();try(InputStream stream=input){byte[] buffer=new byte[8192];int n;while((n=stream.read(buffer))!=-1){output.write(buffer,0,n);if(output.size()>2000000)throw new IOException("Response too large");}}return output.toString("UTF-8");
    }finally{connection.disconnect();}
   }
-  private String error(Exception error){try{return new JSONObject().put("error",error.getMessage()).toString();}catch(Exception ignored){return "{}";}}
+  private String error(Exception error){try{String message=error.getMessage();return new JSONObject().put("error",message==null||message.isEmpty()?"PC connection failed. Please search again and use the current pairing code.":message).toString();}catch(Exception ignored){return "{\"error\":\"PC connection failed.\"}";}}
  }
- @Override protected void onPause(){super.onPause();stopTrackingSender();microphoneGeneration++;if(microphone!=null)microphone.pause();boolean locationPrompt=(locations!=null&&locations.awaitingPermission)||(microphone!=null&&microphone.permissionPending)||wakePermissionPending;if(!locationPrompt){phoneForeground=false;if(locations!=null)locations.stop();}if(web!=null)web.evaluateJavascript("window.stopPhoneTracking?.();window.stopPhoneVision?.();window.sakuraStopLocalTracking?.();"+(locationPrompt?"":"window.sakuraLocalPause?.()"),null);}
- @Override protected void onStop(){super.onStop();if(microphone!=null){microphone.stop();microphone.state(false,"Microphone off");}phoneForeground=false;WakeService.busy(false);if(web!=null){web.onPause();web.pauseTimers();}if(locations!=null)locations.stop();}
+ @Override protected void onPause(){super.onPause();stopTrackingSender();microphoneGeneration++;if(microphone!=null)microphone.pause();boolean locationPrompt=(locations!=null&&locations.awaitingPermission)||(microphone!=null&&microphone.permissionPending)||wakePermissionPending||cameraRequest!=null;if(!locationPrompt){phoneForeground=false;if(locations!=null)locations.stop();}if(web!=null&&cameraRequest==null)web.evaluateJavascript("window.stopPhoneTracking?.();window.stopPhoneVision?.();window.sakuraStopLocalTracking?.();"+(locationPrompt?"":"window.sakuraLocalPause?.()"),null);}
+ @Override protected void onStop(){super.onStop();if(microphone!=null){microphone.stop();microphone.state(false,"Microphone off");}phoneForeground=false;rendererCameraAllowed=false;WakeService.busy(false);if(web!=null){web.onPause();web.pauseTimers();}if(locations!=null)locations.stop();}
  @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==71){String job=modelImportJob;modelImportJob=null;if(job==null)return;if(result!=RESULT_OK||data==null){new Bridge().complete(job,new Bridge().error(new Exception("Import cancelled.")));return;}android.net.Uri uri=data.getData();new Thread(()->{try{String name="model";try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)){if(cursor!=null&&cursor.moveToFirst())name=cursor.getString(0);}try(InputStream input=getContentResolver().openInputStream(uri)){if(input==null)throw new IOException("Cannot open the selected file.");new Bridge().complete(job,PhoneModelImport.importModel(input,name,new File(getFilesDir(),"models")).toString());}}catch(Exception e){new Bridge().complete(job,new Bridge().error(e));}},"SakuraModelImport").start();return;}if(request==4){dictationPending=false;WakeService.pauseManual(false);}if(request==4&&result==RESULT_OK&&data!=null){java.util.ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);if(words!=null&&!words.isEmpty())web.evaluateJavascript("window.sakuraDictation?.("+JSONObject.quote(words.get(0))+")",null);}}
  @Override protected void onResume(){super.onResume();phoneForeground=true;if(web!=null){web.resumeTimers();web.onResume();}if(microphone!=null)microphone.resume();if(calls!=null)calls.resume();if(web!=null)web.evaluateJavascript("window.sakuraResume?.()",null);}
- @Override protected void onDestroy(){stopTrackingSender();if(current.get()==this)current.clear();if(microphone!=null)microphone.stop();if(calls!=null)calls.close();if(web!=null){web.removeJavascriptInterface("Sakura");web.destroy();}super.onDestroy();}
+ @Override protected void onDestroy(){stopTrackingSender();if(current.get()==this)current.clear();if(microphone!=null)microphone.stop();if(calls!=null)calls.close();if(web!=null){web.removeJavascriptInterface("_SakuraGateway");web.destroy();}super.onDestroy();}
 }

@@ -97,6 +97,10 @@ const {chromium}=require('playwright');
    assert.equal(await page.locator('.companion-shortcut-settings').isVisible(),false,'Companion shortcut is omitted in VTuber mode');
    assert.equal(await page.locator('.studio-shortcut-settings').isVisible(),true);
    await page.screenshot({path:`audit-results/vtuber-ui-video/general-${width}x${height}.png`});
+   await page.evaluate(()=>{const event=new CustomEvent('sakura-open-phone-panel',{cancelable:true});window.dispatchEvent(event);window.phonePanelHandled=event.defaultPrevented;});
+   assert.equal(await page.evaluate(()=>window.phonePanelHandled),true);
+   assert.equal(await page.locator('#settings-modal').isVisible(),false,'Connect to Phone hides General settings');
+   assert.equal(await page.locator('[data-studio-content="phone"] #phone-link-code').isVisible(),true,'Connect to Phone shows the code inside the phone panel');
    await page.keyboard.press('Escape');
   }
   await page.evaluate(()=>document.body.classList.remove('tracking-only'));await page.waitForFunction(()=>!document.body.classList.contains('studio-ui-active'));

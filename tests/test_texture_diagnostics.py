@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from fastapi.testclient import TestClient
+from local_client import TestClient
 from PIL import Image
 from app import app
 

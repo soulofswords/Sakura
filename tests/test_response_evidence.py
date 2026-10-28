@@ -1,3 +1,4 @@
+from local_client import local_request
 import json
 import tempfile
 import unittest
@@ -182,7 +183,7 @@ class EvidenceEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_threshold_cannot_be_saved(self):
         import app as server
         for value in (True,'0.9',-1,2,float('nan'),float('inf')):
-            result=await server.update_app_settings(Mock(headers={}),{'evidence_confidence_threshold':value})
+            result=await server.update_app_settings(local_request(),{'evidence_confidence_threshold':value})
             self.assertEqual(result.status_code,400)
 
 

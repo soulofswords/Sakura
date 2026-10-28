@@ -8,6 +8,12 @@
 /* Keep an outstanding approval prominent while the task details scroll. */
 #review.action{position:sticky;top:8px;z-index:8;box-shadow:0 8px 28px #0009;border-color:var(--ag-action-line)}
 </style>
+<link rel="stylesheet" href="/static/css/agent-studio.css?v=1">
+<script src="/static/js/agent-services.js?v=schedule-nav1"></script>
+<script src="/static/js/agent-workspace.js?v=colibri-qwen36-2"></script>
+<script src="/static/js/agent-studio.js?v=telegram-nav2"></script>
+<script src="/static/js/agent-memory.js?v=1"></script>
+<script src="/static/js/agent-extensions.js?v=1"></script>
 <script>
 /* Follow the main app's appearance choice; the workspace is a same-origin frame. */
 (function(){
@@ -21,10 +27,10 @@
  fetch('/api/settings').then(r=>r.ok?r.json():null).then(data=>{if(data&&modes.includes(data.ui_theme)&&data.ui_theme!==mode){mode=data.ui_theme;try{localStorage.setItem('sakura_ui_theme',mode);}catch(_){}apply();}}).catch(()=>{});
 })();
 </script></head><body>
-<header><div><h1>🌸 Sakura Agent</h1><p>Plan and complete tasks. Review each step and approve file changes before they run.</p></div><button id="calendar-open" class="link" type="button">Google account</button><button id="companion-mode" class="link" type="button">Companion mode</button><span class="badge">Local approval required</span></header>
+<header><div><span class="agent-eyebrow">SAKURA STUDIO / AGENT</span><h1>Your workspace</h1><p>Tell Sakura what you want to accomplish.</p></div><button id="calendar-open" class="link" type="button">Google account</button><button id="companion-mode" class="link" type="button">Companion mode</button><span class="badge">Local approval required</span></header>
 <p id="status" role="status">Ready. No tool runs until you approve its exact action.</p>
 <div class="grid"><aside>
-<section class="card" id="google-calendar"><h2>Google account</h2><div id="calendar-state" class="muted"></div>
+<section class="card" id="google-calendar" hidden><h2>Google account</h2><div id="calendar-state" class="muted"></div>
 <details id="calendar-setup"><summary>Set up Google sign-in</summary>
 <p>Sakura needs a registered Google desktop app before account sign-in can work. This is a one-time developer setup. Your Gemini API key cannot connect your calendar.</p>
 <ol><li>In <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener noreferrer">Google Cloud</a>, select your project and enable Google Calendar API.</li><li>Configure the app audience in Google Auth Platform. If the app is in testing, add your Google account as a test user.</li><li>In <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener noreferrer">Google Auth Platform → Clients</a>, create a Desktop app client and download its JSON file.</li></ol>
@@ -42,7 +48,7 @@
 <label>Location (optional)<input id="event-location" maxlength="1000"></label><label>Notes (optional)<textarea id="event-description" maxlength="8000"></textarea></label>
 <div class="row"><button id="calendar-propose">Review new event</button></div></details>
 </section>
-<section class="card"><h2>Reusable skills</h2><p>Save procedures for repeated tasks. Skills guide planning; each action still needs approval. Save procedures only, not passwords or personal document contents.</p><div id="skills-list"></div>
+<section class="card" id="agent-skills"><h2>Reusable skills</h2><p>Save procedures for repeated tasks. Skills guide planning; each action still needs approval. Save procedures only, not passwords or personal document contents.</p><p class="muted">Workflow instructions do not install third-party services. Each skill lists its requirements.</p><label>Learn selected completed task as<input id="learn-skill-name" maxlength="60" placeholder="my-reusable-workflow"></label><button id="learn-completed-skill" type="button">Learn selected completed task</button><div id="skills-list"></div>
 <details><summary>Create a skill</summary><label>Name<input id="skill-name" maxlength="60" placeholder="weekly-report"></label><label>Procedure<textarea id="skill-instructions" maxlength="4000" placeholder="Read the selected source documents, draft a report using only their facts, then verify the saved output."></textarea></label><button id="skill-save" type="button">Save procedure</button></details></section>
 <section class="card"><h2>Connections</h2><p>Connect servers that expose MCP tools. Saving a server does not execute it; discovery needs approval.</p><div id="connections"></div>
 <details><summary>Add MCP server</summary><label>Name<input id="connection-name" maxlength="80" placeholder="My work apps"></label>
@@ -51,7 +57,17 @@
 <div id="stdio-fields" hidden><label>Executable<input id="mcp-command" placeholder="C:\path\to\server.exe"></label><label>Arguments (JSON array)<textarea id="mcp-args">[]</textarea></label><label>Secret environment variables (JSON object)<textarea id="mcp-env" placeholder='{"API_KEY":"..."}'></textarea></label><p class="notice">Approving discovery starts this process with your user permissions. Install and review the server first.</p></div>
 <div class="row"><button id="save-connection">Save connection</button></div></details>
 </section>
-<section class="card"><h2>LinkedIn</h2><div id="linkedin-state" class="muted"></div>
+<section class="card" id="agent-telegram"><h2>Messaging gateway · Telegram</h2>
+<p>Talk to Sakura's selected AI from Telegram while this PC is awake and Sakura is open. A cloud model sends your message to that provider. The gateway polls Telegram over HTTPS; no port forwarding is needed. Each message is independent — no desktop history, PC tools or approvals are shared.</p>
+<p>Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer noopener">@BotFather</a>, paste its token, then send the bot any message. It replies with your chat ID; add that ID here so only you can use it.</p>
+<div id="telegram-state" class="muted">Not configured.</div>
+<label>Bot token<input id="telegram-token" type="password" autocomplete="off" placeholder="Leave blank to keep the saved token"></label>
+<label>Allowed chat IDs, comma separated<input id="telegram-chat-ids" autocomplete="off" placeholder="123456789"></label>
+<label><input id="telegram-enabled" type="checkbox" style="width:auto"> Run the Telegram gateway while Sakura is open</label>
+<label><input id="telegram-voice" type="checkbox" style="width:auto"> Transcribe allowed senders’ voice memos locally (ffmpeg and loaded speech recognition required; transcript goes to the selected AI)</label>
+<div class="row"><button id="telegram-save" type="button">Save gateway settings</button><button id="telegram-clear" type="button" class="reject">Remove saved token</button></div>
+</section>
+<section class="card" hidden><h2>LinkedIn</h2><div id="linkedin-state" class="muted"></div>
 <p>Profile reading and approved posts use LinkedIn’s API. Inbox and job submissions require an MCP provider with those granted capabilities.</p>
 <details><summary>Set up LinkedIn sign-in</summary>
 <p>Create your own app in the <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noreferrer noopener">LinkedIn Developer Portal</a>. Enable Sign In with LinkedIn using OpenID Connect and Share on LinkedIn. Register this exact callback:</p><pre id="callback"></pre>
@@ -60,9 +76,9 @@
 <div class="row"><button id="linkedin-save">Save app settings</button></div></details>
 <div class="row"><button id="linkedin-connect">Connect LinkedIn</button><button id="linkedin-disconnect">Disconnect</button></div>
 </section>
-<section class="card"><h2>Tasks</h2><p>Agent task history is saved on this PC so you can resume after closing Sakura. Pending approvals are cancelled when the app restarts. Clear history removes these saved tasks.</p><div id="tasks"></div><div class="row"><button id="refresh">Refresh connections & tasks</button><button id="clear-tasks" class="reject">Clear task history</button></div></section>
+<section class="card" id="agent-history"><h2>Session history</h2><p>The latest 30 tasks can be resumed. Search keeps up to 1,000 bounded session records on this PC, including older tasks. Archived records are read-only; approvals never survive a restart. Clear history removes both stores.</p><label>Search past sessions<input id="history-query" maxlength="300" placeholder="Keywords from a goal or result"></label><button id="history-search" type="button">Search sessions</button><div id="history-results" aria-live="polite"></div><div id="history-record"></div><h3>Recent tasks</h3><div id="tasks"></div><div class="row"><button id="refresh">Refresh connections & tasks</button><button id="clear-tasks" class="reject">Clear task history</button></div></section>
 </aside><main>
-<section class="card"><h2>New workflow</h2><label>Goal<textarea id="goal" placeholder="Read my CV, compare it with the job description, and draft a LinkedIn post. Ask before accessing files or publishing."></textarea></label>
+<section class="card" id="agent-compose"><h2>Start a task</h2><label>Goal<textarea id="goal" placeholder="Read my CV, compare it with the job description, and draft a LinkedIn post. Ask before accessing files or publishing."></textarea></label>
 <label>Workspace folder on this PC<input id="workspace" placeholder="C:\Users\you\Documents\JobSearch"></label>
 <label>Planning AI<select id="planner-provider"><option value="ollama">Local AI</option><option value="gemini">Google Gemini API</option></select></label>
 <label>Reusable skill<select id="selected-skill"><option value="">No skill</option></select></label>
@@ -71,10 +87,10 @@
 <label><input id="auto-plan" type="checkbox" checked style="width:auto"> Work through read-only steps (folder listings and file reads) on their own. Web requests and anything that writes a file, runs a command, posts or changes your calendar still stops for your approval.</label>
 <div class="row"><button id="create">Create task</button><button id="plan">Suggest next step</button><button id="cancel">Cancel task</button></div></section>
 <section id="review" class="card" hidden></section>
-<section class="card"><h2>Task progress</h2><div id="progress">Select or create a task to begin.</div></section>
-<section class="card"><details><summary>Manual tool proposal</summary><p>Choose a tool and exact JSON arguments. This still requires separate approval. Use this if the selected model cannot produce a valid plan.</p>
+<section class="card" id="agent-task-progress"><h2>Activity & results</h2><div id="progress">Select or create a task to begin.</div></section>
+<section class="card" id="agent-tool-proposal"><details><summary>Advanced · propose an exact tool action</summary><p>Choose a tool and exact JSON arguments. This still requires separate approval. Use this if the selected model cannot produce a valid plan.</p>
 <label>Tool<select id="tool"></select></label><pre id="tool-schema"></pre>
-<label>Arguments<textarea id="tool-args">{}</textarea></label><button id="propose">Create approval request</button></details></section>
+<label>Arguments<textarea id="tool-args">{}</textarea></label><button id="propose">Create approval request</button></details><details><summary>Command allow-list · this app session</summary><p>Only commands you explicitly approve with the allow-list checkbox can repeat. Matching includes the exact command, folder, workspace identity and runner. Restarting Sakura revokes all entries.</p><div id="command-permissions"></div></details></section>
 </main></div>
 <script>
 const token='__AGENT_TOKEN__';
@@ -96,16 +112,19 @@ function renderReview(action){
  const box=$('review');box.replaceChildren();box.hidden=!action;box.classList.toggle('action',action?.status==='pending');if(!action)return;
  box.append(node('h2','Review action'),node('span',action.status,'badge'),node('h3',action.tool),node('p',action.reason||'You requested this action.'),node('pre',JSON.stringify(action.arguments,null,2)));
  if(action.preview)box.append(node('pre',JSON.stringify(action.preview,null,2)));
+ if(action.permission_error)box.append(node('p','The action ran, but it was not remembered: '+action.permission_error,'notice'));
  box.append(node('p','This approval applies once to this exact action. Changes require a new review. Its result can be sent to your selected AI provider to plan the next step.','notice'));
  if(action.status==='pending'){
+  const remember=node('input');remember.type='checkbox';remember.style.width='auto';remember.id='remember-command';
+  if(action.tool==='shell.run'){const scope=({'docker':'inside that container','ssh':'on that remote host'})[action.arguments&&action.arguments.backend]||'in this folder';const label=node('label');label.append(remember,document.createTextNode(' Allow this exact command '+scope+' for this app session. Future runs may read changed scripts or inputs.'));box.append(label);}
   const row=node('div',undefined,'row');
   for(const [title,approve,cls]of [['Approve & run',true,'approve'],['Reject',false,'reject']])row.append(button(title,async()=>{
-   const result=await api('actions/'+action.id+'/decision',{approve});renderReview(result.action);
+   const result=await api('actions/'+action.id+'/decision',{approve,remember:approve&&remember.checked});renderReview(result.action);
    if(result.run){selected=result.run.id;current=result.run;renderRun(current);}await refresh();
    if(!approve)announce('No problem. I will leave that step alone.');
    else if(result.action.status==='completed')announce(result.action.tool==='files.write'?'The new draft is ready. I left your original untouched.':'That step finished successfully.');
    else if(result.action.result?.error)announce('That step did not finish. '+result.action.result.error.slice(0,180));
-   if(approve&&result.run?.status==='ready'&&$('auto-plan').checked){
+   if(approve&&result.run?.status==='ready'&&!result.run?.automation_id&&$('auto-plan').checked){
     $('status').textContent='Action finished. Suggesting the next step; execution still needs approval…';
     const next=await api('tasks/'+result.run.id+'/plan',selectedPlanner());renderRun(next);await refresh();
     announce(runAnnouncement(next));
@@ -119,8 +138,10 @@ function renderRun(run){
  current=run;const progress=$('progress');progress.replaceChildren();if(!run)return;
  progress.append(node('h3',run.goal),node('p','Workspace: '+run.workspace),node('span',run.status,'badge'));
  if(run.summary)progress.append(node('p',run.summary));
+ if(run.parent_id)progress.append(node('p','Child task · parent '+run.parent_id));
+ for(const child of state.runs.filter(item=>item.parent_id===run.id))progress.append(button('Child: '+child.goal+' · '+child.status,async()=>{selected=child.id;renderReview(null);renderRun(await api('tasks/'+child.id));}));
  for(const step of run.steps){
-  const detail=node('details');detail.append(node('summary',step.tool+' · '+(step.auto?'auto-read · '+step.status:step.status)),node('pre',JSON.stringify(step.arguments,null,2)));
+  const detail=node('details');detail.append(node('summary',step.tool+' · '+(step.auto?'auto-approved · '+step.status:step.status)),node('pre',JSON.stringify(step.arguments,null,2)));
   if(step.result)detail.append(node('pre',JSON.stringify(step.result,null,2)));progress.append(detail);
  }
  const pending=run.steps.findLast(s=>s.status==='pending');if(pending)renderReview(pending);
@@ -131,41 +152,67 @@ function renderTools(){
  if(state.tools.some(t=>t.name===previous))$('tool').value=previous;renderSchema();
 }
 function renderSchema(){const tool=state.tools.find(t=>t.name===$('tool').value);$('tool-schema').textContent=tool?tool.description+'\n'+JSON.stringify(tool.inputSchema,null,2):'No tools discovered.';}
+let telegramFormLoaded=false;
+async function refreshTelegram(syncForm=false){
+ const t=await api('telegram');
+ $('telegram-state').textContent=(t.token_set?'Token saved. ':'No token saved. ')+(t.running?'Gateway is polling Telegram.':'Gateway is stopped.')+(t.chat_ids.length?' Allowed chat IDs: '+t.chat_ids.join(', '):' No chat ID is allowed yet, so the bot only tells people their ID.')+(t.last_error?' Last error: '+t.last_error:'');
+ if(syncForm||!telegramFormLoaded){$('telegram-enabled').checked=t.enabled;$('telegram-voice').checked=t.voice_enabled===true;$('telegram-chat-ids').value=t.chat_ids.join(', ');$('telegram-token').value='';telegramFormLoaded=true;}
+}
 async function refresh(){
- state=await api('state');$('connections').replaceChildren();
+ state=await api('state');workspaceUI?.render(state.automations||[],state.library_sync);$('connections').replaceChildren();await refreshTelegram();
  const providers=state.providers||[];const choice=$('planner-provider').value;
  $('planner-provider').replaceChildren();
  for(const item of providers){const option=node('option',item.label+(item.ready?'':' · not configured'));option.value=item.id;option.disabled=!item.ready;$('planner-provider').append(option);}
  if(providers.some(item=>item.id===choice&&item.ready))$('planner-provider').value=choice;
  const active=providers.find(item=>item.id===$('planner-provider').value);
  $('planner-provider-status').textContent=active?(active.ready?'Planning with '+active.label+'.':'Configure this provider in Sakura Settings > AI first.'):'No AI provider is available.';
- for(const item of state.connections){const div=node('div',undefined,'connection');div.append(node('strong',item.name),node('p',item.transport==='http'?item.url:[item.command,...item.args].join(' ')));
+ for(const item of state.connections.filter(item=>item.transport!=='builtin')){const div=node('div',undefined,'connection');div.append(node('strong',item.name),node('p',item.transport==='http'?item.url:[item.command,...item.args].join(' ')));
   const row=node('div',undefined,'row');row.append(button('Discover tools',async()=>renderReview(await api('connections/'+item.id+'/discover',{}))),button('Remove',async()=>{await api('connections/'+item.id,undefined,'DELETE');await refresh();}));div.append(row);$('connections').append(div);}
  const li=state.linkedin;$('linkedin-state').textContent=li.connected?'Connected'+(li.profile.name?' as '+li.profile.name:' · approve a profile read to identify account'):li.configured?'Configured · sign-in required':'Not connected';
  const calendar=state.calendar||{};$('calendar-state').textContent=calendar.connected?(calendar.workspace_connected?'Connected · Calendar, Drive, Docs and Sheets':'Connected · Calendar only; reconnect to enable files'):calendar.configured?'Ready to sign in':'One-time Google app setup required. Expand the setup below.';
  $('calendar-setup').open=!calendar.configured;
+ serviceUI.render(state);
+ memoryUI?.render(state.learning);
+ $('command-permissions').replaceChildren();
+ for(const item of state.command_permissions||[]){const entry=node('div',undefined,'connection');entry.append(node('pre',item.command+'\n'+item.cwd),button('Revoke command permission',async()=>{await api('permissions/'+item.id,undefined,'DELETE');await refresh();}));$('command-permissions').append(entry);}
+ if(!state.command_permissions?.length)$('command-permissions').append(node('p','No commands are allow-listed.'));
  const skillChoice=$('selected-skill').value;$('selected-skill').replaceChildren(new Option('No skill',''));$('skills-list').replaceChildren();
- for(const skill of state.skills||[]){$('selected-skill').append(new Option(skill.name,skill.name));const entry=node('details');entry.append(node('summary',skill.name),node('pre',skill.instructions),button('Delete skill',async()=>{await api('skills/'+encodeURIComponent(skill.name),undefined,'DELETE');await refresh();}));$('skills-list').append(entry);}
+ for(const skill of state.skills||[]){$('selected-skill').append(new Option(skill.title||skill.name,skill.name));const entry=node('details');entry.append(node('summary',skill.title||skill.name),...(skill.requirements?[node('p','Requires: '+skill.requirements)]:[]),node('pre',skill.instructions),button('Delete skill',async()=>{await api('skills/'+encodeURIComponent(skill.name),undefined,'DELETE');await refresh();}));$('skills-list').append(entry);}
  if((state.skills||[]).some(item=>item.name===skillChoice))$('selected-skill').value=skillChoice;
  $('tasks').replaceChildren();for(const run of [...state.runs].reverse())$('tasks').append(button(run.goal.slice(0,70)+' · '+run.status,async()=>{selected=run.id;renderReview(null);renderRun(await api('tasks/'+run.id));}));
  renderTools();if(selected){const run=state.runs.find(r=>r.id===selected);if(run)renderRun(run);}
 }
 $('transport').onchange=()=>{$('http-fields').hidden=$('transport').value!=='http';$('stdio-fields').hidden=$('transport').value!=='stdio';};
+$('learn-completed-skill').onclick=()=>perform(async()=>{if(!selected)throw Error('Select a successfully completed task from Task history first.');await api('skills/learn',{run_id:selected,name:$('learn-skill-name').value.trim()});$('learn-skill-name').value='';await refresh();});
+$('goal').addEventListener('input',()=>{const match=$('goal').value.match(/^\/(brag|learn)\b/);if(match&&[...$('selected-skill').options].some(option=>option.value===match[1]))$('selected-skill').value=match[1];});
 $('skill-save').onclick=()=>perform(async()=>{await api('skills',{name:$('skill-name').value.trim(),instructions:$('skill-instructions').value});$('skill-name').value='';$('skill-instructions').value='';await refresh();});
 $('planner-provider').onchange=()=>{try{localStorage.setItem('sakura-agent-planner',$('planner-provider').value);}catch{}const item=(state.providers||[]).find(provider=>provider.id===$('planner-provider').value);$('planner-provider-status').textContent=item?'Planning with '+item.label+'.':'No AI provider is available.';};
 $('save-connection').onclick=()=>perform(async()=>{
  const data={name:$('connection-name').value,transport:$('transport').value,url:$('mcp-url').value,token:$('mcp-token').value,command:$('mcp-command').value,args:JSON.parse($('mcp-args').value||'[]'),env:JSON.parse($('mcp-env').value||'{}')};
  await api('connections',data);$('mcp-token').value='';$('mcp-env').value='';await refresh();
 });
-$('create').onclick=()=>perform(async()=>{const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value,auto_continue:$('auto-plan').checked===true});selected=run.id;renderReview(null);renderRun(run);announce('All right. I will read what I need on my own and stop for your approval before anything changes.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
+$('create').onclick=()=>perform(async()=>{if(await extensions?.slash($('goal').value))return;const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value,auto_continue:$('auto-plan').checked===true});selected=run.id;renderReview(null);renderRun(run);announce('All right. I will read what I need on my own and stop for your approval before anything changes.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
  $('plan').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderReview(null);const planned=await api('tasks/'+selected+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));await refresh();});
 $('propose').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderRun(await api('tasks/'+selected+'/propose',{tool:$('tool').value,arguments:JSON.parse($('tool-args').value)}));await refresh();});
 $('cancel').onclick=()=>perform(async()=>{if(!selected)return;renderReview(null);renderRun(await api('tasks/'+selected+'/cancel',{}));await refresh();});
-$('clear-tasks').onclick=()=>perform(async()=>{if(!window.confirm('Clear all saved Agent tasks from this PC? This cannot be undone.'))return;await api('tasks',undefined,'DELETE');selected=null;current=null;renderReview(null);$('progress').textContent='Select or create a task to begin.';await refresh();});
+$('clear-tasks').onclick=()=>perform(async()=>{if(!window.confirm('Clear all saved Agent tasks and the searchable archive from this PC? This cannot be undone.'))return;await api('tasks',undefined,'DELETE');selected=null;current=null;renderReview(null);$('progress').textContent='Select or create a task to begin.';$('history-results').replaceChildren();$('history-record').replaceChildren();await refresh();});
+async function searchHistory(query){
+ const data=await api('history/search?q='+encodeURIComponent(query));const box=$('history-results');box.replaceChildren();$('history-record').replaceChildren();
+ box.append(node('p',data.results.length+' matching sessions'));
+ for(const item of data.results){const entry=node('div',undefined,'connection');entry.append(button(item.goal+' · '+item.status,async()=>{const record=await api('history/'+encodeURIComponent(item.id));$('history-record').replaceChildren(node('h3','Archived session · read only'),node('pre',JSON.stringify(record,null,2)));}),node('p',item.snippet));box.append(entry);}
+}
+$('history-search').onclick=()=>perform(()=>searchHistory($('history-query').value));
+$('history-query').onkeydown=event=>{if(event.key==='Enter'){$('history-search').click();event.preventDefault();}};
 $('refresh').onclick=()=>perform(refresh);$('tool').onchange=renderSchema;
 $('callback').textContent=location.origin+'/api/agent/linkedin/callback';
 $('linkedin-save').onclick=()=>perform(async()=>{await api('linkedin/configure',{client_id:$('linkedin-client').value.trim(),client_secret:$('linkedin-secret').value});$('linkedin-secret').value='';await refresh();});
 $('linkedin-connect').onclick=()=>perform(async()=>{const data=await api('linkedin/connect',{});location.assign(data.url);});
+$('telegram-save').onclick=()=>perform(async()=>{
+ const submitted=$('telegram-token').value;$('telegram-token').value='';
+ await api('telegram',{enabled:$('telegram-enabled').checked,chat_ids:$('telegram-chat-ids').value,token:submitted,voice_enabled:$('telegram-voice').checked});
+ await refreshTelegram(true);announce('Telegram gateway settings saved.');
+});
+$('telegram-clear').onclick=()=>perform(async()=>{await api('telegram',{enabled:false,chat_ids:'',clear_token:true});await refreshTelegram(true);});
 $('linkedin-disconnect').onclick=()=>perform(async()=>{await api('linkedin/disconnect',{});await refresh();});
 $('calendar-client-file').onchange=()=>perform(async()=>{
  const input=$('calendar-client-file'),file=input.files?.[0];if(!file)return;
@@ -200,5 +247,11 @@ async function loadAgenda(){
  $('agenda-status').textContent=data.events.length+' upcoming event'+(data.events.length===1?'':'s')+' · '+(data.calendar||'primary calendar');
  for(const event of data.events){const row=node('div',undefined,'connection');row.append(node('strong',event.summary||'(Untitled event)'),node('p',displayEventTime(event.start)+(event.end?' – '+displayEventTime(event.end):'')));if(event.location)row.append(node('p',event.location));box.append(row);}
 }
+const workspaceUI=window.installAgentWorkspace?.({api,perform,refresh,renderRun,selectedRun:()=>current,announce});
+const serviceUI=window.installAgentServices({api,perform,refresh,review:renderReview});
+const memoryUI=window.installAgentMemory?.({api,perform,refresh});
+window.searchAgentHistory=searchHistory;
+const extensions=window.installAgentExtensions?.({api,perform,refresh,renderRun,selectRun:id=>{selected=id;if(!id){current=null;renderReview(null);}},currentRun:()=>current,planner:selectedPlanner,token,node,button});
+window.installAgentStudio?.();
 perform(refresh);
 </script></body></html>
