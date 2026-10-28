@@ -20,7 +20,7 @@ def repair(directory, apply=False):
     prepared=json.loads(checkpoint.read_text(encoding='utf-8'));changes=[]
     for entry in prepared.values():
         source=entry.get('variant_model') or entry.get('preview_model','').removeprefix('pmx/')
-        if source not in inventory['files']:continue
+        if not source:continue
         name=pmx_library_name(source,siblings[str(Path(source).parent)]>1)
         if len(name)>200:raise ValueError('A full model path exceeds the current catalogue limit; keep the old metadata and review it.')
         if name!=entry['name']:
