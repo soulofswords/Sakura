@@ -48,8 +48,11 @@ Additional requested UI integration:
 - Companion has a dedicated Background & stage items toolbar button.
 - Both model panels include MikuMikuDance beside PMX Editor. The executable is a
   user-selected local preference, not a developer path baked into distributions.
-  MMD opens normally; use its model Load control to open PMX files. No unsupported
-  PMX command-line import behavior is claimed.
+  The button validates the PMX currently displayed in Sakura, starts a new MMD
+  process, waits for that process's file-drop window, and sends its existing PMX
+  path via WM_DROPFILES. It does not modify the model or overwrite another MMD
+  scene. MMD may show the model's own confirmation dialog. A queued import is
+  reported as a request, not independent proof of a successfully rendered model.
 
 Validation: full Python suite 1,206 passed / 171 subtests; subsequent targeted
 checks 64 passed / 6 subtests after final follow-ups. Native uninstall checks and

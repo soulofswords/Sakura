@@ -189,8 +189,10 @@ class DesktopApi:
     def platform_capabilities(self):
         return {'platform': sys.platform, 'pmx_editor': sys.platform == 'win32','mmd':sys.platform=='win32'}
 
-    def open_mmd(self):
+    def open_mmd(self,model_path):
         from mmd_launcher import find_mmd,open_mmd
+        from pmx_editor import model_file
+        model_file(model_path)
         path=find_mmd(get_settings().get('mmd_path'))
         if path is None:
             win=self.holder.get('window')
@@ -202,7 +204,7 @@ class DesktopApi:
             if path is None:raise ValueError('Choose MikuMikuDance.exe with its Data folder alongside it.')
             from app import save_settings
             save_settings({'mmd_path':str(path)})
-        return open_mmd(str(path))
+        return open_mmd(str(path),model_path)
 
     def install_rvc_runtime(self):
         if sys.platform!='win32':raise RuntimeError('Use setup-rvc-macos.command on macOS.')

@@ -557,8 +557,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (window.pywebview) showEditorButton();
     window.addEventListener('pywebviewready', showEditorButton);
     document.getElementById('mmd-btn').addEventListener('click',async()=>{
-        try{const result=await window.pywebview.api.open_mmd();if(result?.message){if(trackingOnly)alert(result.message);else addMessage(result.message,'sakura');}}
+        if(!selectedPmxPath?.toLowerCase().endsWith('.pmx')){const message='Select a PMX model to open in MikuMikuDance.';if(trackingOnly)alert(message);else addMessage(message,'sakura');return;}
+        const button=document.getElementById('mmd-btn');button.disabled=true;
+        try{await window.pywebview.api.open_mmd(selectedPmxPath);}
         catch(error){const message=`MikuMikuDance: ${error.message||error}`;if(trackingOnly)alert(message);else addMessage(message,'sakura');}
+        finally{button.disabled=false;}
     });
     document.getElementById('rvc-runtime-setup').addEventListener('click',async()=>{
         const status=document.getElementById('rvc-runtime-status');
