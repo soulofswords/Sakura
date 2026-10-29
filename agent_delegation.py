@@ -20,17 +20,21 @@ def execute(runtime,parent,goals,model):
     def work(identifier):
         try:
             selected=copy.copy(model)
-            for _ in range(6):
-                if closed(identifier):
-                    with runtime.lock:
-                        if identifier in runtime.runs:runtime.cancel(identifier)
-                    break
-                state=runtime._plan_once(identifier,selected)
-                if state['status']!='awaiting_approval':break
-                step=state['steps'][-1]
-                if not state.get('auto_continue') or step['tool'] not in READ_TOOLS:break
-                runtime._decide(step['id'],True,auto=True)
-                if closed(identifier) or runtime.state(identifier)['status']!='ready':break
+            # A worker thread inherits no usage context from the parent, so without this
+            # window every child model call would be dropped from the telemetry.
+            with runtime._meter(identifier):
+                for _ in range(6):
+                    if closed(identifier):
+                        with runtime.lock:
+                            if identifier in runtime.runs:runtime.cancel(identifier)
+                        break
+                    if runtime._usage_budget(identifier):break
+                    state=runtime._plan_once(identifier,selected)
+                    if state['status']!='awaiting_approval':break
+                    step=state['steps'][-1]
+                    if not state.get('auto_continue') or step['tool'] not in READ_TOOLS:break
+                    runtime._decide(step['id'],True,auto=True)
+                    if closed(identifier) or runtime.state(identifier)['status']!='ready':break
         except Exception as error:
             with runtime.lock:
                 child=runtime.runs.get(identifier)

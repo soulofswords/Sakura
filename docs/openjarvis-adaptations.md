@@ -39,6 +39,31 @@ planning window. This includes rendering and other GPU processes. It is not
 per-task electricity attribution, total-PC energy, CPU energy or cloud energy.
 Unsupported hardware returns unmeasured. No CPU/GPU/SoC units are mixed.
 
+Follow-up verification (29 October) found two places where a model call was made
+outside any window and silently dropped: delegated child tasks planned on worker
+threads, and the vision or integration call inside an approved tool execution. A
+worker thread inherits no usage context from the parent, so each child now holds its
+own window and is budget-checked between its own planner calls, and approved
+execution is wrapped in a window too. A window never nests inside an already-capture
+thread, so one bill cannot be split across two totals or sample the GPU twice over
+the same seconds; joules therefore stay with the run that held the outer window, and
+delegated children report tokens without their own energy. If the history file is
+busy, the billed window is kept in memory and the deferred write is traced rather
+than allowed to discard a completed action.
+
+### Task history shared by two processes
+
+`desktop-profile/agent-task-history.json` previously used one fixed `.tmp` name, no
+cross-process lock and a blind replace, so a second Sakura process on the same
+profile folder could delete the first one's tasks or leave a half-written file.
+A save now takes the shared state lock, merges with what is already on disk by
+task identity preferring the newer record, and replaces through a uniquely named
+temporary file that is flushed before the rename. A task this session archived away
+from the 30-slot cap stays archived instead of being resurrected by the merge. A
+contended file raises a readable message rather than silently keeping one process's
+view. Cross-instance merging is last-write-wins per task, not a conflict-free
+replicated store; two processes editing the same task can still overwrite each other.
+
 ### Planner loop guard
 
 The planner receives a warning before a fourth identical ordinary action is

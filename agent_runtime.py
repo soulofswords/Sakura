@@ -10,11 +10,13 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 from jsonschema import validate
 from config import BASE_DIR
 from agent_connections import Connections,mcp_request
+from atomic_state import atomic_text,state_lock
 from agent_backends import PROPERTIES as BACKEND_PROPERTIES
 
 
@@ -172,6 +174,12 @@ def _bounded(value,limit):
     return value
 
 
+def _stamp(run):
+    """Sort key that treats a missing or corrupt timestamp as the oldest possible run."""
+    try:return float(run.get('updated_at') or 0)
+    except (TypeError,ValueError):return 0
+
+
 class AgentRuntime:
     def __init__(self,connections=None,store_path=None):
         self.connections=connections or Connections();self.lock=threading.RLock();self.runs={};self.actions={}
@@ -201,6 +209,8 @@ class AgentRuntime:
         from agent_observability import Trace
         self.trace=Trace(self.store_path.parent/'agent-trace.jsonl')
         self.active_runs=set();self.planners={}
+        # Saves merge with the file, so this keeps a deliberately evicted task from reappearing.
+        self.evicted=set()
         from agent_browser import AgentBrowser
         self.browser=AgentBrowser()
         from agent_knowledge import Knowledge
@@ -265,29 +275,51 @@ class AgentRuntime:
             if run.get('status') in ('awaiting_approval','running'):run['status']='ready'
             self.runs[run['id']]=run
         if self.runs:self._save_runs()
+    def _disk_runs(self):
+        """Task records already on disk, oldest first; empty when unreadable."""
+        try:
+            entries=json.loads(self.store_path.read_text(encoding='utf-8')).get('runs',[])
+        except (OSError,ValueError,AttributeError):return []
+        if not isinstance(entries,list):return []
+        return [run for run in entries if isinstance(run,dict) and isinstance(run.get('id'),str) and isinstance(run.get('steps'),list)]
     def _save_runs(self):
         """Persist bounded Agent history locally, excluding ephemeral bindings."""
         self.store_path.parent.mkdir(parents=True,exist_ok=True)
         self.history.save(self.runs.values())
         for run in self.runs.values():
             if run['status'] in ('completed','cancelled'):self.browser.cancel(run['id'])
-        for limit in (MAX_STORE_TEXT,2000):
-            kept=[]
-            for run in list(self.runs.values())[-30:]:
-                from agent_history import public_record
-                item=_bounded(public_record(copy.deepcopy(run)),limit)
-                for step in item.get('steps',[]):
-                    if isinstance(step,dict):
-                        step.pop('bindings',None);step.pop('approval_digest',None);step.pop('schema_hash',None)
-                kept.append(item)
-            while kept and len(json.dumps({'version':1,'runs':kept},ensure_ascii=False).encode('utf-8'))>MAX_STORE_BYTES:
-                # Dropping the oldest transcript beats writing a history file that can
-                # never be read back, or one that grows the app folder without bound.
-                kept.pop(0)
-            if kept or limit==2000:break
-        temp=self.store_path.with_suffix('.tmp')
-        temp.write_text(json.dumps({'version':1,'runs':kept},ensure_ascii=False),encoding='utf-8')
-        temp.replace(self.store_path)
+        from agent_history import public_record
+        local=[public_record(copy.deepcopy(run)) for run in self.runs.values()]
+        try:
+            # A second Sakura process can share this file, so read, merge and replace
+            # it as one cross-process operation instead of overwriting what it wrote.
+            with state_lock(self.store_path):
+                merged={}
+                for source in (self._disk_runs(),local):
+                    for item in source:
+                        identifier=item.get('id')
+                        if not isinstance(identifier,str) or identifier in self.evicted:continue
+                        previous=merged.get(identifier)
+                        if previous and _stamp(previous)>_stamp(item):continue
+                        merged[identifier]=item
+                ordered=sorted(merged.values(),key=_stamp)
+                for limit in (MAX_STORE_TEXT,2000):
+                    kept=[]
+                    for run in ordered[-30:]:
+                        item=_bounded(public_record(copy.deepcopy(run)),limit)
+                        for step in item.get('steps',[]):
+                            if isinstance(step,dict):
+                                step.pop('bindings',None);step.pop('approval_digest',None);step.pop('schema_hash',None)
+                        kept.append(item)
+                    while kept and len(json.dumps({'version':1,'runs':kept},ensure_ascii=False).encode('utf-8'))>MAX_STORE_BYTES:
+                        # Dropping the oldest transcript beats writing a history file that can
+                        # never be read back, or one that grows the app folder without bound.
+                        kept.pop(0)
+                    if kept or limit==2000:break
+                atomic_text(self.store_path,json.dumps({'version':1,'runs':kept},ensure_ascii=False))
+        except OSError as error:
+            # A contended lock or a refused replace is a readable persistence failure, not a crash.
+            raise ValueError(str(error) or 'Agent history could not be written.') from None
     def catalog(self):
         from agent_history import TOOLS as HISTORY_TOOLS
         from agent_delegation import TOOLS as DELEGATION_TOOLS
@@ -325,6 +357,7 @@ class AgentRuntime:
                      or next((key for key,value in self.runs.items() if key not in self.active_runs and value['status'] not in ('awaiting_approval','running')),None)
                 if not evict:raise ValueError('Every open task is waiting for your approval. Approve, reject or cancel one first.')
                 self.history.save([self.runs[evict]])
+                self.evicted.add(evict)
                 self.runs.pop(evict);self.planners.pop(evict,None)
                 self.run_locks.pop(evict,None);self.controls.pop(evict,None)
                 # A task browser holds a live cookie-bearing page; evicting its record
@@ -584,13 +617,14 @@ class AgentRuntime:
             with self.lock:self.active_runs.add(pinned)
         try:
             started=time.monotonic()
-            try:
-                result=self._execute(copy.deepcopy(action),run,cancel_event=control['cancel'] if control else None)
-                action['status']='cancelled' if result.get('cancelled') else ('failed' if result.get('ok') is False or result.get('is_error') else 'completed')
-                action['result']=result
-            except Exception as error:
-                action['status']='cancelled' if control and control['cancel'].is_set() else 'failed'
-                action['result']={'ok':False,'cancelled':bool(control and control['cancel'].is_set()),'error':str(error)[:1500]}
+            with self._meter(run['id'] if run else None,energy=True):
+                try:
+                    result=self._execute(copy.deepcopy(action),run,cancel_event=control['cancel'] if control else None)
+                    action['status']='cancelled' if result.get('cancelled') else ('failed' if result.get('ok') is False or result.get('is_error') else 'completed')
+                    action['result']=result
+                except Exception as error:
+                    action['status']='cancelled' if control and control['cancel'].is_set() else 'failed'
+                    action['result']={'ok':False,'cancelled':bool(control and control['cancel'].is_set()),'error':str(error)[:1500]}
             action['finished_at']=time.time()
             action['seconds']=round(time.monotonic()-started,3)
             self.trace.record('decision',run['id'] if run else '',tool=action['tool'],approve=True,
@@ -829,19 +863,40 @@ class AgentRuntime:
             return True
         return False
 
-    def plan(self,identifier,model,skill=''):
-        from agent_usage import capture_usage,summarize,merge,DeviceEnergy
+    @contextmanager
+    def _meter(self,identifier,energy=False):
+        """Bill model calls made by a thread that no wider window is already watching."""
+        from agent_usage import capturing
+        # Worker threads inherit no usage context, so delegation and approved execution need their own
+        # window; a nested same-thread window would split one bill across two totals and sample the GPU twice.
+        if identifier is None or identifier not in self.runs or capturing():
+            yield
+            return
+        from agent_usage import DeviceEnergy, capture_usage, merge, summarize
         started=time.monotonic()
+        monitor=DeviceEnergy() if energy else None
         with capture_usage() as records:
-            energy=DeviceEnergy()
             try:
-                with energy:self._plan_metered(identifier,model,skill)
+                if monitor:
+                    with monitor:yield
+                else:yield
             finally:
-                report=summarize(records,self.usage_config()['prices']);report['seconds']=time.monotonic()-started
-                report.update(energy.result())
+                report=summarize(records,self.usage_config()['prices'])
+                report['seconds']=round(time.monotonic()-started,4)
+                if monitor:report.update(monitor.result())
                 with self.lock:
-                    if identifier in self.runs and records:
-                        self.runs[identifier]['usage']=merge(self.runs[identifier].get('usage'),report);self._save_runs()
+                    if records and identifier in self.runs:
+                        run=self.runs[identifier]
+                        run['usage']=merge(run.get('usage'),report);run['updated_at']=time.time()
+                        try:self._save_runs()
+                        except ValueError as error:
+                            # The action this window billed already succeeded; a contended
+                            # history file defers the total, it must not discard the result.
+                            self.trace.record('usage',identifier,save_error=str(error)[:200])
+
+    def plan(self,identifier,model,skill=''):
+        with self._meter(identifier,energy=True):
+            self._plan_metered(identifier,model,skill)
         return self.state(identifier)
 
     def _plan_metered(self,identifier,model,skill=''):

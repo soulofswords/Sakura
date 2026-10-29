@@ -83,6 +83,11 @@ def capture_usage():
     finally:_capture.reset(token)
 
 
+def capturing():
+    """True when this thread already has a window that owns its records."""
+    return _capture.get() is not None
+
+
 def active_usage():return list(_capture.get() or [])
 
 
@@ -111,9 +116,10 @@ def merge(previous,current):
     result=copy.deepcopy(previous or {})
     for key in ('calls','input_tokens','output_tokens','prompt_estimated_tokens','usage_reported_calls','priced_calls','budget_tokens','seconds'):
         result[key]=round(result.get(key,0)+current.get(key,0),4)
-    for key in ('gpu_device_joules','cost_usd_estimate'):
-        a=result.get(key);b=current.get(key)
-        result[key]=None if (previous and a is None) or b is None else round((a or 0)+b,8)
-    result['energy_basis']=current.get('energy_basis','unavailable')
-    result['cost_basis']=current.get('cost_basis','unavailable')
+    for key,basis in (('gpu_device_joules','energy_basis'),('cost_usd_estimate','cost_basis')):
+        # An absent key was not measured by this window so an earlier reading stays; an explicit None was measured as unavailable.
+        if key not in current:continue
+        total=result.get(key);added=current[key]
+        result[key]=None if (added is None or (key in (previous or {}) and total is None)) else round((total or 0)+added,8)
+        result[basis]=current.get(basis,'unavailable')
     return result

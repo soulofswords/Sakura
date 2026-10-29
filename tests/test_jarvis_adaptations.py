@@ -182,3 +182,96 @@ def test_docker_mount_is_rechecked_after_approval(tmp_path):
     process=Mock()
     with pytest.raises(ValueError,match='protected'):execute(args,run,bindings,process)
     process.assert_not_called()
+
+
+class MeteredModel:
+    """A planner whose transport reports usage the way llm.py and cloud_api.py really do."""
+    provider='ollama';model='test';base_url='http://127.0.0.1:11434'
+    def __init__(self,workspace):self.workspace=str(workspace)
+    def _request_raw(self,messages,**kwargs):
+        record_usage('ollama','test',messages,{'prompt_eval_count':40,'eval_count':9})
+        return json.dumps({'tool':'files.list','arguments':{'path':self.workspace}})
+
+
+def test_delegated_children_are_metered_in_their_own_threads(tmp_path):
+    from agent_delegation import execute
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'))
+    parent=runtime.new_run('Delegate work',str(tmp_path),False)
+    result=execute(runtime,runtime.runs[parent['id']],['inspect one','inspect two'],MeteredModel(tmp_path))
+    assert [child['status'] for child in result['children']]==['awaiting_approval','awaiting_approval']
+    stored={run['id']:run for run in runtime.states()}
+    assert [stored[child['id']].get('usage',{}).get('calls') for child in result['children']]==[1,1]
+    assert runtime.metrics()['summary']['inference']['calls']==2
+
+
+def test_child_budget_blocks_the_next_planner_call_not_the_first(tmp_path):
+    from agent_delegation import execute
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'))
+    runtime.usage_config({'prices':{},'max_tokens':1,'max_cost_usd':0})
+    parent=runtime.new_run('Delegate under budget',str(tmp_path),True)
+    result=execute(runtime,runtime.runs[parent['id']],['bounded one','bounded two'],MeteredModel(tmp_path))
+    assert [child['status'] for child in result['children']]==['blocked','blocked']
+    assert [runtime.state(child['id'])['usage']['calls'] for child in result['children']]==[1,1]
+
+
+def test_approved_tool_execution_is_metered(tmp_path):
+    image=tmp_path/'shot.png';image.write_bytes(b'\x89PNG\r\n\x1a\n')
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'))
+    model=MeteredModel(tmp_path)
+    run=runtime.new_run('Read my screenshot',str(tmp_path),False)
+    planned=runtime.plan(run['id'],model)
+    step=[item for item in planned['steps'] if item['tool']=='files.list'][-1]
+    runtime.decide(step['id'],True)
+    proposed=runtime.propose(run['id'],'files.analyze',{'path':'shot.png'})
+    assert proposed['status']=='awaiting_approval'
+    def reader(path,model,question=''):
+        record_usage('gemini','vision-test',[{'role':'user','content':'image prompt '*900}],
+                     {'usageMetadata':{'promptTokenCount':9500,'candidatesTokenCount':120}})
+        return {'ok':True,'text':'a window and a desk'}
+    with patch('agent_vision.analyze',side_effect=reader):
+        decided=runtime.decide(proposed['steps'][-1]['id'],True)
+    assert decided['action']['status']=='completed'
+    usage=runtime.state(run['id'])['usage']
+    assert usage['calls']==2 and usage['input_tokens']==9540
+    assert usage['cost_usd_estimate'] is None
+
+
+def test_two_runtimes_on_one_history_file_keep_each_other_runs(tmp_path):
+    store=tmp_path/'shared.json'
+    one=AgentRuntime(Connections(tmp_path/'one.json'),store)
+    two=AgentRuntime(Connections(tmp_path/'two.json'),store)
+    first=one.new_run('first task',str(tmp_path),False)
+    second=two.new_run('second task',str(tmp_path),False)
+    stored=[run['goal'] for run in json.loads(store.read_text(encoding='utf-8'))['runs']]
+    assert {'first task','second task'}<=set(stored)
+    assert 'first task' in [run['goal'] for run in AgentRuntime(Connections(tmp_path/'one.json'),store).states()]
+    assert 'second task' in [run['goal'] for run in AgentRuntime(Connections(tmp_path/'two.json'),store).states()]
+    assert {'id','goal'}<=set(first.keys()) and second['id']!=first['id']
+
+
+def test_evicted_tasks_stay_out_after_a_merged_save(tmp_path):
+    store=tmp_path/'bounded.json'
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'),store)
+    for index in range(40):runtime.new_run('task '+str(index),str(tmp_path),False)
+    goals=[run['goal'] for run in json.loads(store.read_text(encoding='utf-8'))['runs']]
+    assert len(goals)<=30 and 'task 0' not in goals
+    runtime.new_run('one more',str(tmp_path),False)
+    assert 'task 0' not in [run['goal'] for run in json.loads(store.read_text(encoding='utf-8'))['runs']]
+
+
+def test_a_busy_history_file_defers_usage_instead_of_discarding_a_billed_window(tmp_path,monkeypatch):
+    runtime=AgentRuntime(Connections(tmp_path/'connections.json'))
+    run=runtime.new_run('Read notes',str(tmp_path),False)
+    def busy(self):raise ValueError('Private state is busy. Try again shortly.')
+    with runtime._meter(run['id']):
+        monkeypatch.setattr(AgentRuntime,'_save_runs',busy)
+        record_usage('ollama','test',[{'role':'user','content':'x'*4000}],{'prompt_eval_count':11,'eval_count':5})
+    monkeypatch.undo()
+    assert runtime.state(run['id'])['usage']['calls']==1
+    assert any(item.get('save_error') for item in runtime.trace.tail(5))
+
+
+def test_merge_keeps_an_unmeasured_quantity_from_an_earlier_window():
+    assert merge({'gpu_device_joules':4.5,'energy_basis':'nvml'},{'calls':1})['gpu_device_joules']==4.5
+    assert merge({'gpu_device_joules':4.5,'energy_basis':'nvml'},{'calls':1,'gpu_device_joules':None})['gpu_device_joules'] is None
+    assert merge({'calls':1},{'calls':1,'gpu_device_joules':2})['gpu_device_joules']==2
