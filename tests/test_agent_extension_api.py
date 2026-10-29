@@ -12,6 +12,7 @@ from agent_runtime import AgentRuntime
 
 @pytest.fixture
 def client(tmp_path,monkeypatch):
+    monkeypatch.setattr(agent_api,'native_confirm',lambda *args:True)
     runtime=AgentRuntime(Connections(tmp_path/'connections.json'));monkeypatch.setattr(agent_api,'runtime',runtime)
     monkeypatch.setattr('agent_messaging.get_cloud_key',lambda name:'')
     app=FastAPI();app.include_router(agent_api.agent_router(lambda choice='current':Mock()))

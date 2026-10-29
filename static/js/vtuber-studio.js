@@ -69,7 +69,7 @@ export function installVtuberStudio(){
   for(const id of ['model-dropdown','vrm-dropdown','live2d-dropdown'])move(byId(id),id);
   for(const id of ['upload-pmx-toolbar','upload-vrm-toolbar','upload-live2d-toolbar','refresh-models'])move(byId(id),'imports');
   move(byId('model-size')?.closest('label'),'size');
-  for(const id of ['full-model-btn','quality-btn','eye-tracking-btn','pmx-editor-btn'])move(byId(id),'framing');
+  for(const id of ['full-model-btn','quality-btn','eye-tracking-btn','pmx-editor-btn','mmd-btn'])move(byId(id),'framing');
   move(byId('voice-dropdown'),'voice');
   move(byId('spout-enabled')?.closest('fieldset'),'spout');
   move(byId('virtual-camera-settings-toggle')?.closest('fieldset'),'virtual-camera');

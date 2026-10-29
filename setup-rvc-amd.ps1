@@ -2,12 +2,14 @@
 # Creates rvc-amd-runtime\ with torch + torch-directml and RVC's dependencies.
 # Run once on an AMD machine from the Sakura folder:
 #   powershell -ExecutionPolicy Bypass -File setup-rvc-amd.ps1
+param([ValidateSet('directml','cuda','cpu')][string]$Backend='directml')
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 
-$runtime = Join-Path $PSScriptRoot 'rvc-amd-runtime'
+$runtimeName=if($Backend -eq 'cuda'){'rvc-gpu-runtime'}elseif($Backend -eq 'cpu'){'rvc-runtime'}else{'rvc-amd-runtime'}
+$runtime = Join-Path $PSScriptRoot $runtimeName
 if (Test-Path (Join-Path $runtime 'Scripts\python.exe')) {
-    Write-Host "rvc-amd-runtime already exists - recreating torch-directml packages only." -ForegroundColor Yellow
+    Write-Host "$runtimeName already exists - verifying its packages." -ForegroundColor Yellow
 }
 
 function Find-Python312 {
@@ -40,13 +42,16 @@ $pip = Join-Path $runtime 'Scripts\pip.exe'
 
 # DirectML builds on top of regular torch; the CPU wheel keeps inference
 # correct on any machine, and torch-directml accelerates it on AMD/Intel.
-Write-Host 'Installing torch (CPU wheel) + torch-directml...' -ForegroundColor Cyan
+Write-Host "Installing PyTorch for $Backend..." -ForegroundColor Cyan
 # Pin against torch-directml's published wheel metadata, including torchaudio's
 # matching ABI. Explicit CPU index avoids downloading NVIDIA CUDA packages.
-& $pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cpu
-if ($LASTEXITCODE -ne 0) { throw 'CPU torch / torchaudio install failed.' }
-& $pip install torch-directml==0.2.5.dev240914
-if ($LASTEXITCODE -ne 0) { throw 'torch-directml install failed.' }
+$torchIndex=if($Backend -eq 'cuda'){'https://download.pytorch.org/whl/cu124'}else{'https://download.pytorch.org/whl/cpu'}
+& $pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url $torchIndex
+if ($LASTEXITCODE -ne 0) { throw 'PyTorch / torchaudio install failed.' }
+if($Backend -eq 'directml'){
+ & $pip install torch-directml==0.2.5.dev240914
+ if ($LASTEXITCODE -ne 0) { throw 'torch-directml install failed.' }
+}
 
 # Same dependency set as the NVIDIA runtime, but rvc-python must be
 # installed WITHOUT dependency resolution (its metadata pins legacy
@@ -56,7 +61,8 @@ Write-Host 'Installing RVC dependencies...' -ForegroundColor Cyan
 $deps = Join-Path $env:TEMP ("sakura-rvc-deps-" + [guid]::NewGuid().ToString() + '.txt')
 $constraints = Join-Path $env:TEMP ("sakura-rvc-pins-" + [guid]::NewGuid().ToString() + '.txt')
 try {
-    @('torch==2.4.1', 'torchvision==0.19.1', 'torchaudio==2.4.1', 'torch-directml==0.2.5.dev240914') | Set-Content -Encoding ASCII $constraints
+    @('torch==2.4.1', 'torchvision==0.19.1', 'torchaudio==2.4.1') | Set-Content -Encoding ASCII $constraints
+    if($Backend -eq 'directml'){'torch-directml==0.2.5.dev240914' | Add-Content -Encoding ASCII $constraints}
     Get-Content requirements-rvc.txt | Where-Object { $_ -notmatch '^\s*rvc-python' } | Set-Content -Encoding ASCII $deps
     & $pip install -r $deps -c $constraints
     if ($LASTEXITCODE -ne 0) { throw 'RVC dependency install failed.' }
@@ -70,6 +76,7 @@ Write-Host ''
 # Check the actual service imports too, not merely a trivial tensor operation.
 & (Join-Path $runtime 'Scripts\python.exe') -c "import torch, torchaudio, fairseq, rvc_python.infer, fastapi, uvicorn; print('RVC imports OK')"
 if ($LASTEXITCODE -ne 0) { throw 'RVC package verification failed.' }
+if($Backend -ne 'directml'){Write-Host "RVC $Backend runtime ready.";exit 0}
 Write-Host 'Verifying DirectML...' -ForegroundColor Cyan
 $code = "import torch, torch_directml; d = torch_directml.device(); print('DirectML OK:', (torch.ones(2, device=d) + 1).cpu().tolist())"
 & (Join-Path $runtime 'Scripts\python.exe') -c $code

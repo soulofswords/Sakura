@@ -39,7 +39,7 @@ def select_port():
                 continue
         port = candidate
         return False
-    raise RuntimeError("No available Sakura port between 8766 and 8776")
+    raise RuntimeError(f"No available Sakura port between {first} and {first+7 if separate else 8776}")
 
 def launch():
     import uvicorn

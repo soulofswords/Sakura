@@ -15,7 +15,11 @@ def transcribe(content,recognizer):
     else:raise ValueError('Supported voice memos are OGG/Opus, WAV and WebM.')
     if recognizer is None:raise ValueError('Load Sakura speech recognition on this PC before transcribing a memo.')
     ffmpeg=shutil.which('ffmpeg')
-    if not ffmpeg:raise ValueError('Install ffmpeg separately to decode voice memos.')
+    if not ffmpeg:
+        from audio_decode import decode_audio
+        text=recognizer(decode_audio(content,MAX_SECONDS))
+        if not isinstance(text,str):raise ValueError('Speech recognition returned no transcript.')
+        return text[:8000]
     try:
         decoded=subprocess.run([ffmpeg,'-nostdin','-hide_banner','-loglevel','error','-protocol_whitelist','pipe','-f',format_name,
                                 '-i','pipe:0','-t',str(MAX_SECONDS+1),'-ar','16000','-ac','1','-f','f32le','pipe:1'],

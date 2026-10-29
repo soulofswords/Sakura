@@ -2701,15 +2701,18 @@ async def speech_to_text(audio: UploadFile = File(...)):
             import shutil
             ffmpeg = shutil.which("ffmpeg")
             if not ffmpeg:
-                raise RuntimeError("ffmpeg is required to decode browser microphone audio.")
-            converted = subprocess.run(
+                from audio_decode import decode_audio
+                import soundfile as sf
+                decoded=await asyncio.to_thread(decode_audio,content)
+                sf.write(str(wav_path),decoded,16000,subtype='PCM_16')
+            else:
+                converted = subprocess.run(
                 [ffmpeg, "-y", "-i", str(tmp), "-af", "highpass=f=80,lowpass=f=7000,afftdn=nf=-25",
                  "-ar", "16000", "-ac", "1", str(wav_path)],
                 capture_output=True, timeout=15,
-            )
-            if converted.returncode != 0 or not wav_path.exists() or wav_path.stat().st_size < 100:
-                detail = converted.stderr.decode("utf-8", errors="replace")[-240:]
-                raise RuntimeError(f"Could not decode microphone audio. {detail}")
+                )
+                if converted.returncode != 0 or not wav_path.exists() or wav_path.stat().st_size < 100:
+                    raise RuntimeError('Could not decode microphone audio.')
         except Exception as exc:
             tmp.unlink(missing_ok=True)
             wav_path.unlink(missing_ok=True)

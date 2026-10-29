@@ -4,8 +4,16 @@ import unittest
 from nvidia_ar_setup import sdk_status, import_sdk_archive
 import io
 import zipfile
+from unittest.mock import patch
+from nvidia_ar_setup import _sdk_root_candidates
 
 class OptionalSdkTests(unittest.TestCase):
+    def test_default_discovery_never_probes_the_developer_drive(self):
+        probed=[]
+        with patch.dict('os.environ',{'ARSDK_ROOT':''}),patch.object(Path,'is_file',lambda path:probed.append(str(path)) or False):
+            list(_sdk_root_candidates())
+        self.assertFalse(any('F:/AI/AR' in path.replace('\\','/') for path in probed))
+
     def test_archive_import_does_not_claim_tracking_is_ready(self):
         package=io.BytesIO()
         with zipfile.ZipFile(package,'w') as archive:

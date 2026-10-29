@@ -11,6 +11,29 @@ using Microsoft.Win32;
 static class Uninstall {
  const string Marker="Sakura Companion installation v1";
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool MoveFileEx(string existing,string replacement,int flags);
+ static void RemoveOwnedIntegrations(string root,string project) {
+  const string run=@"Software\Microsoft\Windows\CurrentVersion\Run";
+  using(var key=Registry.CurrentUser.OpenSubKey(run,true)) {
+   string value=key==null?null:key.GetValue("Sakura Companion") as string;
+   string launcher="\""+Path.Combine(root,"Sakura Companion.exe")+"\"";
+   if(value!=null&&(value.Equals(launcher,StringComparison.OrdinalIgnoreCase)||value.StartsWith(launcher+" ",StringComparison.OrdinalIgnoreCase))) {
+    key.DeleteValue("Sakura Companion",false);
+    using(var approved=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",true))
+     if(approved!=null)approved.DeleteValue("Sakura Companion",false);
+   }
+  }
+  string desired=Path.Combine(project,@"native\sakura-camera\bin\x64\sakura-camera64.dll");
+  using(var key=Registry.ClassesRoot.OpenSubKey(@"CLSID\{5F4A34D7-C3B9-4E6D-9A12-8A4D3C6E7201}\InprocServer32")) {
+   string registered=key==null?null:key.GetValue("") as string;
+   if(registered!=null&&Path.GetFullPath(registered).Equals(Path.GetFullPath(desired),StringComparison.OrdinalIgnoreCase)&&File.Exists(desired)) {
+    var info=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"regsvr32.exe"),"/s /u \""+desired+"\"");
+    info.UseShellExecute=true;info.Verb="runas";info.WindowStyle=ProcessWindowStyle.Hidden;
+    using(var process=Process.Start(info)) {
+     if(!process.WaitForExit(30000)||process.ExitCode!=0)throw new IOException("Close video apps and approve camera removal before uninstalling Sakura.");
+    }
+   }
+  }
+ }
  public static string RemoveInstallation(string directory,bool preserve) {
   string root=Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
   string project=Path.Combine(root,"Sakura"),marker=Path.Combine(root,".sakura-installation");
@@ -20,6 +43,7 @@ static class Uninstall {
   // Check locks before moving user data or removing anything. Never kill an
   // unrelated Python process. The user must close Sakura before uninstalling.
   foreach(string file in files)using(var input=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.None)){}
+  RemoveOwnedIntegrations(root,project);
   var installed=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
   foreach(string row in File.ReadAllLines(Path.Combine(project,"installed-files.tsv"))) {
    string[] fields=row.Split('\t');if(fields.Length!=2)continue;

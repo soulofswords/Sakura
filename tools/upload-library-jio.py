@@ -142,7 +142,16 @@ class JioUploader:
                     kwargs['data'] = io.BytesIO(raw)
                 elif json_body is not None:
                     kwargs['json'] = json_body
-                response = self.http().request(method, url, **kwargs)
+                try:
+                    response = self.http().request(method, url, **kwargs)
+                except requests.RequestException as exc:
+                    # Do not expose signed URLs, query strings or credentials in
+                    # logs. The endpoint and phase identify transient failures.
+                    phase=('connecting' if isinstance(exc,requests.ConnectTimeout) else
+                           'waiting for a reply' if isinstance(exc,requests.ReadTimeout) else
+                           'TLS verification' if isinstance(exc,requests.exceptions.SSLError) else
+                           'transferring')
+                    raise UploadError(f'Jio {method} failed at {parsed.hostname} while {phase} ({type(exc).__name__}). Verified transfers are retained for resume.') from None
             finally:
                 if opened:
                     opened.close()

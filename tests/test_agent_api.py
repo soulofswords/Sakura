@@ -16,6 +16,7 @@ class AgentAPITests(unittest.TestCase):
         self.folder=tempfile.TemporaryDirectory();self.addCleanup(self.folder.cleanup)
         runtime=AgentRuntime(Connections(Path(self.folder.name)/'connections.json'));self.runtime=runtime
         patcher=patch('agent_api.runtime',runtime);patcher.start();self.addCleanup(patcher.stop)
+        approval=patch('agent_api.native_confirm',return_value=True);self.native_approval=approval.start();self.addCleanup(approval.stop)
         app=FastAPI();app.include_router(agent_router(lambda:Mock()))
         self.client=TestClient(app,base_url='http://127.0.0.1:8790',client=('127.0.0.1',35000))
         self.token=re.search(r"const token='([^']+)'",self.client.get('/agent').text)[1]
@@ -96,11 +97,31 @@ class AgentAPITests(unittest.TestCase):
         identifier=proposal['steps'][-1]['id']
         with patch('agent_runtime.run_process',return_value={'ok':True,'output':'original'}) as execute:
             response=self.client.post('/api/agent/actions/'+identifier+'/decision',headers=self.headers,json={'approve':True,'arguments':{'command':'changed'}})
+        self.assertEqual(response.status_code,400)
+        execute.assert_not_called()
+        self.native_approval.return_value=False
+        self.assertEqual(self.client.post('/api/agent/actions/'+identifier+'/decision',headers=self.headers,json={'approve':True}).status_code,403)
+        self.native_approval.return_value=True
+        with patch('agent_runtime.run_process',return_value={'ok':True,'output':'original'}) as execute:
+            response=self.client.post('/api/agent/actions/'+identifier+'/decision',headers=self.headers,json={'approve':True})
         self.assertEqual(response.status_code,200)
         self.assertEqual(execute.call_args.args[0][-1],'Write-Output original')
         self.assertEqual(self.client.post('/api/agent/actions/'+identifier+'/decision',headers=self.headers,json={'approve':True}).status_code,400)
     def test_non_boolean_approval_is_rejected(self):
         self.assertEqual(self.client.post('/api/agent/actions/anything/decision',headers=self.headers,json={'approve':'yes'}).status_code,400)
+    def test_action_mutation_during_native_review_cannot_execute(self):
+        run=self.runtime.new_run('Review exact bytes',self.folder.name)
+        proposal=self.runtime.propose(run['id'],'shell.run',{'command':'Write-Output original'},'User review')
+        identifier=proposal['steps'][-1]['id']
+        def changed(*args):
+            with self.runtime.lock:self.runtime.actions[identifier]['arguments']['command']='Write-Output changed'
+            return True
+        self.native_approval.side_effect=changed
+        with patch('agent_runtime.run_process') as execute:
+            response=self.client.post('/api/agent/actions/'+identifier+'/decision',headers=self.headers,json={'approve':True})
+        self.assertEqual(response.status_code,400)
+        self.assertIn('changed during native review',response.text)
+        execute.assert_not_called()
     def test_non_loopback_client_cannot_load_panel_or_approve(self):
         app=FastAPI();app.include_router(agent_router(lambda:None))
         remote=TestClient(app,base_url='http://127.0.0.1:8790',client=('192.168.1.5',50000))

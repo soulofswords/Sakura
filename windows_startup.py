@@ -15,7 +15,9 @@ def command(base=None):
     python=base/'runtime/pythonw.exe'
     if not python.is_file():python=base/'venv/Scripts/pythonw.exe'
     if not python.is_file():python=Path(sys.executable)
-    return subprocess.list2cmdline([str(python),str(base/'windows_startup.py'),'--launch'])
+    # desktop.py is the supported bootstrap in both source and protected builds.
+    # windows_startup.py is compiled into the core and is not a loose entry point.
+    return subprocess.list2cmdline([str(python),str(base/'desktop.py'),'--windows-startup'])
 
 
 def status():

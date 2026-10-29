@@ -29,3 +29,8 @@ try:
 except Exception:
     import traceback
     (OUT/'Errors.md').write_text(traceback.format_exc(),encoding='utf-8');raise
+finally:
+    # This directory contains only copies made above for the native compiler.
+    # Keep binary/compiler caches, but do not retain another loose source tree.
+    if source.resolve().parent!=OUT.resolve():raise RuntimeError('Unexpected native source cache location.')
+    shutil.rmtree(source)

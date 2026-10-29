@@ -3,6 +3,8 @@ import ssl
 import tempfile
 import time
 import unittest
+import os
+import subprocess
 from pathlib import Path
 import httpx
 from cryptography import x509
@@ -12,6 +14,23 @@ from mobile_tls import ensure_identity,fingerprint
 
 
 class IdentityFileTests(unittest.TestCase):
+    def test_private_key_permissions_are_repaired_without_changing_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first=ensure_identity(directory)
+            key=Path(first['key']);original=key.read_bytes()
+            if os.name=='nt':
+                subprocess.run(['icacls',str(key),'/grant','*S-1-5-32-545:R'],check=True,capture_output=True)
+            else:os.chmod(key,0o644)
+            second=ensure_identity(directory)
+            self.assertEqual(first,second)
+            self.assertEqual(original,key.read_bytes())
+            if os.name=='nt':
+                acl=subprocess.run(['icacls',str(key)],check=True,capture_output=True,text=True).stdout
+                self.assertNotIn('BUILTIN\\Users:',acl)
+                self.assertNotIn('Authenticated Users:',acl)
+                self.assertNotIn('(I)',acl)
+            else:self.assertEqual(key.stat().st_mode&0o777,0o600)
+
     def test_identity_is_created_once_and_replaced_when_the_key_is_lost(self):
         with tempfile.TemporaryDirectory() as directory:
             first=ensure_identity(directory)

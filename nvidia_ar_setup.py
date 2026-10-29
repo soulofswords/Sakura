@@ -15,9 +15,8 @@ def _sdk_root_candidates(folder=''):
         env_root=os.environ.get('ARSDK_ROOT')
         if env_root:candidates.append(Path(env_root).expanduser())
         candidates.append(Path(os.environ.get('ProgramFiles','C:/Program Files'))/'NVIDIA Corporation/NVIDIA AR SDK')
-        # Support the user's imported SDK layout and keep it auto-detected after
-        # app restarts, while allowing other users to select their own folder.
-        candidates.append(Path('F:/AI/AR'))
+        # Custom SDKs must come from the user's saved selection or ARSDK_ROOT,
+        # never from a developer-specific writable drive path.
     seen=set()
     for candidate in candidates:
         try:candidate=candidate.resolve()

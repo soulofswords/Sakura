@@ -142,6 +142,8 @@ def voice(audio: UploadFile = File(...), model: str = Form(...),
         converter.infer_file(str(source), str(target))
         return Response(target.read_bytes(), media_type='audio/wav')
 
-if __name__ == '__main__':
+def main():
     import uvicorn
     uvicorn.run(app, host='127.0.0.1', port=18888)
+
+if __name__ == '__main__':main()

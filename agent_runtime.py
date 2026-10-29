@@ -496,7 +496,7 @@ class AgentRuntime:
         action['approval_digest']=digest(action['bindings'])
         with self.lock:self.actions[action['id']]=copy.deepcopy(action)
         return action
-    def decide(self,identifier,approve,remember=False):
+    def decide(self,identifier,approve,remember=False,expected_digest=None):
         if type(approve) is not bool or type(remember) is not bool:raise ValueError('Approval choices must be true or false.')
         if remember and not approve:raise ValueError('Rejected actions cannot be allow-listed.')
         with self.lock:
@@ -504,12 +504,13 @@ class AgentRuntime:
             run_id=pending.get('run_id')
         lock=self._run_lock(run_id) if run_id else self.operation_lock
         if not lock.acquire(blocking=False):raise ValueError('This task is already running another action. Wait for it to finish.')
-        try:return self._decide(identifier,approve,remember=remember)
+        try:return self._decide(identifier,approve,remember=remember,expected_digest=expected_digest)
         finally:lock.release()
-    def _decide(self,identifier,approve,auto=False,remember=False):
+    def _decide(self,identifier,approve,auto=False,remember=False,expected_digest=None):
         with self.lock:
             action=self.actions.get(identifier)
             if not action or action['status']!='pending':raise ValueError('This approval is no longer pending. Actions cannot be replayed.')
+            if expected_digest is not None and digest(action)!=expected_digest:raise ValueError('The action changed during native review. Review a fresh proposal.')
             if remember and action['tool']!='shell.run':raise ValueError('Only exact shell commands can be allow-listed.')
             run=self.runs.get(action.get('run_id'))
             if time.time()-action['created_at']>600:

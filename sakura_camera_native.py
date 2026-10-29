@@ -50,15 +50,18 @@ def uninstall_driver():
     registered = _registered_dll_path()
     if registered is None:
         return {'installed': False, 'device': CAMERA_NAME}
+    if registered.resolve()!=DRIVER_DLL.resolve():
+        raise RuntimeError('The camera is registered to another Sakura installation. Remove it from that installation to preserve its camera.')
     _regsvr32('camera removal', '/s /u "'+str(registered)+'"', registered.parent)
     for _ in range(120):
-        if not driver_installed():
+        if _registered_dll_path() is None:
             return {'installed': False, 'device': CAMERA_NAME}
         time.sleep(.25)
     raise RuntimeError('Windows has not finished removing the camera. Close your video apps, then try again.')
 
 def driver_installed():
-    return _registered_dll_path() is not None
+    registered=_registered_dll_path()
+    return registered is not None and registered.resolve()==DRIVER_DLL.resolve()
 
 class NativeCamera:
     def __init__(self, width=1280, height=720, fps=30):

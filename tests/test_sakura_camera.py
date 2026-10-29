@@ -34,15 +34,15 @@ class CameraDriverRegistrationTests(unittest.TestCase):
             self.assertEqual(sakura_camera_native.uninstall_driver(),{'installed':False,'device':CAMERA_NAME})
         register.assert_not_called()
 
-    def test_uninstall_removes_the_registered_driver_not_the_build_output(self):
+    def test_uninstall_removes_only_its_owned_registered_driver(self):
         register=Mock()
-        with patch.object(sakura_camera_native,'_registered_dll_path',Mock(return_value=self.REGISTERED)),patch.object(sakura_camera_native,'driver_installed',Mock(return_value=False)),patch.object(sakura_camera_native,'_regsvr32',register):
+        with patch.object(sakura_camera_native,'DRIVER_DLL',self.REGISTERED),patch.object(sakura_camera_native,'_registered_dll_path',Mock(side_effect=[self.REGISTERED,None])),patch.object(sakura_camera_native,'_regsvr32',register):
             self.assertEqual(sakura_camera_native.uninstall_driver(),{'installed':False,'device':CAMERA_NAME})
         self.assertEqual(register.call_args.args,('camera removal','/s /u "C:\\Windows\\System32\\sakura-camera64.dll"',self.REGISTERED.parent))
 
     def test_uninstall_reports_a_cancelled_windows_prompt(self):
         shell=Mock(return_value=2)
-        with patch.object(sakura_camera_native,'_registered_dll_path',Mock(return_value=self.REGISTERED)),patch.object(sakura_camera_native.ctypes.windll.shell32,'ShellExecuteW',shell):
+        with patch.object(sakura_camera_native,'DRIVER_DLL',self.REGISTERED),patch.object(sakura_camera_native,'_registered_dll_path',Mock(return_value=self.REGISTERED)),patch.object(sakura_camera_native.ctypes.windll.shell32,'ShellExecuteW',shell):
             with self.assertRaises(RuntimeError) as failure:sakura_camera_native.uninstall_driver()
         self.assertIn('cancelled',str(failure.exception))
         self.assertIn('removal',str(failure.exception))

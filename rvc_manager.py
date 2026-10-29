@@ -77,8 +77,7 @@ def _runtime_python():
         python = BASE / name / 'Scripts' / 'python.exe'
         if python.is_file() and _runtime_usable(BASE / name):
             return python
-    raise RuntimeError('No usable RVC runtime found. Install a self-contained RVC runtime; '
-                       'for AMD/Intel, run setup-rvc-amd.ps1 in the Sakura folder.')
+    raise RuntimeError('No usable RVC runtime found. Run the included setup-rvc-windows.ps1 to install a self-contained runtime, or select a built-in voice.')
 
 
 def ensure_rvc_service(timeout=90):
@@ -96,6 +95,14 @@ def ensure_rvc_service(timeout=90):
         python = _runtime_python()
         if not python.is_file():
             raise RuntimeError('The RVC runtime is not installed.')
+        entry=BASE/'rvc_service.py'
+        if not entry.is_file():
+            entry=BASE/'workers/rvc-worker.py'
+            if not entry.is_file():raise RuntimeError('This installation is missing its protected RVC worker. Repair Sakura or use a built-in voice.')
+            version=subprocess.run([str(python),'--version'],capture_output=True,text=True,timeout=10,
+                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            if version.returncode or not version.stdout.startswith('Python 3.12.'):
+                raise RuntimeError('Protected RVC requires a Python 3.12 runtime. Run the included setup-rvc-amd.ps1 on AMD/Intel, or install a self-contained Python 3.12 RVC runtime. Built-in voices remain available.')
         if _worker is None or _worker.poll() is not None:
             if _job is not None:
                 _job.close()
@@ -105,7 +112,7 @@ def ensure_rvc_service(timeout=90):
             logs_dir.mkdir(parents=True, exist_ok=True)
             log = open(logs_dir / 'rvc-service.log', 'a', encoding='utf-8')
             try:
-                _worker = subprocess.Popen([str(python), '-u', str(BASE / 'rvc_service.py')],
+                _worker = subprocess.Popen([str(python), '-u', str(entry)],
                     cwd=str(BASE), stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=os.name != 'nt',
                     creationflags=(subprocess.CREATE_NO_WINDOW | 0x00000004) if os.name == 'nt' else 0)

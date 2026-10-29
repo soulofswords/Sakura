@@ -20,6 +20,10 @@ def inspect(archive,windows):
         assert '_hitModelPixelAt' in viewer and '_0x' in viewer,'Missing GPU picking/protected JavaScript'
         assert 'Sakura/static/model-library-preview.html' in names,'Character library preview page is not packaged'
         assert 'Sakura/static/js/pmx-stage.js' in names,'PMX scenery controls are not packaged'
+        for module in ('av','psutil','mcp','playwright'):
+            assert 'Sakura/runtime/Lib/site-packages/'+module+'/__init__.py' in names,'Required packaged dependency missing: '+module
+        assert 'Sakura/workers/rvc-worker.py' in names,'Protected RVC bootstrap missing'
+        assert 'Sakura/setup-rvc-amd.ps1' in names,'Optional RVC setup is missing'
         assert 'eye-tracking.js?v=cursor-gpu6' in archive.read('Sakura/static/js/app.js').decode(),'Shipped app.js pins a stale eye-tracking cache'
     else:
         assert 'classes.dex' in names and 'assets/mobile.js' in names

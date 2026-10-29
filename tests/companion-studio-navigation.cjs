@@ -39,7 +39,13 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
  assert.equal(await page.locator('#companion-model-search').inputValue(),'');
  assert.equal(await page.locator('[data-companion-pane="theme"]').count(),0);
  assert.equal(await page.locator('#companion-dock-right').count(),0,'Companion has one toolbar');
- assert.equal(await page.locator('#companion-dock [data-companion-pane]').count(),8,'All tools share the left toolbar');
+ assert.equal(await page.locator('#companion-dock [data-companion-pane]').count(),9,'All tools share the left toolbar');
+ await page.getByRole('button',{name:'Background & stage items',exact:true}).click();
+ assert.equal(await page.locator('#companion-panel-title').textContent(),'Background & stage items');
+ assert.equal(await page.locator('[data-companion-content="background"] #obs-background-enabled').isVisible(),true);
+ assert.equal(await page.locator('[data-companion-content="background"] #bg-toggle-btn').isVisible(),true);
+ await page.getByRole('button',{name:'Background & stage items',exact:true}).click();
+ assert.equal(await page.locator('#companion-panel').isVisible(),false);
  await page.getByRole('button',{name:'Model Settings',exact:true}).click();assert.equal(await page.locator('#expression-modal').isVisible(),true);
  assert.equal(await page.locator('[data-model-panel="coloring"]').isVisible(),true);
  assert.equal(await page.locator('body').evaluate(el=>el.classList.contains('companion-panel-left')),false);

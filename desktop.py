@@ -187,7 +187,33 @@ class DesktopApi:
         return open_model(model_path, str(editor))
 
     def platform_capabilities(self):
-        return {'platform': sys.platform, 'pmx_editor': sys.platform == 'win32'}
+        return {'platform': sys.platform, 'pmx_editor': sys.platform == 'win32','mmd':sys.platform=='win32'}
+
+    def open_mmd(self):
+        from mmd_launcher import find_mmd,open_mmd
+        path=find_mmd(get_settings().get('mmd_path'))
+        if path is None:
+            win=self.holder.get('window')
+            if not win:raise RuntimeError('Open Sakura’s desktop window to select MikuMikuDance.')
+            selected=win.create_file_dialog(webview.FileDialog.OPEN,allow_multiple=False,
+                file_types=('MikuMikuDance (MikuMikuDance.exe)',))
+            if not selected:return {'cancelled':True}
+            path=find_mmd(selected[0])
+            if path is None:raise ValueError('Choose MikuMikuDance.exe with its Data folder alongside it.')
+            from app import save_settings
+            save_settings({'mmd_path':str(path)})
+        return open_mmd(str(path))
+
+    def install_rvc_runtime(self):
+        if sys.platform!='win32':raise RuntimeError('Use setup-rvc-macos.command on macOS.')
+        from native_consent import confirm
+        script=Path(__file__).parent/'setup-rvc-windows.ps1'
+        if not script.is_file():raise RuntimeError('RVC setup is missing. Repair this Sakura installation.')
+        if not confirm('Install optional RVC',{'downloads':'PyTorch, RVC dependencies and checksum-verified base models. Several GB may be required.','script':str(script)}):return {'cancelled':True}
+        import subprocess
+        executable=Path(os.environ.get('SystemRoot','C:/Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
+        subprocess.Popen([str(executable),'-NoProfile','-NoExit','-ExecutionPolicy','Bypass','-File',str(script)],cwd=str(script.parent),creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return {'opened':True}
 
     def copy_text(self,text):
         from native_clipboard import copy_text
@@ -518,6 +544,14 @@ def exclude_companion_from_capture():
 
 
 def main():
+    try:
+        from private_storage import protect_installation_state
+        protect_installation_state(Path(__file__).parent)
+    except OSError:
+        if sys.platform=='win32':
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None,'Sakura cannot protect or write its private data in this folder. Install Sakura for your Windows user in LocalAppData, or choose a folder you own. Your existing files were kept.','Sakura — private storage',0x10)
+        return
     print()
     print("  🌸 Sakura — Transparent Desktop Companion")
     from PySide6 import __version__ as qt_version
@@ -525,7 +559,13 @@ def main():
     print("  ──────────────────────────────────────────")
 
     # Start FastAPI server in background only if not already running
-    if gui_server.select_port():
+    try:existing_backend=gui_server.select_port()
+    except RuntimeError as error:
+        if sys.platform=='win32':
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None,str(error)+'\nClose another Sakura window or the app occupying these ports, then try again.','Sakura — connection unavailable',0x10)
+        return
+    if existing_backend:
         print(f"  Found existing Sakura backend on {gui_server.url()}")
     else:
         print("  Initializing local backend server...")

@@ -8,6 +8,8 @@ import datetime
 import hashlib
 import ipaddress
 import os
+import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 CERT_NAME='phone-link.crt'
@@ -20,13 +22,59 @@ def fingerprint(certificate):
     return hashlib.sha256(certificate.public_bytes(serialization.Encoding.DER)).hexdigest()
 
 
+@lru_cache(maxsize=1)
+def _windows_owner_sid():
+    import csv
+    import re
+    import subprocess
+    system=Path(os.environ.get('SystemRoot','C:/Windows'))/'System32'
+    result=subprocess.run([str(system/'whoami.exe'),'/user','/fo','csv','/nh'],
+        capture_output=True,text=True,check=True,timeout=10,
+        creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    rows=list(csv.reader(result.stdout.strip().splitlines()))
+    sid=rows[0][-1] if len(rows)==1 and rows[0] else ''
+    if not re.fullmatch(r'S-1-\d+(?:-\d+)+',sid):
+        raise OSError('Could not identify the owner of the phone-link key.')
+    return sid
+
+
+def restrict_private_key(path):
+    """Protect new and existing keys without rotating the pinned identity."""
+    if os.name!='nt':
+        os.chmod(path,0o600)
+        return
+    import ctypes
+    from ctypes import wintypes
+    sid=_windows_owner_sid()
+    advapi=ctypes.WinDLL('advapi32',use_last_error=True)
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    convert=advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    convert.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(wintypes.ULONG)]
+    convert.restype=wintypes.BOOL
+    protect=advapi.SetFileSecurityW
+    protect.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,ctypes.c_void_p]
+    protect.restype=wintypes.BOOL
+    kernel.LocalFree.argtypes=[ctypes.c_void_p];kernel.LocalFree.restype=ctypes.c_void_p
+    descriptor=ctypes.c_void_p()
+    # Protected DACL: no inherited Users/Authenticated Users permissions.
+    inherit='OICI' if Path(path).is_dir() else ''
+    sddl=f'D:P(A;{inherit};FA;;;SY)(A;{inherit};FA;;;BA)(A;{inherit};FA;;;{sid})'
+    if not convert(sddl,1,ctypes.byref(descriptor),None):raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not protect(str(Path(path).resolve()),0x80000004,descriptor):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:kernel.LocalFree(descriptor)
+
+
 def _atomic_write(path,data,private=False):
-    pending=path.with_name(path.name+'.tmp')
-    if private:
-        descriptor=os.open(pending,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-        with os.fdopen(descriptor,'wb') as stream:stream.write(data)
-    else:pending.write_bytes(data)
-    pending.replace(path)
+    descriptor,name=tempfile.mkstemp(prefix=path.name+'.',suffix='.tmp',dir=path.parent)
+    pending=Path(name)
+    try:
+        with os.fdopen(descriptor,'wb') as stream:
+            if private:restrict_private_key(pending)
+            stream.write(data)
+        pending.replace(path)
+    finally:pending.unlink(missing_ok=True)
 
 
 def _existing(cert_path,key_path):
@@ -46,6 +94,7 @@ def _existing(cert_path,key_path):
 
 def ensure_identity(directory):
     directory=Path(directory);cert_path=directory/CERT_NAME;key_path=directory/KEY_NAME
+    if key_path.exists():restrict_private_key(key_path)
     existing=_existing(cert_path,key_path)
     if existing:return existing
     from cryptography import x509

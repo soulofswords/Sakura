@@ -12,7 +12,7 @@ const SHELLS=['vtuber-studio.js','companion-studio.js'];
  // Each shell is an ES module with its own top-level ICONS, so install them in
  // separate scopes the way the browser would.
  for(const file of SHELLS)await page.addScriptTag({content:`(function(){${fs.readFileSync('static/js/'+file,'utf8').replace(/export function/g,'function')}})()`});
- const ids=['model-dropdown','vrm-dropdown','live2d-dropdown','upload-pmx-toolbar','upload-vrm-toolbar','upload-live2d-toolbar','full-model-btn'];
+ const ids=['model-dropdown','vrm-dropdown','live2d-dropdown','upload-pmx-toolbar','upload-vrm-toolbar','upload-live2d-toolbar','full-model-btn','obs-background-enabled','mmd-btn'];
  const home=async()=>page.evaluate(names=>Object.fromEntries(names.map(id=>{
   const el=document.getElementById(id);
   return [id,el?.closest('#companion-studio')?'companion':el?.closest('#vtuber-studio')?'vtuber':el?.closest('#companion-toolbar')?'toolbar':el?'other':'missing'];

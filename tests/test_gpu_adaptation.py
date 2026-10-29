@@ -195,6 +195,7 @@ def test_all_broken_runtimes_give_actionable_error(monkeypatch, tmp_path):
 
 
 def test_failed_rvc_attach_cleans_process_and_job(monkeypatch, tmp_path):
+    (tmp_path/'rvc_service.py').write_text('# worker fixture')
     from unittest.mock import Mock
     worker = Mock()
     worker.poll.return_value = None

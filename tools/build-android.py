@@ -12,7 +12,7 @@ import re
 from PIL import Image
 
 BASE=Path(__file__).resolve().parents[1]
-parser=argparse.ArgumentParser();parser.add_argument('--edition',choices=['combined','vtuber'],default='combined');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--edition',choices=['combined','vtuber'],default='combined');parser.add_argument('--release-signing',action='store_true');args=parser.parse_args()
 # Keep old automation arguments compatible; mobile is now one combined product.
 if args.edition=='vtuber':
     print('Sakura VTuber Mobile has merged into Sakura Mobile; building the combined APK.',flush=True)
@@ -69,9 +69,21 @@ try:
     aligned=BUILD/'aligned.apk'
     run([tools/'zipalign.exe','-f','-P','16','4',unsigned,aligned])
     keystore=CACHE/'testing-key.jks'
-    if not keystore.exists():run([java/'keytool.exe','-genkeypair','-keystore',keystore,'-storepass','android','-keypass','android','-alias','sakura','-dname','CN=SoulOfSwords, O=Sakura','-keyalg','RSA','-keysize','2048','-validity','10000'])
+    alias='sakura'
+    if args.release_signing:
+        keystore=Path(os.environ.get('SAKURA_ANDROID_KEYSTORE',''))
+        alias=os.environ.get('SAKURA_ANDROID_KEY_ALIAS','sakura')
+        if not keystore.is_file() or not os.environ.get('SAKURA_ANDROID_STORE_PASSWORD') or not os.environ.get('SAKURA_ANDROID_KEY_PASSWORD'):
+            raise RuntimeError('Release signing requires a private keystore and SAKURA_ANDROID_STORE_PASSWORD / SAKURA_ANDROID_KEY_PASSWORD environment variables. Never put them in source or command arguments.')
+        storepass='env:SAKURA_ANDROID_STORE_PASSWORD';keypass='env:SAKURA_ANDROID_KEY_PASSWORD'
+    else:
+        print('TEST SIGNATURE: use --release-signing and a privately managed key for production distribution.',flush=True)
+        if not keystore.exists():run([java/'keytool.exe','-genkeypair','-keystore',keystore,'-storepass','android','-keypass','android','-alias','sakura','-dname','CN=SoulOfSwords, O=Sakura','-keyalg','RSA','-keysize','2048','-validity','10000'])
+        storepass=keypass='pass:android'
+    from mobile_tls import restrict_private_key
+    restrict_private_key(keystore)
     apk=OUT/('Sakura-VTuber-Mobile-Android.apk' if args.edition=='vtuber' else 'Sakura-Mobile-Android.apk')
-    run([java/'java.exe','-jar',tools/'lib/apksigner.jar','sign','--ks',keystore,'--ks-key-alias','sakura','--ks-pass','pass:android','--key-pass','pass:android','--out',apk,aligned])
+    run([java/'java.exe','-jar',tools/'lib/apksigner.jar','sign','--ks',keystore,'--ks-key-alias',alias,'--ks-pass',storepass,'--key-pass',keypass,'--out',apk,aligned])
     run([java/'java.exe','-jar',tools/'lib/apksigner.jar','verify','--verbose',apk])
     run([tools/'aapt2.exe','dump','badging',apk])
     with zipfile.ZipFile(apk) as archive:

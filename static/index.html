@@ -165,6 +165,7 @@
             <button id="dance-btn" type="button">Dance</button>
             <button id="dance-stop-btn" type="button">Stop dance</button>
             <button id="pmx-editor-btn" type="button" class="hidden" title="Open the selected PMX in its native editor">PMX Editor</button>
+            <button id="mmd-btn" type="button" class="hidden" title="Open MikuMikuDance; use its model Load button to load a PMX">MikuMikuDance</button>
             <button id="virtual-camera-toggle" type="button" aria-pressed="false" title="Send your character to an installed OBS Virtual Camera">Virtual Camera: Off</button>
             <button id="connect-phone-btn" type="button" title="Pair the Android app for face tracking, expressions or companion chat">📱 Connect to Phone</button>
             <label class="model-size-control no-drag" for="model-size">Size <input id="model-size" type="range" min="40" max="180" step="5" value="100" aria-label="Model display size"><output id="model-size-value">100%</output></label>
@@ -487,6 +488,7 @@
                 <!-- RVC Custom Voice Upload -->
                 <div class="setting-group">
                     <label>🎤 Custom RVC Voice (.pth + .index):</label>
+                    <button id="rvc-runtime-setup" type="button">Install optional RVC runtime</button><span id="rvc-runtime-status" role="status"></span>
                     <div class="rvc-upload-section">
                         <div class="rvc-models-list" id="rvc-models-list">
                             <div class="rvc-empty">No custom voice models found in <code>voices/</code> folder</div>
@@ -998,10 +1000,10 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=native-choice122-release101"></script>
-    <script type="module" src="/static/js/vtuber-studio.js?v=phone-panel76"></script>
+    <script type="module" src="/static/js/app.js?v=native-choice123-mmd"></script>
+    <script type="module" src="/static/js/vtuber-studio.js?v=mmd1029"></script>
     <script type="module" src="/static/js/appearance.js?v=access-level1028"></script>
-    <script type="module" src="/static/js/companion-studio.js?v=guided-modes4"></script>
+    <script type="module" src="/static/js/companion-studio.js?v=background-mmd1029"></script>
     <script type="module" src="/static/js/model-library.js?v=scenery1028"></script>
     <script type="module" src="/static/js/local-character-library.js?v=named-imports2"></script>
 </body>

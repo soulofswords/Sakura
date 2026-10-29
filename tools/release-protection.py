@@ -21,6 +21,8 @@ def protected_files(records,output):
     subprocess.run(['node',str(BASE/'tools/obfuscate-release.cjs'),str(js_input),str(js_output)],check=True)
     desktop=output/'desktop.py';desktop.write_text('import sakura_core\nfrom desktop import main\nmain()\n',encoding='utf-8')
     site=output/'sitecustomize.py';site.write_text('import sakura_core\n',encoding='utf-8')
+    worker=output/'rvc-worker.py'
+    worker.write_text("import sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path(__file__).resolve().parents[1]))\nimport sakura_core\nfrom rvc_service import main\nmain()\n",encoding='utf-8')
     for path,name in records:
         if name.startswith('Sakura/') and name.count('/')==1 and name.endswith('.py'):continue
         if name.startswith('Sakura/static/js/') and Path(name).suffix=='.js':path=js_output/Path(name).name
@@ -28,3 +30,4 @@ def protected_files(records,output):
     yield core,'Sakura/'+core.name
     yield desktop,'Sakura/desktop.py'
     yield site,'Sakura/sitecustomize.py'
+    yield worker,'Sakura/workers/rvc-worker.py'

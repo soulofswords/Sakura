@@ -33,7 +33,7 @@ def set_taskbar_identity(hwnd, app_id, launcher, icon):
     release = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)(table[2])
     try:
         for pid, text in [(5, app_id), (2, f'"{launcher}"'), (3, f'{icon},0'),
-                          (4, 'Sakura Companion')]:
+                          (4, 'Sakura VTuber' if app_id=='Sakura.VTuber' else 'Sakura Companion')]:
             key = PROPERTYKEY(GUID('9f4c2855-9f79-4b39-a8d0-e1d42de1d5f3'), pid)
             buffer = ctypes.create_unicode_buffer(text)
             value = PROPVARIANT()

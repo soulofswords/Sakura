@@ -69,6 +69,8 @@ def app_files():
                  'setup-macos.command','setup-rvc-macos.command','requirements-rvc.txt',
                  'requirements-agent.txt'):
         yield BASE / name, 'Sakura/' + name
+    yield BASE/'setup-rvc-amd.ps1','Sakura/setup-rvc-amd.ps1'
+    yield BASE/'setup-rvc-windows.ps1','Sakura/setup-rvc-windows.ps1'
     yield BASE/'personality/sakura.txt', 'Sakura/personality/sakura.txt'
     for name in ('companion.ico','companion-vtuber.ico','vtuber.ico','model-upload.ico'):
         yield BASE/'launcher'/name,'Sakura/launcher/'+name
@@ -141,6 +143,12 @@ def windows():
     bootstrap=BASE/'tools/packaging-cache/python-3.12.10-embed-amd64.zip'
     print(f'Solid payload: {payload.stat().st_size:,} → {compressed.stat().st_size:,} bytes; offline decoder included',flush=True)
     compile_cs(OUT/INSTALLER_FILE,['Installer.cs'],['System.IO.Compression','System.IO.Compression.FileSystem','System.Web.Extensions'],compressed,bootstrap)
+    if PROTECT_RELEASE:
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('release_asset_verifier',BASE/'tools/verify-release-assets.py')
+        verifier=importlib.util.module_from_spec(spec);spec.loader.exec_module(verifier)
+        receipt=verifier.verify(OUT/INSTALLER_FILE)
+        (OUT/(INSTALLER_FILE+'.verification.json')).write_text(json.dumps(receipt,indent=2),encoding='utf-8')
 
 MAC_INSTALL = r'''#!/bin/bash
 set -euo pipefail

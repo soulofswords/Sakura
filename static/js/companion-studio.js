@@ -4,6 +4,7 @@ const ICONS={
  camera:'<rect x="3" y="6" width="18" height="15" rx="3"/><path d="m8 6 2-3h4l2 3"/><circle cx="12" cy="13" r="4"/>',
  voice:'<path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
  tools:'<path d="m14 7 3 3-9 9-3-3 9-9Z"/><path d="m17 4 3 3-2 2-3-3 2-2Z"/><path d="M5 19H4v-1"/>',
+ background:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="2"/><path d="m3 17 6-6 4 4 3-3 5 5"/>',
  output:'<rect x="2" y="5" width="14" height="14" rx="3"/><path d="m16 10 6-4v12l-6-4"/>',
  phone:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/>',
  memory:'<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/>',
@@ -15,7 +16,7 @@ export function installCompanionStudio(){
  if(document.getElementById('companion-studio'))return;
  const byId=id=>document.getElementById(id);
  const root=document.createElement('section');root.id='companion-studio';root.hidden=true;root.setAttribute('aria-label','Sakura Companion studio');
- const entries=[['character','Models','#f7dce8','#b7688d'],['camera','Camera & tracking','#d9effb','#3888b3'],['voice','Voice & speech','#d9effb','#3888b3'],['tools','Model Settings','#e3f3da','#76a85c'],['output','Streaming & output','#dce7fa','#6480b5'],['phone','Sakura Mobile','#fae8d1','#b9894a'],['memory','Memory & privacy','#e9e2fa','#8d6abb'],['settings','Settings','#f7dce8','#b7688d']];
+ const entries=[['character','Models','#f7dce8','#b7688d'],['camera','Camera & tracking','#d9effb','#3888b3'],['voice','Voice & speech','#d9effb','#3888b3'],['tools','Model Settings','#e3f3da','#76a85c'],['background','Background & stage items','#e3f3da','#76a85c'],['output','Streaming & output','#dce7fa','#6480b5'],['phone','Sakura Mobile','#fae8d1','#b9894a'],['memory','Memory & privacy','#e9e2fa','#8d6abb'],['settings','Settings','#f7dce8','#b7688d']];
  const dockButton=([key,label,tint,ink])=>`<button type="button" class="studio-dock-button" data-companion-pane="${key}" data-label="${label}" title="${label}" aria-label="${label}" aria-pressed="false" aria-controls="companion-panel" style="--dock-tint:${tint};--dock-ink:${ink}">${svg(key)}</button>`;
  root.innerHTML=`<nav id="companion-dock" aria-label="Companion tools">${entries.map(dockButton).join('')}</nav>
  <aside id="companion-panel" hidden aria-labelledby="companion-panel-title"><header class="studio-panel-header"><div><small>SAKURA COMPANION</small><h2 id="companion-panel-title">Character</h2></div><button id="companion-panel-close" type="button" aria-label="Close panel">×</button></header><div class="studio-panel-body">
@@ -33,8 +34,8 @@ export function installCompanionStudio(){
  const memoryContent=root.querySelector('[data-companion-content="memory"]');
  memoryContent.append(...toolsContent.children);toolsContent.remove();
  const backgroundContent=document.createElement('div');backgroundContent.dataset.companionContent='background';backgroundContent.hidden=true;
+ backgroundContent.innerHTML='<section class="studio-card"><h3>Stage background</h3><div data-companion-port="background"></div><div class="studio-actions" data-companion-port="transparency"></div></section>';
  panelRoot(root).append(backgroundContent);
- const backgroundButton=document.createElement('button');backgroundButton.type='button';backgroundButton.dataset.companionPane='background';backgroundButton.textContent='Background & stage items';memoryContent.append(backgroundButton);
  const panel=byId('companion-panel'),portals=[];let active=false,currentPane='';
  const nativeModals=['settings-modal','expression-modal','tracking-modal'];
  // Resize the model editor independently of the app window and chat panel.
@@ -131,13 +132,15 @@ export function installCompanionStudio(){
   move(byId('companion-camera-group'),'camera');
   for(const id of ['upload-pmx-toolbar','upload-vrm-toolbar','upload-live2d-toolbar','refresh-models'])move(byId(id),'imports');
   move(byId('model-size')?.closest('label'),'size');
-  for(const id of ['full-model-btn','quality-btn','eye-tracking-btn','pmx-editor-btn'])move(byId(id),'framing');
+  for(const id of ['full-model-btn','quality-btn','eye-tracking-btn','pmx-editor-btn','mmd-btn'])move(byId(id),'framing');
   move(byId('voice-dropdown'),'voice');
   for(const id of ['interrupt-btn'])move(byId(id),'speech');
   move(byId('dance-style')?.closest('label'),'dance');
   for(const id of ['dance-btn','dance-stop-btn'])move(byId(id),'dance-buttons');
   for(const id of ['screen-view-btn','screen-react-btn','auto-game-btn','game-play-mode-control'])move(byId(id),'screen');
-  for(const id of ['bg-toggle-btn','vtuber-mode-btn','send-model-mobile'])move(byId(id),'stage');
+  for(const id of ['vtuber-mode-btn','send-model-mobile'])move(byId(id),'stage');
+  move(byId('obs-background-enabled')?.closest('.setting-group'),'background');
+  move(byId('bg-toggle-btn'),'transparency');
   move(byId('virtual-camera-toggle'),'virtual-camera');
   move(byId('spout-enabled')?.closest('fieldset'),'spout');
   move(byId('phone-link-enabled')?.closest('fieldset'),'phone');

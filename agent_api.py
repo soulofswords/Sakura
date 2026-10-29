@@ -1,5 +1,6 @@
 """Local-only API for agent review. Separate from chat/model-generated actions."""
 import secrets
+import copy
 from datetime import datetime,timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ from config import BASE_DIR
 from agent_runtime import runtime
 from agent_linkedin import linkedin
 from agent_calendar import google_calendar
+from native_consent import confirm as native_confirm
 
 
 def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_transcriber=None):
@@ -86,6 +88,9 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
             else:message='The operation failed. Check the connection and retry; no automatic retry was sent.'
             raise HTTPException(400,message) from None
     guard=[Depends(authorize)]
+    async def consent(title,details):
+        if not await call(native_confirm,title,details):
+            raise HTTPException(403,'The native approval was rejected. Nothing was executed.')
 
     @router.get('/api/agent/identity',dependencies=[Depends(local)])
     def identity():
@@ -157,6 +162,10 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     @router.post('/api/agent/imports/{identifier}/confirm',dependencies=guard)
     async def import_confirm(identifier:str,payload:dict):
         if set(payload)-{'approved'}:raise HTTPException(400,'Import confirmation accepts approval only, not changes to the preview.')
+        if payload.get('approved') is True:
+            with imports.lock:preview=copy.deepcopy(imports.pending.get(identifier))
+            if not preview:raise HTTPException(400,'Import preview has expired.')
+            await consent('Import Agent configuration',preview)
         return await call(imports.confirm,identifier,payload.get('approved'))
 
     @router.post('/api/agent/voice/transcribe',dependencies=guard)
@@ -252,6 +261,8 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
         if set(payload)-{'run_id','name','minutes','approved','mode','planner','event'}:raise HTTPException(400,'Unexpected automation fields.')
         event=payload.get('event')
         if event is not None and (not isinstance(event,dict) or set(event)-{'path','min_seconds'}):raise HTTPException(400,'Event trigger accepts only path and min_seconds.')
+        if payload.get('approved') is True:
+            await consent('Enable automatic workflow',{'request':payload,'task':await call(runtime.state,payload.get('run_id'))})
         return await call(automations.create,payload.get('run_id'),payload.get('name'),payload.get('minutes'),payload.get('approved',False),
                           payload.get('mode','steps'),payload.get('planner','current'),event)
 
@@ -261,15 +272,19 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     @router.post('/api/agent/library-sync/run',dependencies=guard)
     async def library_sync_run(payload:dict):
         if set(payload)-{'approved'}:raise HTTPException(400,'This workflow accepts approval only, never paths or commands.')
+        if payload.get('approved') is True:await consent('Run owner library sync',{'workflow':'Validate, preview, upload and publish the configured owner model library.'})
         return await call(owner_library.start,payload.get('approved',False))
 
     @router.post('/api/agent/library-sync/schedule',dependencies=guard)
     async def library_sync_schedule(payload:dict):
         if set(payload)-{'enabled','minutes','approved'}:raise HTTPException(400,'Unexpected schedule fields.')
+        if payload.get('approved') is True and payload.get('enabled') is True:await consent('Schedule owner library sync',payload)
         return await call(owner_library.schedule,payload.get('enabled'),payload.get('minutes'),payload.get('approved',False))
 
     @router.post('/api/agent/automations/{identifier}',dependencies=guard)
-    async def automation_update(identifier:str,payload:dict):return await call(automations.update,identifier,payload.get('paused'))
+    async def automation_update(identifier:str,payload:dict):
+        if payload.get('paused') is False:await consent('Resume an automatic workflow',{'automation_id':identifier,'workflow':next((x for x in automations.list() if x.get('id')==identifier),None)})
+        return await call(automations.update,identifier,payload.get('paused'))
 
     @router.delete('/api/agent/automations/{identifier}',dependencies=guard)
     async def automation_delete(identifier:str):return await call(automations.remove,identifier)
@@ -351,9 +366,17 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
 
     @router.post('/api/agent/actions/{identifier}/decision',dependencies=guard)
     async def decision(identifier:str,payload:dict):
+        if set(payload)-{'approve','remember'}:raise HTTPException(400,'Approval cannot change action arguments.')
         if type(payload.get('approve')) is not bool:raise HTTPException(400,'Choose Approve or Reject.')
         if type(payload.get('remember',False)) is not bool:raise HTTPException(400,'Choose whether to allow this exact command for this session.')
-        return await call(runtime.decide,identifier,payload['approve'],payload.get('remember',False))
+        expected=None
+        if payload['approve']:
+            from agent_runtime import digest
+            with runtime.lock:action=copy.deepcopy(runtime.actions.get(identifier))
+            if not action or action.get('status')!='pending':raise HTTPException(400,'This approval is no longer pending.')
+            expected=digest(action)
+            await consent('Run Agent action',{'action':action,'remember_exact_command':payload.get('remember',False)})
+        return await call(runtime.decide,identifier,payload['approve'],payload.get('remember',False),expected_digest=expected)
 
     @router.delete('/api/agent/permissions/{identifier}',dependencies=guard)
     async def revoke_permission(identifier:str):return await call(runtime.permissions.revoke,identifier)

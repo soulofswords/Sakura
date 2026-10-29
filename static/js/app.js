@@ -551,10 +551,20 @@ window.addEventListener('DOMContentLoaded', async () => {
             } catch (error) { console.warn('Native capabilities:', error); return; }
         }
         editorButton.classList.remove('hidden');
+        document.getElementById('mmd-btn').classList.remove('hidden');
         document.getElementById('pmx-texture-compare').classList.remove('hidden');
     };
     if (window.pywebview) showEditorButton();
     window.addEventListener('pywebviewready', showEditorButton);
+    document.getElementById('mmd-btn').addEventListener('click',async()=>{
+        try{const result=await window.pywebview.api.open_mmd();if(result?.message){if(trackingOnly)alert(result.message);else addMessage(result.message,'sakura');}}
+        catch(error){const message=`MikuMikuDance: ${error.message||error}`;if(trackingOnly)alert(message);else addMessage(message,'sakura');}
+    });
+    document.getElementById('rvc-runtime-setup').addEventListener('click',async()=>{
+        const status=document.getElementById('rvc-runtime-status');
+        try{const result=await window.pywebview?.api?.install_rvc_runtime();if(!result)throw Error('Open the Windows desktop app to install RVC.');status.textContent=result.cancelled?'Installation cancelled.':'Installer opened. Follow its progress, then select your RVC voice.';}
+        catch(error){status.textContent=error.message||String(error);}
+    });
     editorButton.addEventListener('click', async () => {
         if (!selectedPmxPath?.toLowerCase().endsWith('.pmx')) {
             addMessage('Select a PMX model to open in PMX Editor.', 'sakura');
