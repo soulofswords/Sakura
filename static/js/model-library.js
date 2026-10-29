@@ -91,6 +91,8 @@ function installCard(host,assetKind='character') {
     } else host.append(buttons, section);
     const get = key => section.querySelector('[data-library-' + key + ']');
     let models = [], selectedFormat = '', cloudHost = '', selectedModel = '', downloads = 0, selectedGame='';
+    const locationKey=()=>`sakura-cloud-folder:${assetKind}:${selectedFormat}`;
+    const rememberLocation=()=>{if(selectedFormat)try{localStorage.setItem(locationKey(),selectedGame);}catch{}};
     const modelParts=model=>{
         const parts=String(model.name||'').split(' / ');
         return model.format==='pmx'&&parts.length>1?{game:parts[0],path:parts.slice(0,-1),name:parts.at(-1)}:{game:'Other characters',path:['Other characters'],name:String(model.name||'')};
@@ -124,6 +126,7 @@ function installCard(host,assetKind='character') {
     function render() {
         const query = get('search').value.trim().toLocaleLowerCase();
         const results = get('results'); results.replaceChildren();
+        rememberLocation();
         const navigation=get('folders');navigation.replaceChildren();
         // Retain old combined package IDs for already-installed users, but hide
         // their card once the authored outfit/variant children are published.
@@ -218,7 +221,7 @@ function installCard(host,assetKind='character') {
         for (const other of buttons.querySelectorAll('button')) other.setAttribute('aria-expanded', String(!closing && other === button));
         if (closing) return;
         selectedFormat = format;
-        selectedGame='';
+        try{selectedGame=localStorage.getItem(locationKey())||'';}catch{selectedGame='';}
         get('browse').hidden = true;
         get('title').textContent = button.textContent;
         get('destination').textContent = assetKind==='character'?`Downloaded models install into models/${format}/ and appear in the ${format === 'live2d' ? 'Live2D' : format.toUpperCase()} selector. Your existing models are kept.`:`Downloads install into models/pmx/${assetKind==='stage'?'Stages':'Tools & Props'}/. They are separate from characters; select an asset locally to place it.`;

@@ -27,6 +27,7 @@ import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
 import ModelDance from './model-dance.js?v=irina-greeting113';
 import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
 import {renderPixelRatio} from './render-budget.js?v=startup68';
+import {applyPmxReferenceLighting} from './pmx-reference-lighting.js?v=1';
 
 /**
  * Smart loader for .tga textures.
@@ -999,6 +1000,7 @@ export default class ModelViewer {
                         material.userData.MMD ||= {};
                         material.userData.MMD.userToonOverride = !!materialTextures[i]?.toon;
                         material.userData.MMD.userSphereOverride = !!materialTextures[i]?.sphere;
+                        material.userData.MMD.authoredLighting = {diffuse:[...data.materials[i].diffuse],ambient:[...data.materials[i].ambient]};
                     }
                     return mesh;
                 };
@@ -1053,6 +1055,9 @@ export default class ModelViewer {
                         // image decoding. Apply it to the material before shaders
                         // compile, otherwise eye highlights become opaque white.
                         this._preparePmxMaterials(mmd);
+                        mmd.traverse(child=>{for(const material of Array.isArray(child.material)?child.material:[child.material]){
+                            applyPmxReferenceLighting(material,material?.userData?.MMD?.authoredLighting);
+                        }});
                         repairNoseSkin(mmd);
                         this._repairDancerSkirtAtlas(mmd);
                         this._fixPmxLayeredSurfaces(mmd);

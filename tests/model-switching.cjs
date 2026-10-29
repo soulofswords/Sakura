@@ -9,6 +9,7 @@ const context = {
     performance,
     window: {},
     repairNoseSkin() { return 0; },
+    applyPmxReferenceLighting() {},
     loadVisibility() {}, applyVisibility() {},
     fetch: (...args) => fetchImpl(...args),
     THREE: {

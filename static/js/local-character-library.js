@@ -4,6 +4,11 @@ const pictures=new Map();
 let folderNames={};
 const folderLabel=(name,depth)=>depth===0?(folderNames[format+'/'+name]||name):name;
 let dialog,format='',folder=[],preview,ready=false,busy='',current='',queue=[],hover=null,timer;
+const locations=new Map();
+function rememberFolder(parts=folder){
+ locations.set(format,[...parts]);
+ try{localStorage.setItem('sakura-character-folder:'+format,JSON.stringify(parts));}catch{}
+}
 function send(message){preview?.contentWindow?.postMessage(message,location.origin);}
 function park(){send({type:'rotate',enabled:false});if(preview)preview.style.cssText='position:fixed;left:-10000px;top:0;width:256px;height:256px;pointer-events:none';}
 function showRotation(square){
@@ -25,7 +30,11 @@ function entries(){
  });
 }
 async function open(kind){
- format=kind;folder=[];
+ format=kind;
+ try{folder=locations.get(kind)||JSON.parse(localStorage.getItem('sakura-character-folder:'+kind)||'null')||[];}catch{folder=[];}
+ if(!Array.isArray(folder)||folder.some(p=>typeof p!=='string'))folder=[];
+ // Removed/moved folders fall back to the closest surviving parent.
+ const available=entries();while(folder.length&&!available.some(item=>folder.every((name,i)=>item.parts[i]===name)))folder.pop();
  if(!dialog){
   dialog=document.createElement('dialog');dialog.id='local-character-library';
   dialog.innerHTML=`<header><h2 data-local-title></h2><button type="button" data-local-close aria-label="Close character library">×</button></header>
@@ -63,6 +72,7 @@ function renderer(){
  park();
 }
 function render(){
+ rememberFolder();
  park();hover=null;queue=[];
  const q=dialog.querySelector('[data-local-search]').value.trim().toLocaleLowerCase(),grid=dialog.querySelector('[data-local-grid]'),nav=dialog.querySelector('[data-local-path]');
  grid.replaceChildren();nav.replaceChildren();
@@ -80,7 +90,7 @@ function render(){
   if(format==='live2d')setImage('/api/local-model-library/preview?model='+encodeURIComponent(item.path));
   else if(pictures.has(item.path))setImage(pictures.get(item.path));
   else queue.push(item);
-  button.onclick=()=>{item.select.value=item.option.value;item.select.dispatchEvent(new Event('change',{bubbles:true}));dialog.close();};
+  button.onclick=()=>{rememberFolder(item.parts.slice(0,-1));item.select.value=item.option.value;item.select.dispatchEvent(new Event('change',{bubbles:true}));dialog.close();};
   if(format!=='live2d'){
    button.onpointerenter=()=>{
     hover={path:item.path,square};

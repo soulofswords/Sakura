@@ -27,7 +27,12 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
   await dialog.getByRole('button',{name:'PMX · Irina',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.chosen),'pmx/Other/Irina.pmx');
   assert.equal(await dialog.isVisible(),false);
+  await page.getByRole('button',{name:'PMX',exact:true}).click();
+  assert.equal(await dialog.getByRole('button',{name:'PMX · Irina',exact:true}).count(),1,'Search selection reopens its actual parent folder');
+  assert.equal(await dialog.getByRole('button',{name:'Open folder Game',exact:true}).count(),0);
+  await dialog.getByRole('button',{name:'Close character library'}).click();
   await page.getByRole('button',{name:'VRM',exact:true}).click();
+  await dialog.getByRole('button',{name:'VRM · Anna',exact:true}).waitFor();
   assert.equal(await dialog.getByRole('button',{name:'VRM · Anna',exact:true}).count(),1);
   await dialog.getByRole('button',{name:'Close character library'}).click();
   await page.getByRole('button',{name:'Live2D',exact:true}).click();
@@ -35,6 +40,14 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
   await page.waitForFunction(()=>document.querySelector('[data-local-model]')?.textContent==='Annie');
   await dialog.getByRole('button',{name:'Live2D · Annie',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.chosen),'live2d/Annie/model.model3.json');
+  await page.reload();
+  await page.getByRole('button',{name:'PMX',exact:true}).click();
+  await dialog.getByRole('button',{name:'PMX · Irina',exact:true}).waitFor();
+  assert.equal(await dialog.getByRole('button',{name:'PMX · Irina',exact:true}).count(),1,'PMX location survives a page restart independently of Live2D');
+  await dialog.getByRole('button',{name:'Close character library'}).click();
+  await page.getByRole('button',{name:'Live2D',exact:true}).click();
+  await dialog.getByRole('button',{name:'Live2D · Annie',exact:true}).waitFor();
+  assert.equal(await dialog.getByRole('button',{name:'Live2D · Annie',exact:true}).count(),1,'Live2D has its own remembered folder');
   assert.deepEqual(errors,[]);
   console.log('PASS: separate format buttons, folder navigation, cross-folder search, preview fallback, and real selector change events.');
  }finally{await browser.close();}
