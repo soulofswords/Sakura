@@ -60,7 +60,8 @@ def test_repeating_task_requires_a_reviewed_completed_workflow(tmp_path):
     import pytest
     with pytest.raises(ValueError):bridge.schedule(run['id'],False)
     scheduler.create.assert_not_called()
-    bridge.schedule(run['id'],True);scheduler.create.assert_called_once_with(run['id'],'Research market',30,True)
+    with patch('teacher_agent_chat.native_confirm',return_value=True):bridge.schedule(run['id'],True)
+    scheduler.create.assert_called_once_with(run['id'],'Research market',30,True)
     with pytest.raises(ValueError):bridge.schedule(run['id'],True)
     assert scheduler.create.call_count==1
 

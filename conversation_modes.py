@@ -31,7 +31,7 @@ def work_request(text):
     build=r"(?:make|build|create|develop|code|write|design|edit|rewrite|fix|debug|search|find|run|execute|automate|schedule|research|analy[sz]e|summari[sz]e|generate|upload|delete|download|send|publish|deploy|install|update|add|set)\b"
     if not re.search(prefix+build,text,re.I):return False
     objects=r"\b(?:github|repository|repositories|projects|app|application|website|code|script|program|software|dashboard|bot|agent|task|workflow|automation|report|document|resume|cv|spreadsheet|sheet|file|folder|command|calendar|meeting|reminder|event|schedule|email|post|model|package|project|market|stocks?|trading|research|presentation)\b"
-    return bool(re.search(objects,text,re.I))
+    return bool(re.search(objects,text,re.I) or re.search(r'\b(?:playwright|firecrawl|nuclei|mcp)\b',text,re.I))
 
 
 def teacher_prompt():

@@ -8,10 +8,10 @@
 /* Keep an outstanding approval prominent while the task details scroll. */
 #review.action{position:sticky;top:8px;z-index:8;box-shadow:0 8px 28px #0009;border-color:var(--ag-action-line)}
 </style>
-<link rel="stylesheet" href="/static/css/agent-studio.css?v=1">
-<script src="/static/js/agent-services.js?v=schedule-nav1"></script>
+<link rel="stylesheet" href="/static/css/agent-studio.css?v=conversation1029">
+<script src="/static/js/agent-services.js?v=tool-integrations1029"></script>
 <script src="/static/js/agent-workspace.js?v=colibri-qwen36-2"></script>
-<script src="/static/js/agent-studio.js?v=telegram-nav2"></script>
+<script src="/static/js/agent-studio.js?v=conversation1029"></script>
 <script src="/static/js/agent-memory.js?v=1"></script>
 <script src="/static/js/agent-extensions.js?v=1"></script>
 <script>
@@ -84,7 +84,7 @@
 <label>Reusable skill<select id="selected-skill"><option value="">No skill</option></select></label>
 <p id="planner-provider-status" class="muted">Choose which configured AI plans each step.</p>
 <p class="notice">Files stay in this folder. Sakura can read source documents and create new DOCX or Markdown drafts after you approve each step. Approve &amp; run opens a Windows confirmation showing the exact stored action; execution starts only after you choose Yes there. It will not overwrite the original. Approved shell commands and MCP processes run with your user permissions; the workspace is not a sandbox. Results read by a cloud model are sent to that selected provider.</p>
-<label><input id="auto-plan" type="checkbox" checked style="width:auto"> Work through read-only steps (folder listings and file reads) on their own. Web requests and anything that writes a file, runs a command, posts or changes your calendar still stops for your approval.</label>
+<label><input id="auto-plan" type="checkbox" checked style="width:auto"> Auto-continue using the selected approval mode. Ask for approval permits workspace reads; Approve for me also permits public web lookups; Full access permits tools and changes within existing tool boundaries. Turn this off to review every step.</label>
 <div class="row"><button id="create">Create task</button><button id="plan">Suggest next step</button><button id="pause">Pause</button><button id="resume">Resume +25 steps</button><button id="cancel">Cancel task</button></div></section>
 <section id="review" class="card" hidden></section>
 <section class="card" id="agent-task-progress"><h2>Activity & results</h2><div id="progress">Select or create a task to begin.</div></section>
@@ -214,7 +214,7 @@ $('save-connection').onclick=()=>perform(async()=>{
  const data={name:$('connection-name').value,transport:$('transport').value,url:$('mcp-url').value,token:$('mcp-token').value,command:$('mcp-command').value,args:JSON.parse($('mcp-args').value||'[]'),env:JSON.parse($('mcp-env').value||'{}')};
  await api('connections',data);$('mcp-token').value='';$('mcp-env').value='';await refresh();
 });
-$('create').onclick=()=>perform(async()=>{if(await extensions?.slash($('goal').value))return;const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value,auto_continue:$('auto-plan').checked===true});selected=run.id;renderReview(null);renderRun(run);announce('All right. I will read what I need on my own and stop for your approval before anything changes.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
+$('create').onclick=()=>perform(async()=>{if(await extensions?.slash($('goal').value))return;const run=await api('tasks',{goal:$('goal').value,workspace:$('workspace').value,auto_continue:$('auto-plan').checked===true});selected=run.id;renderReview(null);renderRun(run);announce('I created the task. I will use your selected approval mode and report the actual results.');try{const planned=await api('tasks/'+run.id+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));}catch(error){renderRun(await api('tasks/'+run.id));throw error;}await refresh();});
  $('plan').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderReview(null);const planned=await api('tasks/'+selected+'/plan',selectedPlanner());renderRun(planned);announce(runAnnouncement(planned));await refresh();});
 $('propose').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or select a task first.');renderRun(await api('tasks/'+selected+'/propose',{tool:$('tool').value,arguments:JSON.parse($('tool-args').value)}));await refresh();});
 $('cancel').onclick=()=>perform(async()=>{if(!selected)return;renderReview(null);renderRun(await api('tasks/'+selected+'/cancel',{}));await refresh();});
@@ -273,10 +273,10 @@ async function loadAgenda(){
  for(const event of data.events){const row=node('div',undefined,'connection');row.append(node('strong',event.summary||'(Untitled event)'),node('p',displayEventTime(event.start)+(event.end?' – '+displayEventTime(event.end):'')));if(event.location)row.append(node('p',event.location));box.append(row);}
 }
 const workspaceUI=window.installAgentWorkspace?.({api,perform,refresh,renderRun,selectedRun:()=>current,announce});
-const serviceUI=window.installAgentServices({api,perform,refresh,review:renderReview});
+const serviceUI=window.installAgentServices({api,perform,refresh,review:renderReview,renderRun,selectRun:id=>{selected=id;}});
 const memoryUI=window.installAgentMemory?.({api,perform,refresh});
 window.searchAgentHistory=searchHistory;
 const extensions=window.installAgentExtensions?.({api,perform,refresh,renderRun,selectRun:id=>{selected=id;if(!id){current=null;renderReview(null);}},currentRun:()=>current,planner:selectedPlanner,token,node,button});
-window.installAgentStudio?.();
+window.installAgentStudio?.({api,perform,newTask:()=>{selected=null;current=null;renderReview(null);$('goal').value='';$('progress').textContent='What would you like to work on?';}});
 perform(refresh);
 </script></body></html>

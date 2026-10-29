@@ -92,6 +92,36 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
         if not await call(native_confirm,title,details):
             raise HTTPException(403,'The native approval was rejected. Nothing was executed.')
 
+    @router.get('/api/agent/approval-policy',dependencies=guard)
+    async def approval_policy():return runtime.approval_policy()
+
+    @router.get('/api/agent/integrations',dependencies=guard)
+    async def integrations_status():
+        from agent_integrations import status
+        return await call(status)
+
+    @router.post('/api/agent/integrations/configure',dependencies=guard)
+    async def integrations_configure(payload:dict):
+        from agent_integrations import configure
+        if set(payload)-{'firecrawl_key','clear_firecrawl','scan_origins'}:raise HTTPException(400,'Unexpected integration fields.')
+        if payload.get('scan_origins'):await consent('Authorize security testing origins',{'origins':payload['scan_origins'],'scope':'Only scan applications you own or are authorized to test. Approved Agent scans may make active HTTP requests.'})
+        return await call(configure,payload)
+
+    @router.post('/api/agent/integrations/{provider}/setup',dependencies=guard)
+    async def integration_setup(provider:str):
+        if provider not in ('playwright','firecrawl','nuclei'):raise HTTPException(400,'Unknown integration.')
+        run=await call(runtime.new_run,'Set up '+provider+' for Sakura Agent',str(BASE_DIR),False)
+        return await call(runtime.propose,run['id'],'integrations.setup',{'provider':provider},'Install or prepare the requested integration; verify status before claiming it is ready.')
+
+    @router.post('/api/agent/approval-policy',dependencies=guard)
+    async def approval_policy_update(payload:dict):
+        if set(payload)!={'mode'} or payload.get('mode') not in ('ask','balanced','full'):raise HTTPException(400,'Choose a valid approval mode.')
+        mode=payload['mode']
+        if mode!='ask':await consent('Change Agent access',{'mode':mode,'scope':'All Agent tasks in this app session; resets on restart.',
+            'permissions':('Automatically run workspace reads and public web lookups; changes, commands and unknown MCP tools still require review.' if mode=='balanced' else 'Automatically run tools, file edits, commands and connected MCP actions. Commands run with your Windows permissions. Existing workspace validation still applies.'),
+            'read_only_steps':'Automatic execution also requires the task’s auto-continue switch.'})
+        return runtime.set_approval_mode(mode)
+
     @router.get('/api/agent/identity',dependencies=[Depends(local)])
     def identity():
         from agent_runtime import digest

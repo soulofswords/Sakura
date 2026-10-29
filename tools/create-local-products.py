@@ -50,7 +50,8 @@ def main(edition=None):
             if not settings.exists():settings.write_text(json.dumps(builder.DEFAULTS,indent=2),encoding='utf-8')
             # Directory junctions share large libraries/runtimes. Independent
             # desktop profiles and logs are deliberately not linked.
-            for name in ['models','voices','venv','kokoro-assets','llm-models','ollama-runtime','rvc-assets','rvc-dependencies','rvc-extra','rvc-gpu-runtime','rvc-runtime','rvc-venv','rvc-amd-runtime']:
+            for name in ['models','voices','venv','kokoro-assets','llm-models','ollama-runtime','rvc-assets','rvc-dependencies','rvc-extra','rvc-gpu-runtime','rvc-runtime','rvc-venv','rvc-amd-runtime','agent-integrations']:
+                if edition=='vtuber' and name=='agent-integrations':continue
                 if edition=='vtuber' and name in ['llm-models','ollama-runtime']:continue
                 source=BASE/name;target=destination/name
                 if not source.is_dir():continue

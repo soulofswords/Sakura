@@ -21,6 +21,7 @@ try{
   if(u.pathname==='/api/settings')return route.fulfill({json:{ui_theme:'dark'}});
   const raw=req.postData();
   calls.push({path:u.pathname,method:req.method(),body:raw&&(req.headers()['content-type']||'').includes('json')?JSON.parse(raw):null,token:req.headers()['x-sakura-agent']});
+  if(u.pathname==='/api/agent/approval-policy')return route.fulfill({json:{mode:req.method()==='POST'?req.postDataJSON().mode:'ask'}});
   if(u.pathname==='/api/agent/state')return route.fulfill({json:state});
   if(u.pathname==='/api/agent/telegram')return route.fulfill({json:{token_set:false,running:false,enabled:false,chat_ids:[],voice_enabled:false,last_error:''}});
   if(u.pathname==='/api/agent/local-ai')return route.fulfill({json:{models:[],runtime_installed:false,job:{running:false}}});
@@ -36,20 +37,30 @@ try{
   if(u.pathname.endsWith('/delegate'))return route.fulfill({json:proposed('agents.delegate',{goals:req.postDataJSON().goals},'action3')});
   if(u.pathname.endsWith('/propose')){const body=req.postDataJSON();return route.fulfill({json:proposed(body.tool,body.arguments,'action4')});}
   if(u.pathname.endsWith('/decision')){const approve=req.postDataJSON().approve;for(const step of run.steps)step.status=approve?'completed':'rejected';run.status='ready';return route.fulfill({json:{action:run.steps.at(-1),run}});}
-  if(u.pathname.endsWith('/plan'))return route.fulfill({json:run});
+  if(u.pathname.endsWith('/plan')){state.runs=[run];return route.fulfill({json:run});}
   if(u.pathname.startsWith('/api/agent/tasks/'))return route.fulfill({json:run});
   return route.fulfill({json:{ok:true}});
  });
  await page.goto('http://127.0.0.1/agent');const nav=page.getByRole('navigation',{name:'Agent studio'});
  const go=async label=>{await nav.getByRole('button',{name:label,exact:true}).click();};
- const open=title=>page.locator('details').filter({has:page.locator('summary',{hasText:title})}).first().locator('summary').click();
+ const open=title=>page.locator('summary').filter({hasText:title}).first().click();
  const seen=async(pattern,scope)=>{const box=scope?page.locator(scope).getByText(pattern).first():page.getByText(pattern).first();await box.waitFor();return box.innerText();};
  for(const [name,id]of [['Connections','service-connections'],['Connections','agent-telegram'],['Skills','agent-skills'],['Memory & learning','agent-memory'],['Task history','agent-history'],['Local AI','agent-local-ai'],['Automations','agent-automations'],['Tasks','agent-compose']]){
   await go(name);assert.equal(await page.locator('#'+id).isVisible(),true,name+' view is wired');
  }
  assert.equal(await page.locator('#agent-telegram').isVisible(),false,'Telegram is hidden outside Connections');
- await page.fill('#goal',run.goal);await page.fill('#workspace','C:\\Documents');await page.click('#create');
- await page.locator('#review .reject').waitFor();
+ await page.fill('#goal','Prepare a task');await page.click('#create');
+ assert.equal(await page.locator('#agent-task-options').getAttribute('open'),'');
+ assert.equal(await page.locator('#workspace').evaluate(el=>el===document.activeElement),true,'Send guides the user to the missing workspace');
+ await page.locator('#agent-task-options>summary').click();
+ await page.locator('#agent-access-menu>summary').click();
+ await page.locator('[data-approval-mode="balanced"]').click();
+ assert.ok(calls.some(c=>c.path==='/api/agent/approval-policy'&&c.body?.mode==='balanced'&&c.token==='test-token'));
+ await page.waitForFunction(()=>document.getElementById('agent-access-label').textContent==='Approve for me');
+ await page.locator('#agent-task-options>summary').click();
+ await page.fill('#goal',run.goal);await page.fill('#workspace','C:\\Documents');
+ await page.locator('#agent-task-options>summary').click();await page.click('#create');
+ try{await page.locator('#review .reject').waitFor({timeout:8000});}catch(error){console.error('UI errors',errors,'Status',await page.locator('#status').innerText(),'Recent calls',calls.slice(-6));await page.screenshot({path:'F:/AI/assistant/private-model-library-pmx/agent-layout-failure.png'});throw error;}
  assert.ok(calls.some(c=>c.path==='/api/agent/tasks'&&c.body?.goal===run.goal&&c.token==='test-token'));
  for(const viewport of [{width:1440,height:1000},{width:850,height:740},{width:390,height:844}]){
   await page.setViewportSize(viewport);await page.locator('#review .reject').scrollIntoViewIfNeeded();
@@ -60,7 +71,7 @@ try{
  await page.click('#review .reject');assert.ok(calls.some(c=>c.path.endsWith('/decision')&&c.body?.approve===false));
 
  // Terminal backends: the exact command reaches the same authenticated approval path.
- await go('Tasks');await open('Terminal backends');
+ await go('Tasks');await page.locator('#agent-advanced-tools>summary').click();await open('Terminal backends');
  for(const id of ['execution-backend','execution-command'])assert.equal(await page.locator('#'+id).isVisible(),true,id+' is on the tools card');
  await page.selectOption('#execution-backend','docker');assert.equal(await page.locator('#execution-image').isVisible(),true,'Docker asks for an installed digest');
  await page.selectOption('#execution-backend','ssh');assert.equal(await page.locator('#execution-host').isVisible(),true,'SSH asks for the exact host');
@@ -122,7 +133,7 @@ try{
  assert.match(await seen(/Imported 1 skills/,'#agent-skills'),/Imported 1 skills/);
 
  // A voice memo transcribes into the goal for review, never straight into an action.
- await go('Tasks');await open('Transcribe a voice memo');
+ await go('Tasks');await page.locator('#agent-task-options>summary').click();await open('Transcribe a voice memo');
  assert.equal(await page.locator('#agent-voice-file').isVisible(),true,'Voice memo picker is offered');
  const memo=path.join(scratch,'memo.ogg');await fs.writeFile(memo,'OGGFAKE');
  await page.setInputFiles('#agent-voice-file',memo);
@@ -159,6 +170,9 @@ try{
  await page.screenshot({path:'F:/AI/assistant/private-model-library-pmx/agent-studio-extensions.png',fullPage:false});
  await page.evaluate(()=>{document.documentElement.dataset.uiTheme='light';});
  await go('Tasks');await page.screenshot({path:'F:/AI/assistant/private-model-library-pmx/agent-studio-light.png'});
+ await page.evaluate(()=>{document.documentElement.dataset.uiTheme='dark';document.getElementById('agent-task-options').open=false;document.getElementById('agent-advanced-tools').open=false;window.scrollTo(0,0);});
+ await page.locator('#agent-access-menu>summary').click();
+ await page.screenshot({path:'F:/AI/assistant/private-model-library-pmx/agent-studio-approval-menu.png'});
  assert.deepEqual(errors,[]);
  console.log('PASS: eight Agent views, backend/delegation/browser/voice/import/gateway panels, allow-list grant and revoke, slash commands, authenticated proposals and responsive rendering.');
 }finally{await fs.rm(scratch,{recursive:true,force:true});await browser.close();}

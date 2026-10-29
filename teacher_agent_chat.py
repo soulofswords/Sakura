@@ -1,9 +1,11 @@
 """Teacher chat bridge to real Agent tasks; plans stop at existing approvals."""
 import re
+import copy
 import threading
 import time
 from pathlib import Path
 from agent_runtime import runtime,digest
+from native_consent import confirm as native_confirm
 
 
 class TeacherAgentChat:
@@ -13,8 +15,8 @@ class TeacherAgentChat:
     def _worker(self,identifier,model,decision=None):
         try:
             if decision:
-                action,approved=decision
-                result=self.agent.decide(action,approved)
+                action,approved,expected=decision
+                result=self.agent.decide(action,approved,expected_digest=expected)
                 if not approved:return
                 if result.get('run',{}).get('status') in ('failed','cancelled','completed'):return
             self.agent.plan(identifier,model)
@@ -44,7 +46,13 @@ class TeacherAgentChat:
         if type(approved) is not bool:raise ValueError('Choose Approve or Reject.')
         state=self.status(identifier)
         if not state['pending'] or state['pending']['id']!=action:raise ValueError('This action changed or is no longer pending. Refresh the task.')
-        return self.launch(identifier,model,(action,approved))
+        expected=None
+        if approved:
+            with self.agent.lock:pending=copy.deepcopy(self.agent.actions.get(action))
+            if not pending:raise ValueError('This action is no longer pending.')
+            expected=digest(pending)
+            if not native_confirm('Run Companion Agent action',pending):raise ValueError('Native approval rejected. Nothing was executed.')
+        return self.launch(identifier,model,(action,approved,expected))
 
     def schedule(self,identifier,approved):
         if approved is not True:raise ValueError('Approve the exact recurring workflow first.')
@@ -53,6 +61,7 @@ class TeacherAgentChat:
         if not proposal:raise ValueError('Ask to repeat this completed task at an interval first.')
         run=self.agent.state(identifier)
         if digest(run['steps'])!=proposal['steps_hash']:raise ValueError('The task changed. Ask for a fresh schedule proposal.')
+        if not native_confirm('Schedule Companion workflow',{'goal':run['goal'],'minutes':proposal['minutes'],'steps':run['steps']}):raise ValueError('Native approval rejected. No workflow was scheduled.')
         scheduler=getattr(self.agent,'chat_automations',None)
         if scheduler is None:raise ValueError('The Agent scheduler is not available.')
         with self.lock:
@@ -92,7 +101,10 @@ class TeacherAgentChat:
         elif not work_request(text) or re.search(r'\b(?:dance|sing|voice|tracking|transparency|model|camera)\b',text,re.I):return None
         if payload.get('phone') and not (cfg.get('computer_control_enabled') and cfg.get('phone_system_access_enabled')):
             return {'reply':'Enable computer access and phone system access on the PC before creating a PC Agent task from the phone. Nothing has run.','audio':None}
-        workspace=path.group(1).strip().rstrip(' .') if path else None
+        providers=re.findall(r'\b(playwright|firecrawl|nuclei)\b',goal,re.I)
+        setup_requested=bool(providers and re.search(r'\b(?:install|add|set up|setup|enable|integrate)\b',goal,re.I))
+        from config import BASE_DIR
+        workspace=path.group(1).strip().rstrip(' .') if path else (str(BASE_DIR) if setup_requested else None)
         if not workspace:
             with self.lock:self.pending[channel]={'goal':goal,'created':time.monotonic()}
             return {'reply':'I can create an Agent task for that. Which folder should I use as its workspace? Send the full folder path, for example C:\\Users\\you\\Documents\\MyProject. I have not run the task yet.','audio':None}
@@ -100,6 +112,11 @@ class TeacherAgentChat:
             run=self.agent.new_run(goal,workspace,True)
             with self.lock:
                 self.latest[channel]=run['id'];self.pending.pop(channel,None)
+            if setup_requested and len(set(name.lower() for name in providers))==1:
+                provider=providers[0].lower()
+                self.agent.propose(run['id'],'integrations.setup',{'provider':provider},'Prepare the tool you asked to add; secrets must be entered in Connections, never chat.')
+                with self.lock:self.jobs[run['id']]={'running':False,'error':''}
+                return {'reply':'I prepared '+provider+' setup as an Agent task. Review and approve the step below. I will report it ready only after checking the result.','agent_task':{'id':run['id']},'audio':None}
             self.launch(run['id'],model)
             return {'reply':'Created an Agent task and started planning. Progress and any required approvals appear below; changes have not been approved automatically.','agent_task':{'id':run['id']},'audio':None}
         except (ValueError,OSError) as error:return {'reply':'I could not create that task: '+str(error)[:300],'audio':None}

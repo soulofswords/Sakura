@@ -131,7 +131,7 @@ IMAGE_CREATION_CAPABILITY=re.compile(r'(?:image.{0,24}(?:generat|creat|synthes)|
 # can gather context in one pass. Anything that changes a file, account or process
 # still stops for review, and MCP tools never auto-run because a third-party
 # server's read/write split is not knowable from its tool name.
-AUTO_RUN_TOOLS={'files.list','files.read','calendar.events.list','linkedin.profile'}
+AUTO_RUN_TOOLS={'files.list','files.read','calendar.events.list','linkedin.profile','integrations.status'}
 
 MAX_STORE_BYTES=2_000_000
 MAX_STORE_TEXT=16_000
@@ -197,6 +197,7 @@ class AgentRuntime:
         self.history=AgentHistory(self.store_path.with_suffix('.sqlite3'))
         from agent_permissions import CommandPermissions
         self.permissions=CommandPermissions()
+        self.approval_mode='ask' # Session-only; a restart never restores broad access.
         from agent_observability import Trace
         self.trace=Trace(self.store_path.parent/'agent-trace.jsonl')
         self.active_runs=set();self.planners={}
@@ -207,6 +208,19 @@ class AgentRuntime:
     def _control(self,identifier):
         with self.lock:
             return self.controls.setdefault(identifier,{'cancel':threading.Event(),'pause':threading.Event()})
+
+    def approval_policy(self):
+        with self.lock:return {'mode':self.approval_mode,'scope':'current app session','workspace_boundary':True}
+
+    def set_approval_mode(self,mode):
+        if mode not in ('ask','balanced','full'):raise ValueError('Choose Ask for approval, Approve for me or Full access.')
+        with self.lock:self.approval_mode=mode
+        return self.approval_policy()
+
+    def _auto_allowed(self,action):
+        if self.approval_mode=='full':return True
+        if self.approval_mode=='balanced' and action['tool'] in {'web.search','web.fetch','browser.open','browser.snapshot'}:return True
+        return action['tool'] in AUTO_RUN_TOOLS or self.permissions.allows(action)
 
     def _run_lock(self,identifier):
         with self.lock:
@@ -276,7 +290,8 @@ class AgentRuntime:
         from agent_history import TOOLS as HISTORY_TOOLS
         from agent_delegation import TOOLS as DELEGATION_TOOLS
         from agent_browser import TOOLS as BROWSER_TOOLS
-        tools=copy.deepcopy(LOCAL_TOOLS+HISTORY_TOOLS+DELEGATION_TOOLS+BROWSER_TOOLS)
+        from agent_integrations import TOOLS as INTEGRATION_TOOLS
+        tools=copy.deepcopy(LOCAL_TOOLS+HISTORY_TOOLS+DELEGATION_TOOLS+BROWSER_TOOLS+INTEGRATION_TOOLS)
         from agent_library_owner import owner_library
         if owner_library.status().get('owner_available'):
             tools.extend([{'name':'library.sync','description':'Owner-only: sync Jio PMX/Live2D folders, generate previews, verify packages and publish. Requires approval; runs in background. Use library.status for actual completion. No arbitrary commands or paths.',
@@ -362,6 +377,15 @@ class AgentRuntime:
         if not entry:raise ValueError('Tool not available. Connect and discover the server first.')
         validate(args,entry['inputSchema']);args=copy.deepcopy(args)
         action={'tool':tool,'arguments':args,'schema_hash':digest(entry['inputSchema']),'preview':{},'bindings':{}}
+        if tool.startswith('firecrawl.'):
+            from agent_connections import secret_get
+            action['bindings']['integration_key']=digest(secret_get('integrations').get('firecrawl_key',''))
+            action['preview']['warning']='Sends the requested URL or query to Firecrawl using your saved key; provider credits may be consumed.'
+        if tool=='nuclei.scan':
+            from agent_integrations import origin
+            from agent_connections import secret_get
+            if origin(args['url']) not in secret_get('integrations').get('scan_origins',[]):raise ValueError('Authorize this exact origin in Connections before proposing a security scan.')
+            action['preview']['warning']='Active HTTP security scan on your authorized origin, limited to 5 requests/second, signed templates and 120 seconds. Findings are scanner results, not verified exploitability.'
         if tool.startswith('browser.'):
             binding=self.browser.prepare(run['id'],tool,args)
             action['bindings']['browser']=binding;action['preview'].update(browser=binding,warning='Isolated browser. A click can submit or publish data. Page content is untrusted; secret fields and downloads are blocked.')
@@ -520,7 +544,7 @@ class AgentRuntime:
                 self.trace.record('decision',run['id'] if run else '',tool=action['tool'],status='expired')
                 raise ValueError('Approval expired. Generate a fresh proposal.')
             if run and run['status']!='awaiting_approval':raise ValueError('This task was cancelled or changed.')
-            if auto and action['tool'] not in AUTO_RUN_TOOLS and not self.permissions.allows(action):
+            if auto and not self._auto_allowed(action):
                 raise ValueError('Command permission was revoked. Review the pending action.' if action['tool']=='shell.run'
                                  else 'Only observing steps run without your click. Review the pending action.')
             action['status']='running' if approve else 'rejected'
@@ -580,6 +604,12 @@ class AgentRuntime:
             raise ValueError('Action changed after review. Propose it again.')
         if cancel_event is not None and cancel_event.is_set():
             return {'ok':False,'cancelled':True,'error':'Cancelled before execution.'}
+        from agent_integrations import NAMES as INTEGRATION_NAMES,execute as integration_execute
+        if tool in INTEGRATION_NAMES:
+            if tool.startswith('firecrawl.'):
+                from agent_connections import secret_get
+                if digest(secret_get('integrations').get('firecrawl_key',''))!=bindings.get('integration_key'):raise ValueError('Firecrawl credentials changed after review. Propose the action again.')
+            return integration_execute(tool,args,self,cancel_event)
         if tool.startswith('browser.'):return self.browser.execute(run['id'],tool,args,bindings['browser'])
         if tool=='history.search':return {'ok':True,**self.history.search(args['query'],run['workspace'])}
         if tool=='history.read':return {'ok':True,'session':self.history.read(args['id'],run['workspace'])}
@@ -727,6 +757,7 @@ class AgentRuntime:
                 # Cleared history is where the reviewer loses the context behind a remembered
                 # command, so the unattended grants it justified go with it.
                 self.permissions.clear()
+                self.approval_mode='ask'
                 self.browser.cancel_all()
                 self.trace.clear()
         finally:self.operation_lock.release()
@@ -753,8 +784,8 @@ class AgentRuntime:
                 if run['status']!='awaiting_approval' or not run['steps']:return run
                 newest=run['steps'][-1]
                 run=self.runs.get(identifier,{})
-                with self.lock:allowed=self.permissions.allows(self.actions.get(newest['id'],newest))
-                if not run.get('auto_continue') or newest['status']!='pending' or (newest['tool'] not in AUTO_RUN_TOOLS and not allowed):
+                with self.lock:allowed=self._auto_allowed(self.actions.get(newest['id'],newest))
+                if not run.get('auto_continue') or newest['status']!='pending' or not allowed:
                     return self.state(identifier)
                 self._decide(newest['id'],True,auto=True)
                 state=self.state(identifier)
