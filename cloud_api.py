@@ -67,6 +67,8 @@ def request(provider,model,key,messages,endpoint='',vision=False,summarizing=Fal
         raise ValueError(provider_error(provider,response,key))
     try:
         data=response.json()
+        from agent_usage import record_usage
+        record_usage(provider,model,messages,data)
         if provider=='anthropic':reply=''.join(part.get('text','') for part in data.get('content',[]) if part.get('type')=='text')
         else:reply=data['choices'][0]['message']['content']
         if not isinstance(reply,str) or not reply.strip():raise ValueError()

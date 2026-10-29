@@ -2,6 +2,11 @@
 /*
 !/.gitignore
 !/README.md
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/*.yml
 !/*.py
 !/requirements*.txt
 !/*.bat

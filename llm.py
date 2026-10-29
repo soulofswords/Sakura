@@ -346,7 +346,10 @@ class LLM:
             if status == 404:
                 raise ValueError('Gemini model was not found (HTTP 404). Check the model name in Settings > AI.')
             raise ValueError(f'Gemini rejected the request (HTTP {status}). Check the message and model settings.')
-        candidates = response.json().get('candidates', [])
+        data=response.json()
+        from agent_usage import record_usage
+        record_usage('gemini',gemini_model,messages,data)
+        candidates = data.get('candidates', [])
         parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
         reply = ''.join(part.get('text', '') for part in parts if not part.get('thought')).strip()
         if not reply:
@@ -732,6 +735,8 @@ class LLM:
                                        'Open Settings > AI and choose a downloaded model, or download that one.')
             response.raise_for_status()
             result = response.json()
+            from agent_usage import record_usage
+            record_usage('ollama',request_payload['model'],messages,result)
             reply = result["message"]["content"]
             if result.get('done_reason') == 'length' and not summarizing and not planning:
                 print('  Local reply reached its output limit; finishing complete spoken sentences.')

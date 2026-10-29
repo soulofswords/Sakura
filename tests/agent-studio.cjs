@@ -167,6 +167,17 @@ try{
   }
  }
  await page.setViewportSize({width:1440,height:1000});
+ await go('Skills');
+ await open('Import SKILL.md');
+ await page.setInputFiles('#skill-import-file',{name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.from('---\nname: reviewed-skill\n---\nRead the source and verify the result.')});
+ await page.click('#skill-import');
+ await page.waitForFunction(()=>document.getElementById('skill-import-file').value==='');
+ assert.ok(calls.some(c=>c.path==='/api/agent/skills/import'&&c.body?.markdown.includes('reviewed-skill')&&c.token==='test-token'));
+ await open('Local evidence index');
+ await page.fill('#knowledge-path','notes.md');await page.click('#knowledge-index');
+ await page.waitForFunction(()=>document.getElementById('knowledge-path').value==='notes.md');
+ assert.ok(calls.some(c=>c.path.endsWith('/propose')&&c.body?.tool==='knowledge.index'&&c.body.arguments.path==='notes.md'),'Knowledge writes create real pending proposals');
+ await go('Tasks');
  await page.screenshot({path:'F:/AI/assistant/private-model-library-pmx/agent-studio-extensions.png',fullPage:false});
  await page.evaluate(()=>{document.documentElement.dataset.uiTheme='light';});
  await go('Tasks');await page.screenshot({path:'F:/AI/assistant/private-model-library-pmx/agent-studio-light.png'});

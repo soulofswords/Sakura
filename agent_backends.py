@@ -28,6 +28,8 @@ def prepare(args,run,cwd):
     runner=Path(runner).resolve(strict=True)
     bindings={'workspace':directory_identity(run['workspace']),'cwd':directory_identity(cwd),'runner':str(runner),'runner_hash':file_hash(runner)}
     if backend=='docker':
+        from sandbox_mount_policy import validate_mount
+        validate_mount(run['workspace'])
         if not re.fullmatch(r'(?:[a-zA-Z0-9][a-zA-Z0-9._:/-]*@)?sha256:[a-f0-9]{64}',args.get('image','')):
             raise ValueError('Select an already-installed Docker image by immutable sha256 digest, not a mutable tag.')
         if any(character in run['workspace'] for character in ',\r\n'):raise ValueError('Docker workspace paths cannot contain commas or newlines.')
@@ -57,6 +59,8 @@ def execute(args,run,bindings,run_process,cancel_event=None):
               'cd -- '+shlex.quote(args['remote_cwd'])+' && sh -s']
         return run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event)
     name='sakura-agent-'+uuid.uuid4().hex
+    from sandbox_mount_policy import validate_mount
+    validate_mount(run['workspace'])
     mount='type=bind,src='+run['workspace']+',dst=/workspace'+('' if args.get('writable') else ',readonly')
     relative=cwd.relative_to(Path(run['workspace'])).as_posix()
     prefix=[runner,'--host',bindings['docker_host']]

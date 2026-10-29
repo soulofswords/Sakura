@@ -150,6 +150,17 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     async def agent_metrics(window:int=900):
         return await call(runtime.metrics,window)
 
+    @router.get('/api/agent/usage-config',dependencies=guard)
+    async def usage_config():return await call(runtime.usage_config)
+
+    @router.post('/api/agent/usage-config',dependencies=guard)
+    async def save_usage_config(payload:dict):return await call(runtime.usage_config,payload)
+
+    @router.get('/api/agent/doctor',dependencies=guard)
+    async def agent_doctor():
+        from sakura_doctor import diagnose
+        return await call(diagnose)
+
     @router.get('/api/agent/telegram',dependencies=guard)
     async def telegram_state():return await call(telegram.status)
 
@@ -381,6 +392,11 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     @router.post('/api/agent/skills',dependencies=guard)
     async def save_skill(payload:dict):
         return await call(runtime.skills.save,payload.get('name'),payload.get('instructions'))
+
+    @router.post('/api/agent/skills/import',dependencies=guard)
+    async def import_skill(payload:dict):
+        if set(payload)-{'markdown','source'}:raise HTTPException(400,'Invalid skill import.')
+        return await call(runtime.skills.import_markdown,payload.get('markdown'),payload.get('source','uploaded SKILL.md'))
 
     @router.post('/api/agent/skills/learn',dependencies=guard)
     async def learn_skill(payload:dict):

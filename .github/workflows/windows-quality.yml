@@ -1,0 +1,42 @@
+name: Windows quality and package contracts
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  agent-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test-only dependencies (no models or owner credentials)
+        run: python -m pip install pytest requests fastapi uvicorn python-multipart Pillow psutil cryptography jsonschema python-docx pypdf mcp playwright
+      - name: Compile source without launching the app
+        run: python -m compileall -q -x '(venv|runtime|private|models|tools/android-cache)' .
+      - name: Agent safety, usage, imports and clean-workspace contracts
+        run: python -m pytest tests/test_jarvis_adaptations.py tests/test_agent_backends.py tests/test_agent_observability.py tests/test_agent_learning.py tests/test_release_payload.py tests/test_windows_release_builder.py tests/test_release_version.py -q
+      - name: JavaScript syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem static/js -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pip-audit
+      - name: Audit explicit Agent dependency profile
+        run: python -m pip_audit -r requirements-agent.txt --progress-spinner off

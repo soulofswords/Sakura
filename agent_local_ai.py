@@ -317,7 +317,10 @@ class LocalAI:
                 if isinstance(detail,str) and detail:raise ValueError('Local inference request failed: '+detail[:350])
                 r.raise_for_status()
             if r.status_code!=200:raise ValueError('The private inference worker returned an unexpected response.')
-            return r.json()['choices'][0]['message']['content']
+            data=r.json()
+            from agent_usage import record_usage
+            record_usage('sakura-native',identifier,messages,data)
+            return data['choices'][0]['message']['content']
         finally:self.generation_lock.release()
 
 local_ai=LocalAI()
