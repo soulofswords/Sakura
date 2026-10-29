@@ -1,9 +1,9 @@
-import {ModelMaterials,storedRemap} from './model-materials.js?v=opacity-boost4';
+import {ModelMaterials,storedRemap} from './model-materials.js?v=signature-remap2';
 import {installColorDial} from './color-dial.js?v=assistant69';
 import {installMouthSettings} from './mouth-settings.js?v=audio-route5';
 import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=2';
 import {installBoneSettings} from './model-bones.js?v=persistent5';
-import {installTextureDiagnostics} from './texture-diagnostics.js?v=1';
+import {installTextureDiagnostics} from './texture-diagnostics.js?v=decoder2';
 import {tintEdit,opacityEdit} from './part-appearance.js?v=1';
 import {installMaterialExpressions} from './material-expressions.js?v=1';
 
@@ -125,7 +125,7 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         current.setColor(part.value,settings);saveColors();updateColor();
     });
     document.getElementById('model-remap-apply').onclick=()=>action(async current=>{
-        const blob=file.files[0];if(!blob)throw Error('Choose a PNG, JPG or WebP replacement image first.');
+        const blob=file.files[0];if(!blob)throw Error('Choose a PNG, JPG, WebP, BMP or TGA replacement image first.');
         const id=texture.value,key=modelKey;await current.setRemap(id,blob);await storedRemap(key,id,blob);file.value='';
     });
     document.getElementById('model-remap-reset').onclick=()=>action(async current=>{const id=texture.value;await current.setRemap(id,null);await storedRemap(modelKey,id,null);});

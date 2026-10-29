@@ -10,12 +10,17 @@ const context={console,Event:class{constructor(type){this.type=type;}},document:
 vm.runInNewContext(fs.readFileSync('static/js/desktop-wake-controls.js','utf8').replace('export function desktopWakeControls','function desktopWakeControls')+'\nthis.create=desktopWakeControls;',context);
 const settings={wake_word_enabled:false,wake_word:'hey sakura'};
 (async()=>{
- const controls=context.create({continuousMic:{stop(){calls.push(['browser-mic-stop']);}},settings:()=>settings,blocked:()=>blocked,receive:async text=>{calls.push(['question',text]);},status:text=>calls.push(['status',text])});
+ const browserMic={stop(){calls.push(['browser-mic-stop']);}};
+ const controls=context.create({continuousMic:browserMic,settings:()=>settings,blocked:()=>blocked,receive:async text=>{calls.push(['question',text]);},status:text=>calls.push(['status',text])});
  await controls.sync();assert.equal(enabled,false);assert.equal(calls.some(c=>c[0]==='download'),false,'No automatic wake pack download');
  await context.window.receiveDesktopWakeCommand('late audio');assert.equal(calls.some(c=>c[0]==='question'),false,'Disabled wake input rejects late commands');
  settings.wake_word_enabled=true;await controls.sync();assert.equal(enabled,false,'Missing pack never opens the microphone');
  await element('desktop-wake-download').onclick();assert.equal(enabled,true);
  assert.ok(calls.some(c=>c[0]==='browser-mic-stop'),'Browser recorder is released before native wake detection');
+ const stops=calls.filter(c=>c[0]==='browser-mic-stop').length;
+ browserMic.userRequested=true;await controls.sync();assert.equal(enabled,false,'Explicit mic takes ownership from wake-only listener');
+ assert.equal(calls.filter(c=>c[0]==='browser-mic-stop').length,stops,'Periodic sync must not stop explicit listening');
+ browserMic.userRequested=false;await controls.sync();assert.equal(enabled,true,'Wake resumes after manual mic ownership is released');
  settings.wake_word='hello computer';await controls.sync();assert.ok(calls.some(c=>c[0]==='listen'&&c[2]==='hello computer'));
  await context.window.receiveDesktopWakeCommand('what time is it');assert.ok(calls.some(c=>c[0]==='question'&&c[1]==='what time is it'));
  assert.deepEqual(calls.at(-1),['pause',false],'Wake resumes after a completed reply');

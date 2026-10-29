@@ -2301,6 +2301,9 @@ async def _chat_core(payload: dict, resolved_reply=None, skip_retrieval=False, p
             return JSONResponse({'error': f'Screen vision failed: {message}'}, 502)
     else:
         if payload.get('ai_vtuber'):live_context['cohost']=True
+        game_name=payload.get('game_name')
+        if isinstance(game_name,str) and game_name.strip():
+            live_context['game_name']=game_name.strip()[:100]
         reply = await run_in_threadpool(llm.chat, text, screen_image, avatar_image, **live_context) if avatar_image or live_context else await run_in_threadpool(llm.chat, text, screen_image)
 
     from user_address import address_text
@@ -2424,6 +2427,9 @@ async def chat(payload: dict):
     cfg=get_settings()
     if not any(payload.get(k) for k in ('screen_reaction','camera_reaction','screen_observation','ai_vtuber')):
         from conversation_modes import mode_command,mode_help,work_request,teacher_prompt,MODE_PATH
+        # Use saved application state on every turn, including after a worker
+        # was replaced by game/vision routing. Dialogue is not mode authority.
+        if llm:llm.conversation_mode=cfg.get('conversation_mode','friend')
         switch=mode_command(text)
         if switch:
             save_settings({'conversation_mode':switch})
@@ -2431,12 +2437,21 @@ async def chat(payload: dict):
             reply=switch.title()+' mode is on. '+('Tell me what you want to work on.' if switch=='teacher' else 'We can chat naturally.')
             return {'reply':reply,'speech_reply':reply,'audio':None,'conversation_mode':switch,'mode_guide':switch}
         if mode_help(text):
-            reply='Friend is for conversation; Teacher is for tasks and step-by-step help. '+MODE_PATH
+            reply=cfg.get('conversation_mode','friend').title()+' mode is currently on. Friend is for conversation; Teacher is for tasks and step-by-step help. '+MODE_PATH
             return {'reply':reply,'speech_reply':reply,'audio':None,'mode_guide':'teacher'}
         if cfg.get('conversation_mode')=='friend' and work_request(text):
             reply=teacher_prompt()
             if llm:await run_in_threadpool(llm.remember_exchange,text,reply)
             return {'reply':reply,'speech_reply':reply,'audio':None,'mode_required':'teacher','mode_guide':'teacher'}
+        from conversation_modes import appearance_repair_request
+        if cfg.get('conversation_mode')=='teacher' and appearance_repair_request(text):
+            reply='I’ll check the selected model’s texture files and decoding, preserving its original colours and your saved edits.'
+            return {'reply':reply,'speech_reply':reply,'audio':None,'avatar_ui_action':'check_textures','conversation_mode':'teacher'}
+        import re
+        if re.fullmatch(r"\s*(?:you(?:'re| are)|we(?:'re| are)|i(?:'m| am))\s+(?:already\s+)?(?:in\s+)?(?:a\s+)?(?:teacher|friend)\s+mode[.!? ]*",text,re.I):
+            selected=cfg.get('conversation_mode','friend')
+            reply=selected.title()+' mode is currently on.'
+            return {'reply':reply,'speech_reply':reply,'audio':None,'conversation_mode':selected,'mode_guide':selected}
     if not any(payload.get(k) for k in ('screen_reaction','camera_reaction','screen_observation','ai_vtuber')):
         from hardware_details import answer
         hardware_cfg=dict(cfg)

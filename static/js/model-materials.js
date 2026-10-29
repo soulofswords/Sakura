@@ -1,4 +1,51 @@
 import * as THREE from 'three';
+import { TGALoader } from 'three/addons/loaders/TGALoader.js';
+
+// Chromium cannot decode TGA, and rigs label PNG/JPG/BMP artwork with a .tga
+// suffix constantly, so the decoder is chosen from the bytes, never the name.
+function signatureOf(buffer) {
+    const b = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 12));
+    return {
+        png: b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47,
+        jpeg: b[0] === 0xFF && b[1] === 0xD8,
+        bmp: b[0] === 0x42 && b[1] === 0x4D,
+        gif: b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46,
+        webp: b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50,
+    };
+}
+
+function tgaToCanvas(buffer) {
+    if(buffer.byteLength<18)throw Error('The TGA header is incomplete.');
+    const header=new DataView(buffer),width=header.getUint16(12,true),height=header.getUint16(14,true);
+    if(![1,2,3,9,10,11].includes(header.getUint8(2))||!width||!height||width*height>16777216)
+        throw Error('Use a valid TGA image up to 4096 × 4096 pixels.');
+    const parsed = new TGALoader().parse(buffer);
+    if (!parsed.width || !parsed.height || parsed.data?.length !== parsed.width * parsed.height * 4) {
+        throw Error('The TGA image is incomplete.');
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = parsed.width; canvas.height = parsed.height;
+    canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(parsed.data), parsed.width, parsed.height), 0, 0);
+    return canvas;
+}
+
+export async function decodeReplacementImage(blob) {
+    const buffer = await blob.arrayBuffer();
+    const mark = signatureOf(buffer);
+    let source;
+    if (mark.png || mark.jpeg || mark.bmp || mark.gif || mark.webp) {
+        const url = URL.createObjectURL(blob);
+        try {
+            source = await new Promise((resolve, reject) => {
+                const image = new Image();
+                image.onload = () => resolve(image);
+                image.onerror = () => reject(Error('The image could not be decoded.'));
+                image.src = url;
+            });
+        } finally { URL.revokeObjectURL(url); }
+    } else source = tgaToCanvas(buffer);
+    return { source, width: source.naturalWidth || source.width, height: source.naturalHeight || source.height };
+}
 
 // Reversible overrides: source files, texture alpha and UV layouts stay intact.
 export class ModelMaterials {
@@ -100,13 +147,19 @@ export class ModelMaterials {
         let replacement=null;
         if(blob){
             if(blob.size>16*1024*1024)throw Error('Replacement images must be under 16 MB.');
-            const url=URL.createObjectURL(blob);const image=new Image();
-            try{await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(Error('Use a PNG, JPG or WebP image.'));image.src=url;});}
-            finally{URL.revokeObjectURL(url);}
+            const {source:image,width,height}=await decodeReplacementImage(blob);
             if(revision!==this.revision)throw Error('Model changed while loading this image. Choose its replacement again.');
-            if(image.naturalWidth*image.naturalHeight>16777216)throw Error('Replacement images must be at most 4096 × 4096.');
+            if(width*height>16777216)throw Error('Replacement images must be at most 4096 × 4096.');
             if(e.kind==='atlas')replacement=PIXI.Texture.from(image);
-            else {replacement=(e.base.map||new THREE.Texture()).clone();replacement.source=new THREE.Source(image);replacement.needsUpdate=true;}
+            else {
+                replacement=new THREE.Texture();
+                if(e.base.map)replacement.copy(e.base.map);else replacement.colorSpace=THREE.SRGBColorSpace;
+                // A decoded PNG/TGA canvas cannot reuse DDS block-compression
+                // format or mipmaps. Keep UV transforms and the original map
+                // for reset, but upload the replacement as normal RGBA pixels.
+                if(e.base.map?.isCompressedTexture){replacement.format=THREE.RGBAFormat;replacement.type=THREE.UnsignedByteType;replacement.mipmaps=[];replacement.generateMipmaps=true;replacement.minFilter=THREE.LinearMipmapLinearFilter;}
+                replacement.source=new THREE.Source(image);replacement.needsUpdate=true;
+            }
         }
         const old=this.replacements.get(id);
         if(replacement)this.replacements.set(id,replacement);else this.replacements.delete(id);

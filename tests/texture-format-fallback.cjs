@@ -32,5 +32,8 @@ vm.runInNewContext(loader+'\nthis.Loader=SmartTgaLoader;',context);
     assert.equal(ddsParses,1);
     assert.equal(compressed.isCompressedTexture,true);
     assert.equal(compressed.image.width,4);
+    const disguised=new context.Loader(manager).load('hair.png',()=>{});
+    assert.equal(ddsParses,2,'DDS artwork with a PNG suffix uses the DDS decoder');
+    assert.equal(disguised.isCompressedTexture,true);
     console.log('PASS: missing DDS PNG fallback waits for decoding; real DDS uses compressed texture');
 })().catch(error=>{console.error(error);process.exitCode=1});

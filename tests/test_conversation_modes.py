@@ -108,6 +108,19 @@ def test_teacher_request_continues_to_existing_tools():
         assert result['reply']=='Choose the workspace in Agent mode.';generate.assert_awaited_once()
 
 
+def test_teacher_appearance_repair_uses_real_ui_action_and_saved_mode():
+    import asyncio,app
+    model=Mock(conversation_mode='friend')
+    with patch.object(app,'get_settings',return_value={'conversation_mode':'teacher'}),patch.object(app,'llm',model),patch.object(app,'_chat_core') as generate:
+        result=asyncio.run(app.chat({'text':'Can you fix the model, actually the hair is pink?'}))
+        assert model.conversation_mode=='teacher'
+        assert result['avatar_ui_action']=='check_textures'
+        assert 'Teacher mode' not in result['reply']
+        generate.assert_not_called()
+        state=asyncio.run(app.chat({'text':'you are in teacher mode'}))
+        assert state['reply']=='Teacher mode is currently on.'
+
+
 def test_friend_is_default_and_emotional_style_stays_grounded():
     from conversation_modes import instruction
     assert 'Selected conversation mode: Friend' in instruction(None)

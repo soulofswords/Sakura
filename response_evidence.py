@@ -196,7 +196,7 @@ CREATIVE_TASKS = re.compile(
     r'|should i|what should)\b', re.I)
 FACT_SEEKING = re.compile(
     r'[?？]|\b(?:what|who|when|where|which|why|how (?:much|many|long|old|is|are|does)|is|are|does|do'
-    r'|price|cost|specs?|specifications|vram|memory|release|latest|current|today|news|weather|version)\b'
+    r'|price|cost|specs?|specifications|vram|memory|release|latest|current|today|news|weather|version|walkthrough|guide|boss|quest|mission)\b'
     r'|\b(?:क्या|कितना|कितने|कब|कौन|कहाँ|कैसा)\b', re.I)
 
 

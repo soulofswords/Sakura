@@ -35,7 +35,7 @@ const tick = async () => { time += 50; timer?.(); await new Promise(r => setImme
     assert.equal(submitted, 0, 'Silence cannot submit a request');
     amplitude=.6; await tick(); amplitude=0; for(let i=0;i<100;i++)await tick();
     assert.equal(submitted,0,'Sudden click noise must not submit');
-    amplitude = 0.03;
+    amplitude = 0.006; // Quiet speech used to fall below the fixed .012 floor.
     for (let i = 0; i < 10; i++) await tick();
     assert.equal(submitted, 0, 'Do not interrupt active speech');
     amplitude = 0;

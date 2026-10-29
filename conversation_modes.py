@@ -8,7 +8,9 @@ MODES = {
 
 
 def instruction(mode):
-    return MODES.get(mode, MODES['friend']) + ' The selected mode changes teaching style, not factual accuracy, tool permissions, language or whether an action has actually succeeded.'
+    selected=mode if mode in MODES else 'friend'
+    state=(' Teacher is already ON. Do not tell the user to enable Teacher again.' if selected=='teacher' else ' Friend is ON; Teacher is OFF.')
+    return state.strip()+' '+MODES[selected] + ' Current application state overrides older replies about the mode. Model appearance controls are in the left pencil icon > Model Settings > Texture remapping or Texture coloring; there is no Appearance > Hair Color tab. A wrong rendered hair colour is a repair request, not permission to recolor the original artwork. The selected mode changes teaching style, not factual accuracy, tool permissions, language or whether an action has actually succeeded.'
 
 
 MODE_PATH = 'Open the speaker icon on the left, choose Voice & speech, then turn Teacher On. If you are in Agent mode, click Companion mode first. You can also say "switch to Teacher mode".'
@@ -36,3 +38,8 @@ def work_request(text):
 
 def teacher_prompt():
     return 'Switch to Teacher mode for this task. '+MODE_PATH+' Your request has not been run yet.'
+
+
+def appearance_repair_request(text):
+    return bool(re.search(r'\b(?:fix|repair|check|diagnose)\b',text,re.I)
+        and re.search(r'\b(?:model|avatar|hair|texture|render|colour|color)\b',text,re.I))

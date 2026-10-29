@@ -19,7 +19,11 @@ vm.createContext(ctx);vm.runInContext(shareBlock+'\nthis.share=screenShare;',ctx
     Object.assign(ctx,{selectedMicId:'chosen-microphone',autoGameEnabled:false,listeningStatus:{}});
     ctx.continuousMic.start=async id=>{selected=id;};vm.runInContext(block,ctx);
     ctx.aiVtuberStarting=false;await ctx.startDesktopListening(true);assert.equal(selected,'chosen-microphone','explicit Listen uses the selected device');
-    selected='unset';await ctx.startDesktopListening();assert.equal(selected,'unset','automatic listening waits for the wake phrase instead of opening the mic');
+    selected='unset';await ctx.startDesktopListening();assert.equal(selected,'chosen-microphone','explicit listening survives screen/background refresh');
+    ctx.continuousMic.userRequested=false;selected='unset';await ctx.startDesktopListening();assert.equal(selected,'unset','a fresh automatic start still waits for opt-in');
+    ctx.window={pywebview:{api:{set_wake_listener(){}}}};ctx.currentSettings.wake_word_enabled=true;
+    let wakeSync=0;ctx.nativeWake={async sync(){wakeSync++;}};
+    await ctx.startDesktopListening(true);assert.equal(selected,'chosen-microphone','explicit mic works with wake phrase enabled');assert.equal(wakeSync,1);
     selected=null;ctx.vtuberEnabled=true;await ctx.startDesktopListening(true);assert.equal(selected,null);
     console.log('PASS: selected microphone on explicit listen, automatic wake-word gate, explicit off preserved, screen stop and AI VTuber microphone exclusion');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -26,6 +26,7 @@ import ReactionExpressions from './reaction-expressions.js?v=files106';
 import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
 import ModelDance from './model-dance.js?v=irina-greeting113';
 import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
+import {renderPixelRatio} from './render-budget.js?v=startup68';
 
 /**
  * Smart loader for .tga textures.
@@ -117,7 +118,6 @@ class SmartTgaLoader extends THREE.Loader {
     }
 }
 
-import {renderPixelRatio} from './render-budget.js?v=startup68';
 export default class ModelViewer {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
@@ -924,9 +924,9 @@ export default class ModelViewer {
         // Wait for those images so alpha flags and shader inputs are final.
         const assetsReady = new Promise(resolve => { manager.onLoad = resolve; });
 
-        // Handle .tga files with SmartTgaLoader
-        manager.addHandler(/\.tga$/i, new SmartTgaLoader(manager));
-        manager.addHandler(/\.dds$/i, new SmartTgaLoader(manager));
+        // Exporters also put DDS bytes in .png files (e.g. Luka's hair).
+        // Dispatch every PMX image by content, not just TGA/DDS suffixes.
+        manager.addHandler(/\.(?:png|jpe?g|bmp|tga|dds|sph|spa)(?:\?.*)?$/i, new SmartTgaLoader(manager));
 
         const assetRoles = new Map();
         let textureReview = null;

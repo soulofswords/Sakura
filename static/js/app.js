@@ -25,9 +25,9 @@ import {installCameraPreview} from './camera-preview.js?v=1';
 import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes108';
 import {installReminders} from './assistant-reminders.js?v=1';
 import {installExpressionEditor} from './expression-editor.js?v=irida101';
-import {installModelSettings} from './model-settings.js?v=part-presets101';
+import {installModelSettings} from './model-settings.js?v=texture-decoder102';
 import {installVtuberCollab} from './vtuber-collab.js?v=collab3';
-import ModelViewer from './model-viewer.js?v=neutral-light116';
+import ModelViewer from './model-viewer.js?v=texture-signature117';
 import AvatarTracking from './avatar-tracking.js?v=nvidia-fixes142';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
 import ChatReader from './chat-reader.js?v=lean1';
@@ -37,8 +37,8 @@ import EyeTracking from './eye-tracking.js?v=cursor-gpu6';
 import ScreenShare from './screen-share.js?v=timeline63';
 import ScreenMemory from './screen-memory.js?v=timeline63';
 import {utilityRequest} from './utility-request.js?v=1';
-import {desktopWakeControls} from './desktop-wake-controls.js?v=mic-gate115';
-import ContinuousMic from './continuous-mic.js?v=interrupt104';
+import {desktopWakeControls} from './desktop-wake-controls.js?v=manual-mic116';
+import ContinuousMic from './continuous-mic.js?v=quiet-mic105';
 import {createSpeechInterrupt,isSpeechInterrupt} from './speech-interrupt.js?v=interrupt104';
 import { speakPhrases } from './speech-pipeline.js?v=latency94';
 import {createVoiceRuntime} from './voice-runtime.js?v=1';
@@ -90,8 +90,12 @@ window.addEventListener('pagehide',()=>{speechInterrupt.stop();clearTimeout(inte
 async function startDesktopListening(explicit = false) {
     if (trackingOnly) return;
     if (vtuberEnabled || aiVtuberStarting) return;
-    if(currentSettings.wake_word_enabled&&window.pywebview?.api?.set_wake_listener){await nativeWake.sync();return;}
-    if (!explicit && !currentSettings.wake_word_enabled) {
+    if(explicit)continuousMic.userRequested=true;
+    if(currentSettings.wake_word_enabled&&window.pywebview?.api?.set_wake_listener){
+        await nativeWake.sync();
+        if(!continuousMic.userRequested)return;
+    }
+    if (!explicit && !continuousMic.userRequested && !currentSettings.wake_word_enabled) {
         continuousMic.stop();
         listeningStatus.textContent='Microphone off · click Listen or enable the wake phrase';
         return;
@@ -111,6 +115,7 @@ let reactionsEnabled = false;
 let autoGameEnabled = false;
 let autoGameBusy = false;
 let gameActive = false;
+let detectedGameName = '';
 let gameReady = false;
 let gameResumeMic = false;
 let gameStartedScreen = false;
@@ -997,7 +1002,7 @@ function setupEvents() {
         if(wasTemporary)continuousMic.stop();
         temporaryFollowupMic=false;
         if (nativeWake.enabled()){wakeWordToggle.checked=false;await saveAppSettings();}
-        else if (continuousMic.enabled) continuousMic.stop();
+        else if (continuousMic.enabled) {continuousMic.userRequested=false;continuousMic.stop();}
         else if(!wasTemporary)startDesktopListening(true);
     });
     installCompactCompanionControls(()=>continuousMic.enabled||nativeWake.enabled());
@@ -2495,10 +2500,19 @@ async function handleSendMessage() {
             signal: controller.signal,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, attachments:attachedIds, ai_vtuber:vtuberEnabled, screen_frames: noVision ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), avatar_can_greet:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_can_chest_tap:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
+            body: JSON.stringify({ text, game_name:gameActive?detectedGameName:null, attachments:attachedIds, ai_vtuber:vtuberEnabled, screen_frames: noVision ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), avatar_can_greet:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_can_chest_tap:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
         });
         const data = await res.json();
         if(generation!==chatReplyGeneration)return;
+        if(data.avatar_ui_action==='check_textures'){
+            document.getElementById('expression-editor-btn')?.click();
+            const check=document.getElementById('model-texture-snapshot-check');
+            if(check?.onclick){
+                await check.onclick();
+                data.reply=document.getElementById('model-texture-check-status')?.textContent||'Texture check finished. Review Model Settings > Texture remapping.';
+                data.speech_reply='The texture check finished. Its results are in Model Settings, under Texture remapping.';
+            }
+        }
         if (data.reply) {
             let presented = false;
             const presentReply = () => {
@@ -2683,6 +2697,7 @@ async function checkGameMode() {
     autoGameBusy = true;
     try {
         const game = await window.pywebview.api.game_status();
+        detectedGameName=game.detected?String(game.name||'').slice(0,100):'';
         if (!autoGameEnabled) return;
         gameForeground = !!game.foreground;
         if (!game.detected) {
@@ -2806,9 +2821,9 @@ async function pollVtuberChat() {
 
 async function reactToScreen(initialCheck = false) {
     if (trackingOnly || viewer?._displayLoading || viewer?._modelSwitchQueue) return;
-    const gameWatch=gameActive&&gameReady&&!initialCheck;
+    const gameWatch=gameActive&&gameReady&&!initialCheck&&currentSettings.game_play_mode==='multiplayer';
     if (!gameWatch&&!initialCheck && Date.now() - lastDirectReplyAt < 30000) return;
-    if(gameWatch&&Date.now()-lastGameWatch<4000)return;
+    if(gameWatch&&Date.now()-lastGameWatch<10000)return;
     const vtuberScreens = vtuberEnabled && document.getElementById('vtuber-screen-enabled').checked;
     if (!gameWatch&&!initialCheck && Date.now() - lastCoHostSpeech < 20000) return;
     if (!initialCheck && autoGameEnabled && gameActive && !gameForeground) return;
@@ -2992,7 +3007,7 @@ async function sendAudioForSTT(blob, options = {}) {
             // Speaker playback can reach the microphone despite browser echo cancellation.
             // Automatic listening needs explicit address while media audio is active.
             const mediaWake = continuous && (gameActive ? currentSettings.game_play_mode==='multiplayer' : screenAudio.playbackActive());
-            if (currentSettings.wake_word_enabled || mediaWake) {
+            if ((currentSettings.wake_word_enabled && !continuousMic.userRequested) || mediaWake) {
                 const query = extractWakeCommand(raw, currentSettings.wake_word || 'hey sakura');
                 if (query !== null) {
                     if (!query) {

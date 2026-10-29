@@ -29,7 +29,7 @@ try:
     application=BASE/'android';source_root=application
     res=BUILD/'res/drawable';res.mkdir(parents=True,exist_ok=True)
     (res/'icon.png').unlink(missing_ok=True) # obsolete generated drawable, never used by the new manifest
-    Image.open(BASE/'static/assets/desktop-companion.png').convert('RGBA').resize((192,192)).save(res/'sakura_flower.png')
+    Image.open(BASE/'android/assets/sakura-mobile-logo.png').convert('RGBA').resize((192,192),Image.Resampling.LANCZOS).save(res/'sakura_flower.png')
     run([tools/'aapt2.exe','compile','--dir',BUILD/'res','-o',BUILD/'resources.zip'])
     unsigned=BUILD/'unsigned.apk'
     run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','37','--version-name','0.3.31','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
@@ -91,7 +91,8 @@ try:
         assert not any(n.lower().endswith(('.bak','.map','.tmp','.orig')) for n in archive.namelist()), 'Backup/debug source leaked into APK'
         for name in ('AndroidManifest.xml','classes.dex','assets/mobile.js','assets/static/vendor/tracking/face_landmarker.task'):assert name in archive.namelist()
         html_text=archive.read('assets/index.html').decode('utf-8')
-        assert '🌸 Sakura' in html_text and 'Settings → General' in html_text, 'UI Unicode was corrupted during packaging'
+        assert 'sakura-mobile-logo.png' in html_text and 'Settings → General' in html_text, 'Mobile branding or UI Unicode was corrupted during packaging'
+        assert archive.read('assets/sakura-mobile-logo.png')==(application/'assets/sakura-mobile-logo.png').read_bytes(), 'Mobile logo missing or stale'
         assert not any(marker in html_text for marker in ('ðŸ','Â·','â†')), 'Garbled UI characters in APK'
         assert not any(name.endswith(('.pmx','.vrm','.moc3','.gguf','.mdl','.fst')) for name in archive.namelist()), 'No character/LLM/wake model packs in the APK'
         assert 'lib/arm64-v8a/libvosk.so' in archive.namelist() and 'assets/phone-wake.js' in archive.namelist()

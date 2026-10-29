@@ -58,7 +58,9 @@ export default class ContinuousMic {
             this.analyser.getFloatTimeDomainData(samples);
             const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
             const now = performance.now();
-            const threshold = Math.max(.012, noiseFloor * 3);
+            // Quiet laptop/headset microphones can carry speech below .012.
+            // Keep a measured noise margin without an excessive fixed floor.
+            const threshold = Math.max(.004, noiseFloor * 2.5);
             if (rms > threshold) {
                 consecutiveVoice += 50;
                 speechMs += 50;

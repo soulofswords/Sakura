@@ -7,7 +7,7 @@ export function desktopWakeControls({continuousMic,settings,blocked,receive,stat
     async function refresh(){if(!api()?.wake_state)return;try{const state=await api().wake_state();enabled=!!state.enabled;label.textContent=state.status;download.hidden=!!state.installed;download.disabled=installing||!state.available;}catch(error){label.textContent=error.message;}}
     async function sync(force=false){
         if(!api()?.set_wake_listener||syncing)return;
-        const config=settings(),wanted=!!config.wake_word_enabled&&!blocked(),key=String(wanted)+'|'+config.wake_word;
+        const config=settings(),wanted=!!config.wake_word_enabled&&!blocked()&&!continuousMic.userRequested,key=String(wanted)+'|'+config.wake_word;
         if(!force&&key===last)return;syncing=true;
         try{if(wanted)continuousMic.stop();const state=await api().set_wake_listener(wanted,config.wake_word||'hey sakura');if(state.error)throw Error(state.error);enabled=!!state.enabled;last=key;label.textContent=state.status;await refresh();}
         catch(error){last=key;enabled=false;label.textContent=error.message;status(error.message);}

@@ -61,7 +61,7 @@ export function installTextureDiagnostics(getViewer,getKey,reloadModel){
     const images=['model-texture-before-image','model-texture-after-image'].map(id=>document.getElementById(id));
     let busy=false,urls=[],displayKey=null;
     const clear=()=>{urls.forEach(URL.revokeObjectURL);urls=[];images.forEach(image=>{image.hidden=true;image.removeAttribute('src');});};
-    const refresh=()=>{if(displayKey!==getKey()){clear();status.textContent='Capture the model, check its texture images and repair confirmed PMX path problems.';displayKey=getKey();}};
+    const refresh=()=>{if(displayKey!==getKey()){clear();status.textContent='Check texture decoding and repair confirmed PMX paths. This preserves original artwork and your saved colour overrides.';displayKey=getKey();}};
     button.onclick=async()=>{
         if(busy)return;const viewer=getViewer(),key=getKey(),identity=viewer?.live2d||viewer?.model;
         if(!identity||viewer._displayLoading){status.textContent='Load a model and wait until it is ready.';return;}
@@ -74,14 +74,14 @@ export function installTextureDiagnostics(getViewer,getKey,reloadModel){
             const loaded=inspectLoadedTextures(viewer);
             const report=/\.pmx$/i.test(key)?await checkPmxTextureReferences(key,viewer.pmxTextureSlots||[],current):{checked:loaded.checked,repaired:0,issues:[]};
             if(!current())throw Error('Model changed during the texture check.');
-            if(report.repaired){
-                status.textContent=`Saved ${report.repaired} confirmed texture path repairs. Reloading model…`;
+            if(report.repaired||loaded.issues.length){
+                status.textContent=`Saved ${report.repaired} confirmed texture path repairs. Reloading textures with the format-aware decoder…`;
                 await reloadModel(key);
                 if(getViewer()!==viewer||getKey()!==key||viewer._displayLoading)throw Error('Model changed or could not be reloaded. Repairs remain saved for its next load.');
                 const reloadedIdentity=viewer.live2d||viewer.model;current=()=>getViewer()===viewer&&getKey()===key&&(viewer.live2d||viewer.model)===reloadedIdentity;
             }
             const after=await snapshot(viewer);if(!current())throw Error('Model changed during the texture check.');
-            report.issues.push(...(report.repaired?inspectLoadedTextures(viewer).issues:loaded.issues));
+            report.issues.push(...inspectLoadedTextures(viewer).issues);
             const summary=`Checked ${report.checked} texture references/images. ${report.repaired} path repairs saved.`;
             const record={before,after,report,time:Date.now()};await store(key,record);if(!current())return;
             for(const [i,blob]of [before,after].entries()){const url=URL.createObjectURL(blob);urls.push(url);images[i].src=url;images[i].hidden=false;}
