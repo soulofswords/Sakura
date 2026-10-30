@@ -136,7 +136,11 @@ for ext in ['html','pdf']:
  p=PARENT/('Sakura_User_Guide.'+ext)
  if p.exists() and not (archive/p.name).exists():shutil.copy2(p,archive/p.name)
 for kind in META:
- chapters=parse(ROOT/f'docs/user-guides/{kind}.md');assert len(chapters)==(17 if kind=='companion' else 15)
+ chapters=parse(ROOT/f'docs/user-guides/{kind}.md')
+ # A fixed chapter count silently rejected this build for two days after a new
+ # chapter landed. Numbering is what actually detects a dropped or duplicated one.
+ numbers=[re.match(r'(\d+)\. ',c['title']) for c in chapters]
+ assert all(numbers) and [m.group(1) for m in numbers]==[str(i) for i in range(1,len(chapters)+1)],(kind,'chapters must be numbered from 1 with no gaps or repeats')
  base='Sakura_'+('Companion' if kind=='companion' else 'VTuber')+'_Guide'
  pdf_guide(kind,chapters,OUT/(base+'.pdf'))
  content=html_guide(kind,chapters)
