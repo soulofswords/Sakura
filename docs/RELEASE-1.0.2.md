@@ -32,7 +32,7 @@ Choose **Sakura Companion** for conversation, local/cloud AI, Agent workflows an
 
 - Project website: <https://soulofswords.github.io/Sakura-website/> — features, setup and guides. The in-app Settings > Theme > About Sakura block links to it beside the release page.
 - Protected Windows x64 Companion and VTuber installers, with SHA256SUMS.txt.
-- Separate illustrated Companion and VTuber PDF guides (29 October 2026, Version 1.0.2) and the offline HTML guide bundle. Guide screenshots use demonstration data and show no personal character or account.
+- Separate illustrated Companion and VTuber PDF guides (30 October 2026, Version 1.0.2) and the offline HTML guide bundle. Guide screenshots use demonstration data and show no personal character or account.
 - **No refreshed macOS installer is attached.** A protected native Mac build needs a Mac host, unavailable in this Windows environment. Existing experimental source/bootstrap Mac support is documented in the repository and is not presented as a verified installer.
 - **Sakura Mobile 0.3.32 (Android, versionCode 38)** is rebuilt because this release changes files the APK bundles (`static/js/**` and `static/vendor/**`, including the model viewer and PMX loader used for phone-local viewing). The Android sources, manifest and certificate pinning are unchanged in this release; the higher versionCode installs over an older build in place.
 
