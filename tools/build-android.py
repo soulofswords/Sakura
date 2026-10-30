@@ -9,9 +9,13 @@ import zipfile
 import argparse
 import runpy
 import re
+import sys
 from PIL import Image
 
 BASE=Path(__file__).resolve().parents[1]
+# mobile_tls lives at the repository root, and running this file as a script puts
+# tools/ - not the root - on the import path.
+sys.path.insert(0,str(BASE))
 parser=argparse.ArgumentParser();parser.add_argument('--edition',choices=['combined','vtuber'],default='combined');parser.add_argument('--release-signing',action='store_true');args=parser.parse_args()
 # Keep old automation arguments compatible; mobile is now one combined product.
 if args.edition=='vtuber':
