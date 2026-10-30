@@ -1504,16 +1504,18 @@ class MaterialBuilder {
 		const width = image.width;
 		const height = image.height;
 
-		canvas.width = width;
-		canvas.height = height;
+		// A quarter-turn swaps dimensions. Keeping the old canvas size
+        // cropped non-square PMX toon strips and left the sampled row black.
+        canvas.width = height;
+        canvas.height = width;
 
-		context.clearRect( 0, 0, width, height );
-		context.translate( width / 2.0, height / 2.0 );
+		context.clearRect( 0, 0, height, width );
+		context.translate( height / 2.0, width / 2.0 );
 		context.rotate( 0.5 * Math.PI ); // 90.0 * Math.PI / 180.0
 		context.translate( - width / 2.0, - height / 2.0 );
 		context.drawImage( image, 0, 0 );
 
-		return context.getImageData( 0, 0, width, height );
+		return context.getImageData( 0, 0, height, width );
 
 	}
 

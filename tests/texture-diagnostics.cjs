@@ -6,6 +6,12 @@ const ctx={AbortSignal,console};vm.runInNewContext(fs.readFileSync('static/js/te
  const v={model:{traverse(fn){fn({material:[material,material]});}}};
  const report=ctx.inspect(v);assert.equal(report.checked,2);assert.equal(report.issues.length,1);assert.equal(valid.needsUpdate,true);assert.equal(material.opacity,.5);assert.equal(material.transparent,true,'Checks preserve authored alpha');
  const live=ctx.inspect({live2d:{avatar:{textures:[{baseTexture:{width:16,height:16,valid:true}}]}}});assert.equal(live.issues.length,0);
+ const mmd={name:'Face'};Object.defineProperty(mmd,'map',{value:{isTexture:true,image:{width:1,height:1},userData:{sakuraPmxFallback:'diffuse'}}});
+ const fallback=ctx.inspect({model:{traverse(fn){fn({material:mmd});}}});assert.equal(fallback.checked,1);assert.match(fallback.issues[0],/neutral fallback/);
+ const shine={isTexture:true,image:{width:1,height:1},userData:{sakuraPmxFallback:'sphereAdd'}};
+ const toon={isTexture:true,image:{width:1,height:1},userData:{sakuraPmxFallback:'toon'}};
+ const shade=ctx.inspect({model:{traverse(fn){fn({material:{name:'Dress',matcap:shine,gradientMap:toon,userData:{sakuraPmxRepairs:['sphere','toon']}}});}}});
+ assert.equal(shade.issues.length,2);assert.ok(shade.issues.some(issue=>issue.includes('shine/sphere')));
  const slots=[{material:0,slot:'diffuse',original:'wrong.png'},{material:0,slot:'toon',original:'Shared toon 1'},{material:1,slot:'sphere',original:'(none)'}];
  const calls=[];const request=async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return {ok:true,json:async()=>({slots:[{material:0,slot:'diffuse',reference:'wrong.png',resolved:'textures/hair.png',status:'repairable'},{material:1,slot:'diffuse',reference:'lost.png',status:'missing',message:'Choose a replacement'}]})};};
  const checked=await ctx.check('pmx/character/one.pmx',slots,()=>true,request);

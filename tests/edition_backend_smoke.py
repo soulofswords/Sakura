@@ -43,7 +43,7 @@ async def check():
   async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url=origin,headers={'Origin':origin}) as client:
    for path in ['/','/api/models','/api/voices','/api/settings','/api/identity','/api/version']:
     response=await client.get(path);assert response.status_code==200,(path,response.text)
-   assert (await client.get('/api/version')).json()['version']=='1.0.1'
+   assert (await client.get('/api/version')).json()['version']=='1.0.2'
    assert (await client.get('/static/js/pmx-stage.js')).status_code==200
    assert (await client.get('/api/scenery/assets?kind=stage')).status_code==200
    settings=(await client.get('/api/settings')).json();assert settings['product_edition']==edition

@@ -35,3 +35,30 @@ class ReleasePayloadTests(unittest.TestCase):
                     for match in re.findall(r'/static/[\w./-]+\.html',script.read_text(encoding='utf-8'))}
         self.assertIn('Sakura/static/model-library-preview.html',referenced)
         self.assertEqual(sorted(referenced-packaged),[])
+
+
+    def test_editor_payload_excludes_reference_jobs_and_keeps_distribution(self):
+        import tempfile
+        builder=load('editor_asset_filter','tools/build-installers.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            allowed=['PmxEditor.exe','Lib/PEPlugin/PEPlugin.dll','_plugin/User/OtherPlugin.dll','README.txt']
+            blocked=['_plugin/User/SakuraAppearanceReference.dll',
+                     '_plugin/User/SakuraAppearanceReference.dll.lock',
+                     '_plugin/User/SakuraAppearanceReference.dll.owner.json',
+                     '_plugin/User/sakuraappearancereference.tmp',
+                     'settings.lock','example.pmx','example.pmd','editor.log','test.bak']
+            for name in allowed+blocked:
+                path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'test')
+            packaged={name for _,name in builder.editor_files(root)}
+            self.assertEqual(packaged,{'Sakura/tools/pmx-editor/'+name for name in allowed})
+
+    def test_both_edition_installers_default_to_local_app_data(self):
+        import tempfile
+        split=load('install_default_editions','tools/build-split-installers.py')
+        for edition,display in [('companion','Sakura Companion'),('vtuber','Sakura VTuber')]:
+            with self.subTest(edition=edition),tempfile.TemporaryDirectory() as folder:
+                split.edition_sources(edition,Path(folder))
+                source=(Path(folder)/'Installer.cs').read_text(encoding='utf-8')
+                self.assertIn('string defaultPath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"'+display+'")',source)
+                self.assertIn('Text=existing??defaultPath',source)

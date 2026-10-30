@@ -32,7 +32,7 @@ try:
     Image.open(BASE/'android/assets/sakura-mobile-logo.png').convert('RGBA').resize((192,192),Image.Resampling.LANCZOS).save(res/'sakura_flower.png')
     run([tools/'aapt2.exe','compile','--dir',BUILD/'res','-o',BUILD/'resources.zip'])
     unsigned=BUILD/'unsigned.apk'
-    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','37','--version-name','0.3.31','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
+    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','38','--version-name','0.3.32','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
     classes=BUILD/'classes';classes.mkdir(exist_ok=True)
     run([java/'javac.exe','-encoding','UTF-8','-source','8','-target','8','-classpath',os.pathsep.join(map(str,[platform,*wake_jars])),'-d',classes,*sorted((source_root/'src').rglob('*.java'))])
     classes_jar=BUILD/'classes.jar'

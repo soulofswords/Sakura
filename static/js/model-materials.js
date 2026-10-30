@@ -82,7 +82,7 @@ export class ModelMaterials {
                 for(const material of (Array.isArray(mesh.material)?mesh.material:[mesh.material])) {
                     if(!material||seen.has(material)||!material.color)continue;seen.add(material);
                     this.entries.push({id:`mat:${this.entries.length}`,name:material.name||`Material ${this.entries.length+1}`,kind:'material',material,
-                        base:{map:material.map,color:material.color.clone(),opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite,alphaTest:material.alphaTest}});
+                        base:{map:material.map,color:material.color.clone(),opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite,alphaTest:material.alphaTest,pmxDiffuse:material.uniforms?.sakuraPmxDiffuse?.value.clone(),pmxAmbient:material.uniforms?.sakuraPmxAmbient?.value.clone()}});
                 }
             });
         }
@@ -103,6 +103,12 @@ export class ModelMaterials {
         const source=this.replacements.get(e.id)||e.base.map,setting=this.colors[e.id];
         const previous=e.generated;e.generated=null;
         e.material.color.copy(e.base.color);
+        // The shared PMX shader reads authored uniforms, not material.color.
+        // Restore first so transparency-only edits and reset keep authored lighting.
+        const pmxDiffuse=e.material.uniforms?.sakuraPmxDiffuse?.value;
+        const pmxAmbient=e.material.uniforms?.sakuraPmxAmbient?.value;
+        if(e.base.pmxDiffuse)pmxDiffuse?.copy(e.base.pmxDiffuse);
+        if(e.base.pmxAmbient)pmxAmbient?.copy(e.base.pmxAmbient);
         const opacity=setting?.opacity??1;
         e.material.opacity=opacity>1?e.base.opacity+(1-e.base.opacity)*(opacity-1):e.base.opacity*opacity;
         const forceOpaque=opacity>1&&e.material.opacity>=.999;
@@ -113,7 +119,12 @@ export class ModelMaterials {
         try {
             if(!setting||(setting.strength===0&&opacity<=1)){e.material.map=source;return;}
             const target=new THREE.Color(setting.color).convertLinearToSRGB();
-            if(!source){e.material.color.lerp(new THREE.Color(setting.color),setting.strength);return;}
+            if(!source){
+                e.material.color.lerp(new THREE.Color(setting.color),setting.strength);
+                if(e.base.pmxDiffuse)pmxDiffuse.lerp(new THREE.Vector3(target.r,target.g,target.b),setting.strength);
+                if(e.base.pmxAmbient)pmxAmbient.lerp(new THREE.Vector3(.5,.5,.5),setting.strength);
+                return;
+            }
             if(source.isCompressedTexture)throw Error('Recoloring this compressed texture needs a PNG/JPG replacement first.');
             const image=source.image,w=image?.naturalWidth||image?.width,h=image?.naturalHeight||image?.height;
             if(!w||!h)throw Error('The texture image is not ready.');
@@ -137,8 +148,13 @@ export class ModelMaterials {
             // Authored diffuse tints must not multiply a newly selected hue
             // back into darkness. Restore the original tint on reset.
             e.material.color.lerp(new THREE.Color(0xffffff),setting.strength);
+            if(e.base.pmxDiffuse)pmxDiffuse.lerp(new THREE.Vector3(1,1,1),setting.strength);
+            if(e.base.pmxAmbient)pmxAmbient.lerp(new THREE.Vector3(.5,.5,.5),setting.strength);
             e.material.map=e.generated=map;
-        } catch(error){e.material.map=source;throw error;}
+        } catch(error){e.material.map=source;
+            if(e.base.pmxDiffuse)pmxDiffuse?.copy(e.base.pmxDiffuse);
+            if(e.base.pmxAmbient)pmxAmbient?.copy(e.base.pmxAmbient);
+            throw error;}
         finally {previous?.dispose();e.material.needsUpdate=true;}
     }
     async setRemap(id,blob) {
@@ -154,6 +170,7 @@ export class ModelMaterials {
             else {
                 replacement=new THREE.Texture();
                 if(e.base.map)replacement.copy(e.base.map);else replacement.colorSpace=THREE.SRGBColorSpace;
+                if(replacement.userData)delete replacement.userData.sakuraPmxFallback;
                 // A decoded PNG/TGA canvas cannot reuse DDS block-compression
                 // format or mipmaps. Keep UV transforms and the original map
                 // for reset, but upload the replacement as normal RGBA pixels.
@@ -172,7 +189,7 @@ export class ModelMaterials {
         this.revision=(this.revision||0)+1;
         if(this.renderer&&this.drawOriginal)this.renderer.drawMesh=this.drawOriginal;
         for(const e of this.entries){
-            if(e.kind==='material'){e.material.map=e.base.map;e.material.color.copy(e.base.color);e.material.opacity=e.base.opacity;e.material.transparent=e.base.transparent;e.material.depthWrite=e.base.depthWrite;e.material.alphaTest=e.base.alphaTest;e.material.needsUpdate=true;e.generated?.dispose();}
+            if(e.kind==='material'){e.material.map=e.base.map;e.material.color.copy(e.base.color);if(e.base.pmxDiffuse)e.material.uniforms?.sakuraPmxDiffuse?.value.copy(e.base.pmxDiffuse);if(e.base.pmxAmbient)e.material.uniforms?.sakuraPmxAmbient?.value.copy(e.base.pmxAmbient);e.material.opacity=e.base.opacity;e.material.transparent=e.base.transparent;e.material.depthWrite=e.base.depthWrite;e.material.alphaTest=e.base.alphaTest;e.material.needsUpdate=true;e.generated?.dispose();}
             if(e.kind==='atlas'&&this.live?.avatar)this.live.avatar.textures[e.index]=e.base;
         }
         for(const [id,texture]of this.replacements){if(id.startsWith('atlas:'))texture.destroy(true);else texture.dispose();}

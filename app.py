@@ -1027,7 +1027,7 @@ async def mobile_transfer_request_info(request: Request):
 
 # ── smart 3D model & texture route ─────────────────────────────
 @app.get("/models/{file_path:path}")
-async def serve_model_file(file_path: str, fallback: str = "") :
+async def serve_model_file(file_path: str, fallback: str = "", strict_texture: bool = False) :
     """
     Intelligently serve PMX models and textures.
     Handles URL-encoded paths, Windows backslashes, textures.json mapping,
@@ -1085,7 +1085,7 @@ async def serve_model_file(file_path: str, fallback: str = "") :
         # 3. Check for alternative extensions (.png, .jpg, .bmp, .tga) in the same directory
         parent = candidate.parent
         stem = candidate.stem
-        if parent.is_dir():
+        if parent.is_dir() and not strict_texture:
             for ext in [".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp"]:
                 alt = parent / f"{stem}{ext}"
                 if alt.is_file():
@@ -1337,8 +1337,10 @@ async def diagnose_pmx_textures(payload: dict):
     """Resolve only this package's references; never guess a different image."""
     import json
     from PIL import Image
+    from pmx_texture_repair import PackageTextures
     try:
         package = _pmx_texture_package(payload.get('model', ''))
+        recovery = PackageTextures(package)
         slots = payload.get('slots')
         if not isinstance(slots, list) or len(slots) > 2048:
             raise ValueError('Provide at most 2048 texture slots.')
@@ -1356,10 +1358,13 @@ async def diagnose_pmx_textures(payload: dict):
             candidate = (package.parent / reference).resolve()
             if not reference or not candidate.is_relative_to(package.parent) or candidate.suffix.lower() not in image_extensions:
                 raise ValueError('Texture references must stay inside this model package.')
-            response = await serve_model_file(candidate.relative_to(MODELS_DIR.resolve()).as_posix())
+            response = await serve_model_file(candidate.relative_to(MODELS_DIR.resolve()).as_posix(), strict_texture=slot in {'sphere', 'toon'})
             result = {'material': index, 'slot': slot, 'reference': reference}
             if not isinstance(response, FileResponse):
                 result.update(status='missing', message='Texture is missing or its filename is ambiguous. Select a replacement.')
+                recovered = await run_in_threadpool(recovery.recover, reference)
+                if recovered:
+                    result.update(recovered)
             else:
                 resolved = Path(response.path).resolve()
                 if not resolved.is_relative_to(package.parent):
@@ -1388,6 +1393,10 @@ async def diagnose_pmx_textures(payload: dict):
                 result['resolved'] = target
                 if result['status'] == 'ok' and target != reference:
                     result['status'] = 'repairable'
+                elif result['status'] == 'invalid':
+                    recovered = await run_in_threadpool(recovery.recover, reference)
+                    if recovered:
+                        result.update(recovered)
             results.append(result)
         return {'slots': results}
     except (ValueError, TypeError, OSError) as exc:

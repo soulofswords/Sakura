@@ -6,7 +6,7 @@ const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playw
  await page.evaluate(()=>{
   window.viewer={camera:{zoom:1},vtuberTrackingMode:false};
   window.installColorDial=()=>({sync(){}});
-  for(const key of ['installBoneSettings','installTextureDiagnostics','installMouthSettings','installLive2DFaceMapping'])window[key]=()=>({refresh(){},stop(){}});
+  for(const key of ['installBoneSettings','installTextureDiagnostics','installMouthSettings','installLive2DFaceMapping','installPmxAppearance','installMaterialExpressions'])window[key]=()=>({refresh(){},stop(){}});
   document.getElementById('expression-modal').classList.remove('hidden');
  });
  await page.addScriptTag({content:fs.readFileSync('static/js/model-settings.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function','function')+';window.settings=installModelSettings(()=>viewer,()=>"test",()=>{},()=>"",()=>{});'});

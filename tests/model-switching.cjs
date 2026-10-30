@@ -10,6 +10,9 @@ const context = {
     window: {},
     repairNoseSkin() { return 0; },
     applyPmxReferenceLighting() {},
+    // Model switching only needs the appearance pass to exist; applying and
+    // persisting the per-model sliders has its own sandbox and WebGL tests.
+    applyPmxAppearance() {}, readPmxAppearance() { return {}; },
     loadVisibility() {}, applyVisibility() {},
     fetch: (...args) => fetchImpl(...args),
     THREE: {

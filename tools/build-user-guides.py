@@ -18,7 +18,7 @@ pdfmetrics.registerFont(TTFont('Guide',str(fonts/'Vera.ttf')))
 pdfmetrics.registerFont(TTFont('GuideBold',str(fonts/'VeraBd.ttf')))
 pdfmetrics.registerFontFamily('Guide',normal='Guide',bold='GuideBold',italic='Guide',boldItalic='GuideBold')
 W,H=A4
-DATE='28 October 2026 / Version 1.0.1'
+DATE=datetime.date.today().strftime('%d %B %Y').lstrip('0')+' / Version 1.0.2'
 def clean(s):
  return s.replace('\u2014','-').replace('\u2013','-').replace('\u2011','-').replace('\u2019',"'").replace('\u201c','"').replace('\u201d','"')
 def parse(p):
@@ -123,7 +123,7 @@ def pdf_guide(kind,chapters,path):
   for line in c['notes']:story.append(para(line,st['note']))
  for suffix,label in [('models','Models and navigation'),('settings','Theme, version and graphics'),('scenery','PMX backgrounds and props')]:
   screenshot=ROOT/'docs/user-guides/images'/f'{kind}-{suffix}.png'
-  if screenshot.is_file():story +=[PageBreak(),para(label,st['title']),para('Actual Sakura 1.0.1 UI components with demonstration data; no personal character or account is shown.',st['note']),Image(str(screenshot),width=509,height=335),Spacer(1,15),para('Use the matching chapters above for detailed instructions. Scenery is enabled explicitly and stays separate from the tracked character.',st['body'])]
+  if screenshot.is_file():story +=[PageBreak(),para(label,st['title']),para('Actual Sakura 1.0.2 UI components with demonstration data; no personal character or account is shown.',st['note']),Image(str(screenshot),width=509,height=335),Spacer(1,15),para('Use the matching chapters above for detailed instructions. Scenery is enabled explicitly and stays separate from the tracked character.',st['body'])]
  doc=GuideDoc(str(path),pagesize=A4,leftMargin=43,rightMargin=43,topMargin=53,bottomMargin=52,title=title+' - Step-by-step user guide',author='Sakura',pageCompression=1)
  doc.build(story,onFirstPage=lambda c,d:chrome(c,d,title,accent),onLaterPages=lambda c,d:chrome(c,d,title,accent))
  pages=PdfReader(path).pages

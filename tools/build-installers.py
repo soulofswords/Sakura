@@ -37,6 +37,21 @@ def release_asset_allowed(name):
     return not (any(part in ('__pycache__','.git','.pytest_cache') for part in path.parts)
         or lowered.endswith(('.bak','.backup','.orig','.rej','.tmp','.swp','.swo','.map','~'))
         or '.before-' in lowered)
+def editor_asset_allowed(name):
+    """Ship the editor distribution, never reference-job state or characters."""
+    path=Path(name)
+    return (release_asset_allowed(path)
+        and not path.name.casefold().startswith('sakuraappearancereference')
+        and path.suffix.casefold() not in ('.pmx','.pmd','.vrm','.vmd','.vpd','.log','.lock'))
+
+
+def editor_files(root):
+    root=Path(root)
+    for path in root.rglob('*'):
+        if path.is_file() and editor_asset_allowed(path.relative_to(root)):
+            yield path, 'Sakura/tools/pmx-editor/'+path.relative_to(root).as_posix()
+
+
 DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'kokoro_af_heart',
             'ollama_model': 'qwen3-vl:2b-instruct', 'ollama_context': 2048,
             'ollama_models_folder': 'llm-models', 'computer_control_enabled': False,
@@ -110,9 +125,8 @@ def windows():
         editor_root=BASE/'tools/pmx-editor'
         if not (editor_root/'PmxEditor.exe').is_file():
             raise FileNotFoundError('Restore tools/pmx-editor/PmxEditor.exe before packaging Windows.')
-        for path in editor_root.rglob('*'):
-            if path.is_file() and path.suffix.lower() not in ('.pmx','.pmd','.vrm','.vmd','.vpd','.log'):
-                add(path,'Sakura/tools/pmx-editor/'+path.relative_to(editor_root).as_posix())
+        for path,name in editor_files(editor_root):
+            add(path,name)
         for path,name in bytecode_files: add(path,name)
         add(BUILD/LAUNCHER_FILE,LAUNCHER_FILE)
         add(BUILD/'Uninstall.exe','Sakura/Uninstall.exe')

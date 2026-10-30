@@ -42,8 +42,9 @@ export function installAppearance() {
         const about=document.createElement('section');about.className='setting-group';
         const heading=document.createElement('h3');heading.textContent='About Sakura';
         const version=document.createElement('p');version.id='sakura-version';version.textContent='Reading installed version…';
+        const site=document.createElement('a');site.href='https://soulofswords.github.io/Sakura-website/';site.target='_blank';site.rel='noopener noreferrer';site.textContent='Sakura website: guides, features and setup';
         const releases=document.createElement('a');releases.href='https://github.com/soulofswords/Sakura-Downloads/releases';releases.target='_blank';releases.rel='noopener noreferrer';releases.textContent='Release history and downloads';
-        about.append(heading,version,releases);themePanel.append(about);
+        about.append(heading,version,site,releases);themePanel.append(about);
         fetch('/api/version').then(r=>{if(!r.ok)throw Error();return r.json();}).then(data=>{version.textContent=data.product+' · Version '+data.version;}).catch(()=>{version.textContent='Version unavailable. Restart Sakura and try again.';});
         const graphics=document.createElement('button');graphics.type='button';graphics.id='open-graphics-settings';graphics.textContent='Graphics';
         const options=document.createElement('section');options.className='setting-group';options.hidden=true;options.id='graphics-settings';

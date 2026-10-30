@@ -1,3 +1,4 @@
+import {applyPmxAppearance,readPmxAppearance} from './pmx-render-controls.js?v=3';
 import {bindSparseMorphs} from './pmx-sparse-morphs.js?v=material-controls114';
 import {collectMaterialControls,withoutMaterialTargets,bindMaterialControls} from './pmx-material-controls.js?v=material-controls114';
 import {waitForModelGpu} from './model-presentation.js?v=switch85';
@@ -6,7 +7,7 @@ import ModelBlockTransition from './model-block-transition.js?v=switch85';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
 import {restoreIdleBreathing,applyIdleBreathing} from './idle-breathing.js?v=2';
 import * as THREE from 'three';
-import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
+import { MMDLoader } from 'three/addons/loaders/MMDLoader.js?v=toon-rectangle1';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
@@ -27,7 +28,7 @@ import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
 import ModelDance from './model-dance.js?v=irina-greeting113';
 import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
 import {renderPixelRatio} from './render-budget.js?v=startup68';
-import {applyPmxReferenceLighting} from './pmx-reference-lighting.js?v=1';
+import {applyPmxReferenceLighting} from './pmx-reference-lighting.js?v=reference-match16';
 
 /**
  * Smart loader for .tga textures.
@@ -930,6 +931,7 @@ export default class ModelViewer {
         manager.addHandler(/\.(?:png|jpe?g|bmp|tga|dds|sph|spa)(?:\?.*)?$/i, new SmartTgaLoader(manager));
 
         const assetRoles = new Map();
+        const strictShadingFiles = new Set();
         let textureReview = null;
         // URL rewrite handler: normalize backslashes & apply textures.json
         manager.setURLModifier((requestedUrl) => {
@@ -950,6 +952,13 @@ export default class ModelViewer {
                     break;
                 }
             }
+            const texturePath=clean.split('?')[0];
+            if(!/[?&]strict_texture=/.test(clean)&&[...strictShadingFiles].some(filename=>texturePath.endsWith(filename)||texturePath.endsWith(encodeURI(filename)))){
+                clean+=(clean.includes('?')?'&':'?')+'strict_texture=true';
+            }
+            if(this.textureReloadRevision&&/\.(?:png|jpe?g|bmp|tga|dds|sph|spa)(?:\?|$)/i.test(clean)&&!/[?&]sakura_texture_refresh=/.test(clean)){
+                clean+=(clean.includes('?')?'&':'?')+'sakura_texture_refresh='+this.textureReloadRevision;
+            }
             return clean;
         });
 
@@ -965,6 +974,20 @@ export default class ModelViewer {
                 loader.meshBuilder.build = (data, ...args) => {
                     data = this._validatePmxReferences(data);
                     this.pmxTextureSlots = this._applyPmxTextureOverrides(data, materialTextures);
+                    // Once a slot holds a neutral fallback, the texture itself no longer
+                    // carries the name the file asked for. Keep the PMX's own per-slot
+                    // names in load order so a report can blame the right file: a diffuse
+                    // map and a shine map failing are different problems for the user.
+                    this.pmxSlotFiles = (data.materials || []).map(material => ({
+                        diffuse: data.textures?.[material.textureIndex] || null,
+                        sphere: data.textures?.[material.envTextureIndex] || null,
+                        toon: material.toonFlag === 0 ? data.textures?.[material.toonIndex] || null : null,
+                    }));
+                    for(const material of data.materials||[]){
+                        for(const index of [material.envTextureIndex,material.toonFlag===0?material.toonIndex:-1]){
+                            const filename=data.textures?.[index];if(filename)strictShadingFiles.add(filename.replace(/\\/g,'/'));
+                        }
+                    }
                     for (const material of data.materials || []) {
                         const sphere = data.textures?.[material.envTextureIndex];
                         if (sphere && material.envFlag) assetRoles.set(sphere, material.envFlag === 1 ? 'white' : 'black');
@@ -1058,9 +1081,11 @@ export default class ModelViewer {
                         mmd.traverse(child=>{for(const material of Array.isArray(child.material)?child.material:[child.material]){
                             applyPmxReferenceLighting(material,material?.userData?.MMD?.authoredLighting);
                         }});
+                        applyPmxAppearance(mmd,readPmxAppearance(url));
                         repairNoseSkin(mmd);
                         this._repairDancerSkirtAtlas(mmd);
                         this._fixPmxLayeredSurfaces(mmd);
+                        this.pmxReferenceAudit = this._auditPmxReferenceMaterials(mmd);
                         await this.physics.initialize?.(mmd);
                         report('shaders');
                         if (generation !== this.loadGeneration) {
@@ -1116,13 +1141,27 @@ export default class ModelViewer {
 
                     console.log('✅ Model loaded successfully. Found morphs:', this.allMorphNames);
                     console.info(`Model ready in ${((performance.now() - started) / 1000).toFixed(2)}s`);
+                    // A texture the file names but that never decoded is the one defect
+                    // an upload can bring that the user can actually act on, so name it -
+                    // and name the slot too, because losing a colour map and losing a shine
+                    // map look nothing alike on the model.
+                    const audit = this.pmxReferenceAudit;
+                    const listed = files => files.length
+                        ? ` (${files.slice(0, 3).join(', ')}${files.length > 3 ? ` and ${files.length - 3} more` : ''})`
+                        : '';
+                    const colourLoss = audit?.missingAssets.filter(asset => asset.kinds.includes('diffuse')).length || 0;
+                    const shadingLoss = (audit?.missingAssets.length || 0) - colourLoss;
+                    const unreadableNotice = [
+                        colourLoss ? `${colourLoss} surface(s) of this model name a colour texture that never decoded${listed(audit.missingFiles)}. Those surfaces show the model's authored colour instead; re-export or re-download the model to restore them.` : null,
+                        shadingLoss ? `${shadingLoss} surface(s) name a shine or toon texture that never decoded${listed(audit.missingShadingFiles)}. They keep their colour and lose only that shading.` : null,
+                    ].filter(Boolean).join(' ') || null;
                     report('ready');
                     resolve({
                         model: this.model,
                         morphs: this.allMorphNames,
                         physics: this.physicsInfo,
                         humanoid: this.humanoidInfo,
-                        notice: [(this.textureReview?.required_missing ?? this.textureReview?.missing)?.length ? 'Missing diffuse texture references. Use Check textures in PMX Editor to inspect them.' : this.textureReview?.optional_missing?.length ? `${this.textureReview.optional_missing.length} optional shine maps missing; neutral fallbacks used.` : null, memoryNotice, geometryRepairs?.invalidVertices ? `Removed ${geometryRepairs.invalidVertices} invalid vertices. A complete re-export may be needed for missing geometry.` : null].filter(Boolean).join(" ") || null,
+                        notice: [(this.textureReview?.required_missing ?? this.textureReview?.missing)?.length ? 'Missing diffuse texture references. Use Check textures in PMX Editor to inspect them.' : this.textureReview?.optional_missing?.length ? `${this.textureReview.optional_missing.length} optional shine maps missing; neutral fallbacks used.` : null, unreadableNotice, memoryNotice, geometryRepairs?.invalidVertices ? `Removed ${geometryRepairs.invalidVertices} invalid vertices. A complete re-export may be needed for missing geometry.` : null].filter(Boolean).join(" ") || null,
                     });
                 },
                 (xhr) => {
@@ -1142,6 +1181,64 @@ export default class ModelViewer {
                 }
             );
         });
+    }
+
+    _auditPmxReferenceMaterials(root) {
+        // The reference lighting pass is per-material, so a PMX whose material or
+        // texture data the loader could not read falls back to three's toon maths
+        // and is the only way a single avatar can arrive too dark or too flat.
+        // Count them instead of assuming every upload matched.
+        const materials = new Set();
+        root.traverse(child => {
+            for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
+                if (material?.isMMDToonMaterial) materials.add(material);
+            }
+        });
+        const unmatched = [];
+        const repaired = [];
+        // MMDLoader builds one material per PMX material, in file order, so the
+        // model's own material array maps a repaired slot back to its index.
+        const order = Array.isArray(root.material) ? root.material : null;
+        for (const material of materials) {
+            if (!material.userData?.sakuraPmxReference) unmatched.push(material.name || 'unnamed');
+            const kinds = material.userData?.sakuraPmxRepairs;
+            if (!kinds?.length) continue;
+            const files = this.pmxSlotFiles?.[order ? order.indexOf(material) : -1] || {};
+            repaired.push({
+                name: material.name || 'unnamed',
+                kinds: kinds.slice(),
+                // Each kind names the file that slot actually asked for; the loader's
+                // mapFileName is only the fallback for the colour slot.
+                files: Object.fromEntries(kinds.map(kind => [kind,
+                    files[kind] || (kind === 'diffuse' ? material.userData?.MMD?.mapFileName : null) || null])),
+            });
+        }
+        if (unmatched.length) console.warn(`PMX reference lighting skipped ${unmatched.length}/${materials.size} materials: ${unmatched.join(', ')}`);
+        // A material with no ramp of its own is asking for MMD's shared default toon,
+        // which is flat white - a normal file, not a defect. Only a map that was named
+        // and then never decoded is a missing asset worth telling the user about.
+        const missingAssets = [];
+        for (const {name, kinds, files} of repaired) {
+            const absent = kinds.filter(kind => kind === 'defaultToon');
+            const unreadable = kinds.filter(kind => kind !== 'defaultToon');
+            if (unreadable.length) console.warn(`PMX texture unreadable (${name}): ${unreadable.map(kind => `${kind} map '${files[kind] || 'unnamed'}'`).join(', ')} reached the renderer with no decodable image; bound a neutral one so the surface keeps its authored colour.`);
+            if (absent.length) console.info(`PMX default toon (${name}): no ramp in the file, bound MMD's shared white toon so the surface keeps its authored colour.`);
+            if (unreadable.length) missingAssets.push({name, kinds: unreadable, files});
+        }
+        const filesFor = kinds => [...new Set(missingAssets
+            .filter(asset => asset.kinds.some(kind => kinds.includes(kind)))
+            .map(asset => kinds.map(kind => asset.files[kind]).find(Boolean))
+            .filter(Boolean)
+            .map(file => file.replace(/\\/g, '/').split('/').pop()))];
+        return {
+            materials: materials.size,
+            matched: materials.size - unmatched.length,
+            unmatched,
+            repaired,
+            missingAssets,
+            missingFiles: filesFor(['diffuse']),
+            missingShadingFiles: filesFor(['toon', 'sphere']),
+        };
     }
 
     _checkModelShaders(root) {
@@ -2284,6 +2381,33 @@ export default class ModelViewer {
         this.camera.updateProjectionMatrix();
         this.camera.lookAt(this.controls.target);
         this.controls.update();
+    }
+
+    captureTextureDiagnosticFrame(maxSize=960) {
+        if(this.live2d)return this.live2d.capture(maxSize);
+        if(!this.model||this._displayLoading)return null;
+        const saved=this.camera.clone();
+        try{
+            this.model.updateMatrixWorld(true);
+            const box=this._visibleModelBounds(this.model);
+            if(box.isEmpty())return null;
+            const center=box.getCenter(new THREE.Vector3());
+            // A sphere fits every viewing angle, including the back and side.
+            // Keep the user's viewing direction instead of auto-framing front.
+            const radius=box.getSize(new THREE.Vector3()).length()/2;
+            const direction=this.camera.position.clone().sub(this.controls.target).normalize();
+            if(!direction.lengthSq())direction.set(0,0,1);
+            this.camera.aspect=.75;this.camera.zoom=1;
+            const vertical=THREE.MathUtils.degToRad(this.camera.fov)/2;
+            const horizontal=Math.atan(Math.tan(vertical)*this.camera.aspect);
+            const distance=Math.max(.01,radius)/Math.sin(Math.min(vertical,horizontal))*1.08;
+            this.camera.position.copy(center).addScaledVector(direction,distance);
+            this.camera.far=Math.max(saved.far,distance+radius*3);
+            this.camera.lookAt(center);this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld(true);
+            return this.captureSpoutFrame(maxSize);
+        }finally{
+            this.camera.copy(saved);this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld(true);
+        }
     }
 
     captureSpoutFrame(maxSize=720) {

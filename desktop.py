@@ -186,6 +186,11 @@ class DesktopApi:
             save_settings({'pmx_editor_path': str(editor)})
         return open_model(model_path, str(editor))
 
+    def capture_pmx_appearance_reference(self, model_path, direction):
+        """Read a reference from an owned PMX Editor, without editing source art."""
+        from pmx_appearance_reference import capture_reference
+        return capture_reference(model_path, direction, get_settings().get('pmx_editor_path'))
+
     def platform_capabilities(self):
         return {'platform': sys.platform, 'pmx_editor': sys.platform == 'win32','mmd':sys.platform=='win32'}
 

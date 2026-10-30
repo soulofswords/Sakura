@@ -1,5 +1,5 @@
 # Sakura Companion
-Step-by-step user guide | Sakura 1.0.1 | Windows desktop | 28 October 2026
+Step-by-step user guide | Sakura 1.0.2 | Windows desktop | 29 October 2026
 
 ## 1. Start Companion and load a character
 Use Companion for AI conversation, speech and approved Agent work.
@@ -178,7 +178,7 @@ Note: You never need the owner's Jio login, OTP, passphrase or publishing script
 
 ## 15. Version, graphics and 3D scenery
 Arrange a background or prop beside your character without replacing it.
-1. Open Settings > Theme. About Sakura displays the installed version, currently 1.0.1. Release history opens the download page; it does not install an update automatically.
+1. Open Settings > Theme. About Sakura displays the installed version, currently 1.0.2. The Sakura website link opens the project site with guides, features and setup. Release history opens the download page; it does not install an update automatically.
 2. Click Graphics. Choose Low, Balanced or High rendering quality. The selection uses the same quality control as the model toolbar and saves automatically.
 3. Open Memory & privacy on the left toolbar, then Background & stage items. Scroll to 3D backgrounds & props and tick Enable PMX backgrounds and props alongside my character.
 4. Choose Stages or Tools & Props. Browse its local folders, or click the matching cloud button to sign in and browse/download from that library. Import accepts one complete asset package with textures. Choose one PMX asset, then Add selected asset to stage. Character models are excluded from these lists.
@@ -209,12 +209,16 @@ Shared avatar tools work in Companion and optional VTuber mode.
 1. Open Model Settings (pencil). Texture remapping replaces files; Texture coloring changes tint; Expressions uses authored expressions; Bones controls individual motion; Mouth selects lip-sync input.
 2. Pick a model part before editing it. Tint and transparency apply independently. Transparency-only edits retain original textures/colors. Restore the selected material to undo an edit.
 3. To reuse an appearance change, choose Change color or Change transparency, set the values, enter a preset name and click Save selected part as expression. Under Expressions > Part color & transparency expressions, switch it On or Off. Off restores that channel's previous setting; the other channel stays intact. Presets are saved separately for each model. Delete preset removes it and restores the previous value if active.
-3. Tune character lighting and physics. Scope lighting to a selected material where supported; otherwise it affects the full character. Calibrate tracking after moving the camera or changing seating.
-4. Open Streaming & output. Enable Sakura Virtual Camera or Spout, then select Sakura in the receiving app. Route microphone audio separately.
-5. Memory & privacy contains conversation controls, screen/game controls and Background & stage items. Image/Live2D items have above/below layers, position locks and optional attachment to model movement.
-6. Settings > Theme contains computer-access permission and Run Sakura when Windows starts. Startup applies at your next Windows sign-in.
+4. Tune character lighting and physics. Scope lighting to a selected material where supported; otherwise it affects the full character. Calibrate tracking after moving the camera or changing seating.
+5. If a PMX loads washed out, grey or tinted, open Model Settings > PMX appearance. Directional shading adds sculpted lighting; Ambient fill and Brightness make it flatter and brighter. Sliders save per model, start at the same global defaults for every PMX, and Reset appearance sliders returns them. For a PMX that seems to be missing artwork, Take snapshot and check textures lists the colour, shine/sphere or toon files that never decoded and captures a full-body before/after image; Sakura reports those files instead of downloading or inventing them.
+6. Open Streaming & output. Enable Sakura Virtual Camera or Spout, then select Sakura in the receiving app. Route microphone audio separately.
+7. Memory & privacy contains conversation controls, screen/game controls and Background & stage items. Image/Live2D items have above/below layers, position locks and optional attachment to model movement.
+8. Settings > Theme contains computer-access permission and Run Sakura when Windows starts. Startup applies at your next Windows sign-in.
 Check: Selected material edits remain independent and the receiving video app displays Sakura. Turning capture/microphone off stops its respective input.
 Note: Transparent stage/window output is separate from model-part transparency. Video output does not carry voice audio automatically.
+On Windows, open Texture coloring > PMX appearance and click **Match appearance from PMX Editor**. Keep the model loaded while Sakura opens its own editor window, captures the reference and checks colour balance. An improving match saves only this model's sliders; **Undo automatic appearance match** restores the prior settings. Rotate to the back and run it again to compare that view. The texture snapshot button first checks paths and readable artwork, then uses the same appearance comparison. Missing or ambiguous artwork still needs your selection.
+
+Note: matching measures colour statistics, not exact pixels. Pose, physics, missing textures and unsupported effects may differ. Use a writable editor installation; a custom read-only installation prevents plugin capture.
 
 ## 18. Teacher hardware readings and computer access
 Ask for actual measurements rather than inferred PC specifications.

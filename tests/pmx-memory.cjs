@@ -16,7 +16,7 @@ assert.ok(gpuBytes<=64*1024*1024);
 const test={metadata:{format:'pmx',vertexCount:1000000,morphCount:5},morphs:[{name:'あ',type:0,elements:[{index:4,ratio:.5}]},...Array.from({length:3},()=>({name:'unused',type:2,elements:[]})),{name:'part',type:1,elements:[{index:0,position:[2,4,6]}]}]};
 assert.deepEqual(prepare.call(viewer,test).morphs[0].elements[0].position,[1,2,3]);
 console.log(JSON.stringify({vertices:data.metadata.vertexCount,before:data.morphs.length,after:reduced.morphs.length,gpuMorphMB:gpuBytes/1048576,kept:reduced.morphs.map(m=>m.name)}));
-const animateBody=source.match(/    animate\(\) \{([\s\S]*?)\n    \}\n\n    _renderFrame/)[1];
+const animateBody=source.match(/    animate\(\) \{([\s\S]*?)\n    \}\n\n    _prepareCompanionSurface/)[1];
 let disposed=0,notices=0;
 const animate=new Function('requestAnimationFrame','window','CustomEvent',animateBody);
 const broken={model:{},vrm:{},physics:{detach(){}},_renderFrame(){if(this.model)throw new RangeError('Array buffer allocation failed')},_disposeObject(){disposed++}};

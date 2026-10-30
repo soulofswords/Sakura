@@ -1,5 +1,5 @@
 # Sakura VTuber
-Step-by-step user guide | Sakura 1.0.1 | Windows desktop | 28 October 2026
+Step-by-step user guide | Sakura 1.0.2 | Windows desktop | 29 October 2026
 
 ## 1. Start VTuber and load an avatar
 Use standalone VTuber for performance without loading a chat LLM.
@@ -109,12 +109,17 @@ Make reversible, targeted changes before editing an entire avatar.
 2. In Texture coloring, choose the material by name or click Pick part on model, then click the intended area of hair/clothing.
 3. Under What would you like to change?, choose Change color or Change transparency. Apply color changes tint; Apply transparency changes opacity while preserving the original or already-saved tint. Use the matching Restore control to undo that channel.
 4. Under Character lighting, use Pick part for gloss and bloom for a selected area. Use Use full model when you want the effect everywhere.
-5. In Bones, use Freeze this bone only to diagnose unwanted motion. Restore all bones reverses manual freezes; Reset automatic freezes and recheck handles automatic ones.
-6. For a broken skirt, hair or face, take a diagnostic snapshot. Restore local overrides and compare the untouched asset in its editor before assuming the asset is damaged.
-7. Retest normal tracking after each single material or physics change.
+5. If a PMX loads washed out, grey or tinted, open Model Settings > PMX appearance. Move Directional shading up for sculpted lighting, or Ambient fill and Brightness for a flatter, brighter read. Each slider is saved per model and resets with Reset appearance sliders; the same defaults apply to every PMX, so nothing here is tuned for one character.
+6. For a PMX that seems to be missing artwork, open Texture remapping > Take snapshot and check textures. It reports which colour, shine/sphere or toon files never decoded and captures a full-body before/after image. A colour texture that is missing shows the model's authored flat colour; a missing shine or toon only loses that shading. Sakura does not download or invent the missing file - re-export or re-download the model.
+7. In Bones, use Freeze this bone only to diagnose unwanted motion. Restore all bones reverses manual freezes; Reset automatic freezes and recheck handles automatic ones.
+8. For a broken skirt, hair or face, take a diagnostic snapshot. Restore local overrides and compare the untouched asset in its editor before assuming the asset is damaged.
+9. Retest normal tracking after each single material or physics change.
 Check: Only the intended material changes and normal movement does not create obvious spikes, clipping or transparency holes.
 Note: Negative transparency strengthens opacity. It cannot reliably fix incorrect skin weights, missing geometry, wrong textures or every alpha-sorting issue.
 Note: Generic/Japanese material names can be confusing; Pick part on model helps avoid editing a similarly named material. Different rigs need different physics tuning.
+On Windows, open Texture coloring > PMX appearance and click **Match appearance from PMX Editor**. Keep the model loaded while Sakura opens its own editor window, captures the reference and checks colour balance. An improving match saves only this model's sliders; **Undo automatic appearance match** restores the prior settings. Rotate to the back and run it again to compare that view. The texture snapshot button first checks paths and readable artwork, then uses the same appearance comparison. Missing or ambiguous artwork still needs your selection.
+
+Note: matching measures colour statistics, not exact pixels. Pose, physics, missing textures and unsupported effects may differ. Use a writable editor installation; a custom read-only installation prevents plugin capture.
 Note: In Background > Stage items choose Add item for transparent images or Live2D assets. Select Above model or Below model, adjust size/rotation and enable Attach to model movement and size if wanted. The small lock prevents accidental movement.
 
 ## 10. Output to OBS, Discord or a video app
@@ -178,10 +183,11 @@ Note: The character remains the tracking target. These static objects do not rec
 
 ## 15. Installed version and graphics
 Check your version and tune rendering cost before increasing tracking complexity.
-1. Open Settings > Theme. About Sakura shows the installed version, currently 1.0.1.
-2. Release history and downloads opens the official release page. Install the matching edition when updating.
-3. Click Graphics and select Low, Balanced or High. Changes save automatically and synchronize with the toolbar quality control.
-4. Test your model, scenery and recording together. Use fewer props or lower quality if GPU memory usage is high.
+1. Open Settings > Theme. About Sakura shows the installed version, currently 1.0.2.
+2. Sakura website opens the project site with guides, features and setup.
+3. Release history and downloads opens the official release page. Install the matching edition when updating.
+4. Click Graphics and select Low, Balanced or High. Changes save automatically and synchronize with the toolbar quality control.
+5. Test your model, scenery and recording together. Use fewer props or lower quality if GPU memory usage is high.
 Check: Settings shows the correct edition/version and the rendering quality follows your selection.
 Note: Rendering quality changes resolution/detail budget; it does not guarantee 60 FPS tracking. Camera inference, hardware and phone network conditions also affect smoothness.
 Note: To toggle a material change like an expression, pick the part in Texture coloring, choose color or transparency, set its values, name the preset and click Save selected part as expression. Use Expressions > Part color & transparency expressions to switch it on/off. Off restores the previous value for that channel while preserving the other channel. Presets stay separate for each model.

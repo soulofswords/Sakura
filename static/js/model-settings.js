@@ -1,9 +1,10 @@
-import {ModelMaterials,storedRemap} from './model-materials.js?v=signature-remap2';
+import {installPmxAppearance} from './pmx-render-controls.js?v=3';
+import {ModelMaterials,storedRemap} from './model-materials.js?v=pmx-colour4';
 import {installColorDial} from './color-dial.js?v=assistant69';
 import {installMouthSettings} from './mouth-settings.js?v=audio-route5';
 import {installLive2DFaceMapping} from './live2d-face-mapping.js?v=2';
 import {installBoneSettings} from './model-bones.js?v=persistent5';
-import {installTextureDiagnostics} from './texture-diagnostics.js?v=decoder2';
+import {installTextureDiagnostics} from './texture-diagnostics.js?v=reference-generic8';
 import {tintEdit,opacityEdit} from './part-appearance.js?v=1';
 import {installMaterialExpressions} from './material-expressions.js?v=1';
 
@@ -21,7 +22,8 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         applyZoom((getViewer()?.camera.zoom||1)*100*Math.exp(-Math.max(-200,Math.min(200,event.deltaY))*.002));
     },{capture:true,passive:false});
     const bones=installBoneSettings(getViewer,getModelKey);
-    const textureDiagnostics=installTextureDiagnostics(getViewer,getModelKey,reloadModel);
+    const textureDiagnostics=installTextureDiagnostics(getViewer,getModelKey,reloadModel,()=>appearance.match());
+    const appearance=installPmxAppearance(getViewer,getModelKey);
     const lighting=document.getElementById('model-lighting-controls');
     for(const id of ['character-glow-slider','light-angle-slider','light-elevation-slider','gloss-boost-slider']){
         const group=document.getElementById(id)?.closest('.slider-group');if(group)lighting.append(group);
@@ -69,6 +71,7 @@ export function installModelSettings(getViewer,getModelKey,refreshPmx,getMic,rel
         zoom.value=Math.round((getViewer()?.camera.zoom||1)*100);
         bones.refresh();
         textureDiagnostics.refresh();
+        void appearance.refresh();
         const viewer=getViewer(),identity=viewer?.live2d||viewer?.model,key=getModelKey();
         faceMapping.refresh();
         document.querySelector('[data-model-tab="mouth"]').hidden=false;

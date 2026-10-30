@@ -13,6 +13,15 @@ export function inspectLoadedTextures(viewer) {
     }else viewer.model?.traverse(mesh=>{
         for(const material of Array.isArray(mesh.material)?mesh.material:[mesh.material]){
             if(!material)continue;
+            // MMD material maps are non-enumerable uniform accessors, so an
+            // Object.entries-only check silently skips their actual textures.
+            for(const slot of ['map','gradientMap','matcap','normalMap','alphaMap','emissiveMap']){
+                const texture=material[slot];
+                if(texture?.isTexture)inspect(texture,`${material.name||'Material'} / ${slot}`);
+            }
+            if(material.map?.userData?.sakuraPmxFallback==='diffuse')issues.push(`${material.name||'Material'}: showing a neutral fallback instead of its diffuse artwork.`);
+            if(/^sphere/.test(material.matcap?.userData?.sakuraPmxFallback||''))issues.push(`${material.name||'Material'}: showing a neutral fallback instead of its shine/sphere map.`);
+            if(material.gradientMap?.userData?.sakuraPmxFallback==='toon'&&material.userData?.sakuraPmxRepairs?.includes('toon'))issues.push(`${material.name||'Material'}: showing a neutral fallback instead of its toon map.`);
             for(const [slot,texture] of Object.entries(material))if(texture?.isTexture)inspect(texture,`${material.name||'Material'} / ${slot}`);
         }
     });
@@ -39,7 +48,7 @@ export async function checkPmxTextureReferences(key,slots,isCurrent,request=fetc
 }
 
 async function snapshot(viewer){
-    const frame=viewer.captureSpoutFrame(640);if(!frame)throw Error('Wait for the model to finish loading before taking a snapshot.');
+    const frame=viewer.captureTextureDiagnosticFrame?viewer.captureTextureDiagnosticFrame(960):viewer.captureSpoutFrame(640);if(!frame)throw Error('Wait for the model to finish loading before taking a snapshot.');
     let canvas=frame.canvas;
     if(!canvas){canvas=document.createElement('canvas');canvas.width=frame.width;canvas.height=frame.height;
         canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(frame.pixels),frame.width,frame.height),0,0);}
@@ -56,7 +65,7 @@ function store(key,record){
     });
 }
 
-export function installTextureDiagnostics(getViewer,getKey,reloadModel){
+export function installTextureDiagnostics(getViewer,getKey,reloadModel,matchAppearance){
     const button=document.getElementById('model-texture-snapshot-check'),status=document.getElementById('model-texture-check-status');
     const images=['model-texture-before-image','model-texture-after-image'].map(id=>document.getElementById(id));
     let busy=false,urls=[],displayKey=null;
@@ -67,27 +76,65 @@ export function installTextureDiagnostics(getViewer,getKey,reloadModel){
         if(!identity||viewer._displayLoading){status.textContent='Load a model and wait until it is ready.';return;}
         busy=true;button.disabled=true;displayKey=key;clear();
         let current=()=>getViewer()===viewer&&getKey()===key&&(viewer.live2d||viewer.model)===identity;
+        const view=viewer.model&&viewer.camera?.clone?{
+            camera:viewer.camera.clone(),target:viewer.controls?.target?.clone(),
+            position:viewer.model.position.clone(),quaternion:viewer.model.quaternion.clone(),scale:viewer.model.scale.clone()
+        }:null;
+        const restoreView=()=>{
+            if(!view||getViewer()!==viewer||getKey()!==key||!viewer.model)return;
+            viewer.model.position.copy(view.position);viewer.model.quaternion.copy(view.quaternion);viewer.model.scale.copy(view.scale);
+            viewer.model.updateMatrixWorld(true);
+            if(view.target)viewer.controls.target.copy(view.target);
+            viewer.camera.copy(view.camera);viewer.camera.updateProjectionMatrix();viewer.camera.updateMatrixWorld(true);
+        };
         try{
             viewer.materialEditor?.setHover(null);
             status.textContent='Taking snapshot and checking texture images…';
             const before=await snapshot(viewer);if(!current())throw Error('Model changed during the snapshot.');
+            let editorOpened=false,editorNote='';
+            if(/\.pmx$/i.test(key)){
+                const openEditor=window.pywebview?.api?.open_pmx_editor;
+                if(openEditor&&!(matchAppearance&&window.pywebview?.api?.capture_pmx_appearance_reference)){
+                    status.textContent='Opening this model in PMX Editor, then checking its texture references…';
+                    try{
+                        const opened=await window.pywebview.api.open_pmx_editor(key);
+                        editorOpened=opened?.opened===true;
+                        editorNote=editorOpened?' Launched PMX Editor with the selected file for comparison.':opened?.cancelled?' PMX Editor selection cancelled.':'';
+                    }catch(error){editorNote=` PMX Editor could not open: ${error.message||error}.`;}
+                }else editorNote=' PMX Editor opens from the Windows desktop app; this browser can still check the texture files.';
+                if(!current())throw Error('Model changed while opening PMX Editor.');
+            }
             const loaded=inspectLoadedTextures(viewer);
             const report=/\.pmx$/i.test(key)?await checkPmxTextureReferences(key,viewer.pmxTextureSlots||[],current):{checked:loaded.checked,repaired:0,issues:[]};
+            report.editorOpened=editorOpened;report.editorNote=editorNote;
             if(!current())throw Error('Model changed during the texture check.');
-            if(report.repaired||loaded.issues.length){
+            if(/\.pmx$/i.test(key)||report.repaired||loaded.issues.length){
                 status.textContent=`Saved ${report.repaired} confirmed texture path repairs. Reloading textures with the format-aware decoder…`;
+                // The files may have been restored while this model still owns
+                // the earlier white fallback. Re-read bytes, not just file paths.
+                viewer.textureReloadRevision=Math.max(Date.now(),(viewer.textureReloadRevision||0)+1);
                 await reloadModel(key);
                 if(getViewer()!==viewer||getKey()!==key||viewer._displayLoading)throw Error('Model changed or could not be reloaded. Repairs remain saved for its next load.');
                 const reloadedIdentity=viewer.live2d||viewer.model;current=()=>getViewer()===viewer&&getKey()===key&&(viewer.live2d||viewer.model)===reloadedIdentity;
+                restoreView();
+            }
+            if(/\.pmx$/i.test(key)&&matchAppearance&&window.pywebview?.api?.capture_pmx_appearance_reference){
+                status.textContent='Texture paths checked. Matching rendered appearance with PMX Editor…';
+                report.appearance=await matchAppearance();
+                const unmatched=viewer.pmxReferenceAudit?.unmatched||[];
+                if(unmatched.length)report.issues.push('Reference shading is unsupported for '+unmatched.length+' materials.');
+                if(!current())throw Error('Model changed during appearance matching.');
+                if(report.appearance?.matched)editorNote=' Read an actual PMX Editor reference and compared the whole model plus visible sampled materials.';
+                else report.issues.push('Appearance matching did not finish: '+(report.appearance?.error||'No editor reference returned.'));
             }
             const after=await snapshot(viewer);if(!current())throw Error('Model changed during the texture check.');
             report.issues.push(...inspectLoadedTextures(viewer).issues);
-            const summary=`Checked ${report.checked} texture references/images. ${report.repaired} path repairs saved.`;
+            const summary=`Checked all ${report.checked} texture references/images across the whole model. ${report.repaired} path repairs saved.`;
             const record={before,after,report,time:Date.now()};await store(key,record);if(!current())return;
             for(const [i,blob]of [before,after].entries()){const url=URL.createObjectURL(blob);urls.push(url);images[i].src=url;images[i].hidden=false;}
-            status.textContent=summary+(report.issues.length?' Needs attention: '+report.issues.join(' '):' No missing or unreadable textures detected.')+' Snapshots and report saved locally for this model.';
+            status.textContent=summary+(report.issues.length?' Needs attention: '+report.issues.join(' '):' No missing or unreadable textures detected.')+editorNote+' Snapshots and report saved locally for this model.';
         }catch(error){if(getKey()===key)status.textContent=error.message;}
-        finally{busy=false;button.disabled=false;}
+        finally{if(current())restoreView();busy=false;button.disabled=false;}
     };
     return {refresh,stop:clear};
 }
