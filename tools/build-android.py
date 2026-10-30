@@ -60,6 +60,9 @@ try:
     for path,name in assets.items():
         if path.suffix=='.js' and not name.startswith('assets/static/vendor/'):
             shutil.copy2(path,js_input/path.name)
+    # Asserted before obfuscation for the same reason release-protection.py does it:
+    # protected JavaScript hides implementation names inside an encoded string array.
+    assert '_hitModelPixelAt' in (js_input/'model-viewer.js').read_text(encoding='utf-8'),'Bundled renderer lost the GPU pixel-picking implementation'
     run(['node',BASE/'tools/obfuscate-release.cjs',js_input,js_output])
     assets={(js_output/path.name if path.suffix=='.js' and not name.startswith('assets/static/vendor/') else path):name for path,name in assets.items()}
     with zipfile.ZipFile(unsigned,'a',compression=zipfile.ZIP_DEFLATED) as archive:

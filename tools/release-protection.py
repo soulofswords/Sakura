@@ -18,6 +18,11 @@ def protected_files(records,output):
     js_input=output/'js-input';js_output=output/'js';js_input.mkdir(exist_ok=True)
     for path,name in records:
         if name.startswith('Sakura/static/js/') and Path(name).suffix=='.js':shutil.copy2(path,js_input/Path(name).name)
+    # The shipped file cannot be searched for implementation names: the obfuscator
+    # rewrites member access into string form and hoists some of those strings into
+    # its encoded array, so a genuine marker disappears at random. Prove the fix here,
+    # while the packaged source is still readable.
+    assert '_hitModelPixelAt' in (js_input/'model-viewer.js').read_text(encoding='utf-8'),'Packaged renderer lost the GPU pixel-picking implementation'
     subprocess.run(['node',str(BASE/'tools/obfuscate-release.cjs'),str(js_input),str(js_output)],check=True)
     desktop=output/'desktop.py';desktop.write_text('import sakura_core\nfrom desktop import main\nmain()\n',encoding='utf-8')
     site=output/'sitecustomize.py';site.write_text('import sakura_core\n',encoding='utf-8')

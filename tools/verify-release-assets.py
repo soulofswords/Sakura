@@ -17,7 +17,11 @@ def inspect(archive,windows):
         root_py=[n for n in names if n.startswith('Sakura/') and n.count('/')==1 and n.endswith(('.py','.pyc'))]
         assert sorted(root_py)==['Sakura/desktop.py','Sakura/sitecustomize.py']
         viewer=archive.read('Sakura/static/js/model-viewer.js').decode()
-        assert '_hitModelPixelAt' in viewer and '_0x' in viewer,'Missing GPU picking/protected JavaScript'
+        # Only two things are provable from protected JavaScript: that protection ran,
+        # and that a top-level name survived it. Implementation names are rewritten into
+        # string form and some are hoisted into the encoded array, so they cannot be
+        # searched for here; release-protection.py asserts them while still readable.
+        assert '_0x' in viewer and 'SmartTgaLoader' in viewer,'Shipped renderer is unprotected or not this release\'s first-party module'
         assert 'Sakura/static/model-library-preview.html' in names,'Character library preview page is not packaged'
         assert 'Sakura/static/js/pmx-stage.js' in names,'PMX scenery controls are not packaged'
         for module in ('av','psutil','mcp','playwright'):
@@ -28,8 +32,9 @@ def inspect(archive,windows):
     else:
         assert 'classes.dex' in names and 'assets/mobile.js' in names
         assert '_0x' in archive.read('assets/mobile.js').decode()
-        assert '_hitModelPixelAt' in archive.read('assets/static/js/model-viewer.js').decode(),'Shared mobile renderer is stale'
-    return {'files':len(names),'personal_models_or_credentials':leaks,'backup_or_debug_sources':backups,'protected_code':True,'gpu_picking_fix':True}
+        mobile=archive.read('assets/static/js/model-viewer.js').decode()
+        assert '_0x' in mobile and 'SmartTgaLoader' in mobile,'Shared mobile renderer is unprotected or stale'
+    return {'files':len(names),'personal_models_or_credentials':leaks,'backup_or_debug_sources':backups,'protected_code':True,'protected_renderer':True}
 
 def verify(path):
     if path.suffix=='.apk':
