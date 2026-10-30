@@ -21,7 +21,13 @@ static class EditionInstallerCheck {
   Require(!File.Exists(Path.Combine(appRoot,"app.py"))&&!File.Exists(Path.Combine(appRoot,"llm.py")),"Readable application Python leaked");
   foreach(string asset in Directory.GetFiles(Path.Combine(appRoot,"static"),"*",SearchOption.AllDirectories))
    Require(!Regex.IsMatch(Path.GetFileName(asset),@"(?i)(\.(bak|backup|orig|rej|tmp|swp|swo|map)|~)$|\.before-"),"Backup/debug asset leaked: "+asset);
-  Require(File.ReadAllText(Path.Combine(appRoot,"static","js","model-viewer.js")).Contains("_hitModelPixelAt"),"GPU cursor lag fix missing");
+  // Protected JavaScript rewrites member access into string form and hoists a seeded
+  // sample of those strings into its encoded array, so an implementation name such as
+  // _hitModelPixelAt can legitimately vanish from the installed file. Only markers that
+  // survive protection by construction are checked here; release-protection.py asserts
+  // the implementation itself on the readable source before obfuscation.
+  string installedViewer=File.ReadAllText(Path.Combine(appRoot,"static","js","model-viewer.js"));
+  Require(installedViewer.Contains("_0x")&&installedViewer.Contains("SmartTgaLoader"),"Installed renderer is unprotected or is not this release first-party module");
   // Renderer cache-busting belongs to the module import in app.js, not the
   // HTML shell.  Keep the installer smoke test aligned with the browser's
   // actual load path so it catches a stale packaged module without rejecting
