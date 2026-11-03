@@ -51,10 +51,16 @@ class EvidencePolicyTests(unittest.TestCase):
         web.assert_not_called()
 
     def test_no_browser_open_is_mistaken_for_search_results(self):
-        with patch('assistant_commands.run_command',return_value='Opening Google search.'):
+        with patch('assistant_commands.run_command',return_value='Opening Google search.') as command, \
+                patch('current_information.lookup_with_context',return_value=(None,None)), \
+                patch('factual_grounding.gpu_memory_lookup',return_value=None), \
+                patch('response_evidence.web_retrieve',return_value=None):
             evidence=policy.retrieve('search for GPU prices',{'computer_control_enabled':True})
-        self.assertNotIn('GPU costs',evidence.text)
-        self.assertEqual(evidence.method,'PC command/status/file/time tool')
+        # Opening a browser is a reviewed PC action, so the evidence stage never runs it
+        # and no browser message can be quoted back as if it were a search result.
+        command.assert_not_called()
+        self.assertEqual(evidence.method,'no sufficient evidence')
+        self.assertNotIn('GPU costs',policy.tool_evidence('Opening Google search.','PC command/status/file/time tool').text)
 
     def test_threshold_has_no_model_confidence_escape_hatch(self):
         for bad in [True,False,'0.9',float('nan'),float('inf'),-1,2]:

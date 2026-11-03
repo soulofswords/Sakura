@@ -1,6 +1,6 @@
 /* Agent workspace. These styles stay inside the iframe; avatar layout is owned by the parent. */
 :root{--ag-bg:#11161d;--ag-card:#20252c;--ag-ink:#eef2f7;--ag-muted:#b5bfcc;--ag-muted2:#99a7b9;--ag-line:#3d4958;--ag-input:#272e38;--ag-input-line:#435163;--ag-button:#303d4d;--ag-button-ink:#93cfff;--ag-button-hover:#3a4d60;--ag-button-line:#445367;--ag-accent:#8ecbff;--ag-label:#c2cfdd;--ag-code:#181e26;--ag-badge-bg:#253b50;--ag-badge-ink:#9ed6ff;--ag-summary:#c7def3;--ag-status:#9edac3;--ag-action-line:#83c9ff;--ag-conn-line:#3d4958;--ag-shadow:0 12px 38px #0002}
-:root[data-ui-theme=light]{--ag-shadow:0 12px 38px #27364b10}
+:root[data-ui-theme=light]{--ag-shadow:0 12px 38px #27364b10;--ag-accent:#075f8a;--ag-link:#075f8a;--ag-button:#e9f4fb;--ag-button-ink:#075f8a;--ag-button-hover:#d7ecf9;--ag-button-line:#c9e2f2;--ag-badge-ink:#075f8a;--ag-notice:#865509}
 html{height:100%;font:14px/1.5 'Segoe UI',system-ui,sans-serif}body{max-width:none;margin:0;padding:0 24px 24px 100px;min-height:100vh;background:var(--ag-bg);color:var(--ag-ink)}
 body>header{height:112px;max-width:1500px;margin:0 auto;gap:12px;border-bottom:1px solid var(--ag-line)}header>div:first-child{margin-right:auto}header h1{font-size:27px;letter-spacing:-.6px;color:var(--ag-ink);margin:2px 0}header p{margin:2px 0;font-size:13px}.agent-eyebrow{font-size:10px;letter-spacing:1.8px;color:var(--ag-accent);font-weight:700}header>.badge{font-size:11px;background:transparent;border:1px solid var(--ag-line)}
 #calendar-open{display:none}#status{max-width:1500px;margin:14px auto 20px;font-size:13px;padding:10px 14px;background:var(--ag-card);border:1px solid var(--ag-line);border-radius:10px;overflow-wrap:anywhere}
@@ -8,7 +8,9 @@ body>header{height:112px;max-width:1500px;margin:0 auto;gap:12px;border-bottom:1
 #agent-studio-nav{position:fixed;left:0;top:0;bottom:0;width:80px;display:flex;align-items:center;flex-direction:column;gap:14px;padding:22px 0;background:var(--ag-card);border-right:1px solid var(--ag-line);z-index:20}#agent-studio-nav .agent-nav-brand{color:var(--ag-accent);font-size:22px;margin-bottom:14px}#agent-studio-nav button{position:relative;border:1px solid transparent;width:48px;height:48px;min-height:48px;display:grid;place-items:center;border-radius:50%;background:#d8eefb;color:#238bc0;padding:12px;box-shadow:0 3px 8px #0001}#agent-studio-nav button:nth-of-type(2){background:#e8e0fa;color:#8964bc}#agent-studio-nav button:nth-of-type(3){background:#e4f3d8;color:#72a956}#agent-studio-nav button:nth-of-type(4){background:#f9e0eb;color:#bf648c}#agent-studio-nav button:nth-of-type(5){background:#fcebd1;color:#c18b42}#agent-studio-nav button:nth-of-type(6){background:#e4e8f8;color:#7484be}#agent-studio-nav button[aria-pressed=true]{background:var(--ag-card);color:var(--ag-accent);border-color:var(--ag-accent);outline:3px solid color-mix(in srgb,var(--ag-accent) 45%,transparent);outline-offset:2px}#agent-studio-nav svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}#agent-studio-nav button span{position:absolute;left:62px;white-space:nowrap;background:var(--ag-card);color:var(--ag-ink);padding:5px 10px;border-radius:7px;border:1px solid var(--ag-line);opacity:0;pointer-events:none}#agent-studio-nav button:hover span,#agent-studio-nav button:focus-visible span{opacity:1}
 #agent-view-heading{max-width:1500px;margin:0 auto 20px;font-size:13px;letter-spacing:.3px;color:var(--ag-muted)}#agent-review-dock{position:fixed;right:20px;top:132px;bottom:20px;width:min(410px,38vw);z-index:15;display:flex;flex-direction:column}#agent-review-dock[hidden]{display:none}#review.action{position:relative;top:auto;margin:0;display:flex;flex-direction:column;min-height:0;max-height:100%;padding:20px;border:1px solid var(--ag-accent);box-shadow:0 10px 45px #0005;overflow:auto}#review>pre{flex:0 0 auto;max-height:200px}#review>.row{position:sticky;bottom:-20px;background:var(--ag-card);padding:14px 0;margin-top:8px;z-index:2;flex-shrink:0}#review>.row button{flex:1;min-height:42px}body.agent-review-open{padding-right:450px}#progress details{border-left:2px solid var(--ag-line);padding:4px 0 4px 16px}#progress>h3{margin-top:0}#tasks button{background:var(--ag-input);border-color:var(--ag-line);padding:14px}#agent-task-progress:has(#progress:empty){display:none}.agent-stat-line{font-size:12px;color:var(--ag-muted);margin:0 0 14px}
 /* Conversation layout */
-:root:not([data-ui-theme=light]){--ag-bg:#181b19;--ag-card:#222622;--ag-code:#1b1f1c;--ag-line:#363d37;--ag-input:#252a26;--ag-button:#2d352e;--ag-button-hover:#39443b;--ag-button-line:#414c43;--ag-button-ink:#d5dfd6;--ag-accent:#84c99b;--ag-muted:#a0aaa2;--ag-ink:#e0e6e0;--ag-input-ink:#e0e6e0}
+/* Dark follows Companion's appearance tokens so the workspace matches the shell around it. */
+:root[data-ui-theme=dark]{--ag-bg:#171b21;--ag-card:#20242b;--ag-code:#171b21;--ag-line:#414b59;--ag-input:#292f38;--ag-input-line:#414b59;--ag-input-ink:#edf1f7;--ag-button:#303c4b;--ag-button-hover:#394657;--ag-button-line:#414b59;--ag-button-ink:#edf1f7;--ag-accent:#91ceff;--ag-muted:#b5c1d0;--ag-muted2:#9fb0c2;--ag-label:#c9d5e2;--ag-ink:#edf1f7;--ag-badge-bg:#253b50;--ag-badge-ink:#9ed6ff;--ag-link:#9ed6ff;--ag-summary:#c7def3;--ag-status:#9edac3;--ag-action-line:#83c9ff;--ag-conn-line:#414b59;--ag-shadow:0 12px 38px #0002}
+:root:not([data-ui-theme]){--ag-bg:#181b19;--ag-card:#222622;--ag-code:#1b1f1c;--ag-line:#363d37;--ag-input:#252a26;--ag-button:#2d352e;--ag-button-hover:#39443b;--ag-button-line:#414c43;--ag-button-ink:#d5dfd6;--ag-accent:#84c99b;--ag-muted:#a0aaa2;--ag-ink:#e0e6e0;--ag-input-ink:#e0e6e0}
 html{overflow-x:hidden}body,body.agent-review-open{padding:0 22px 20px 228px;min-width:0}
 body>header{height:66px;margin:0;max-width:none;border-bottom:1px solid var(--ag-line);gap:10px}
 header h1{font-size:16px;letter-spacing:0}header p,.agent-eyebrow,header>.badge{display:none}
@@ -44,8 +46,26 @@ body[data-agent-view=tasks] .grid>main{display:flex;flex-direction:column;min-he
 #agent-task-options input,#agent-task-options select{font-size:12px;min-height:33px}#agent-task-options p,#agent-task-options label{font-size:11px}
 #agent-compose>.row{align-items:center;justify-content:space-between;gap:8px;margin-top:6px}#create{font-size:12px;min-height:33px;padding:6px 18px;border-radius:8px}
 #agent-advanced-tools{order:2;margin:12px 0;color:var(--ag-muted);font-size:11px}#agent-tool-proposal{margin-top:12px}
+/* Agent-mode chat: the thread reads like the companion conversation, composer stays docked below it. */
+#agent-conversation{order:0;flex:0 1 auto;min-height:0;background:transparent;border:0;padding:0 8px;margin:0 0 6px;overflow:auto}
+#agent-conversation>h2{display:none}#agent-conversation:has(.agent-thread-empty){display:none}
+#agent-thread{display:flex;flex-direction:column;gap:2px}
+.agent-thread-empty{font-size:13px;padding:8px 0}
+.agent-bubble{display:flex;flex-wrap:wrap;margin:0 0 10px}
+.agent-bubble>span{max-width:82%;padding:10px 14px;border-radius:14px;border:1px solid var(--ag-line);font-size:14px;line-height:1.65;overflow-wrap:anywhere;white-space:pre-wrap;background:var(--ag-card)}
+.agent-server-link{display:inline-block;margin:3px 4px 3px 0;padding:3px 10px;border-radius:12px;background:var(--ag-accent);color:#0d1117;font-weight:650;text-decoration:none;overflow-wrap:anywhere}
+.agent-server-link:hover,.agent-server-link:focus{text-decoration:underline;outline:none}
+.agent-bubble.user{justify-content:flex-end}
+.agent-bubble.user>span{background:color-mix(in srgb,var(--ag-accent) 18%,var(--ag-card))}
+.agent-bubble>.row{width:100%;justify-content:flex-end;margin:6px 0 0}
+.agent-bubble>.row button{font-size:12px;min-height:31px;padding:5px 12px}
+@media(max-width:650px){#agent-conversation{padding:0}.agent-bubble>span{max-width:92%}}
 #agent-access-menu{position:relative;font-size:12px;min-width:0}#agent-access-menu>summary{padding:5px 9px;background:var(--ag-input);border-radius:20px;cursor:pointer;list-style:none;color:var(--ag-muted)}
 #agent-access-menu[data-mode=full]>summary{color:#f5a460}#agent-access-menu>summary:before{content:'◈ ';font-size:13px}
+#agent-execution-mode{display:flex;gap:3px;padding:2px;background:var(--ag-input);border-radius:20px}
+#agent-execution-mode button{font-size:11px;padding:4px 10px;border:0;border-radius:16px;background:transparent;color:var(--ag-muted);cursor:pointer;min-width:0;line-height:1.4}
+#agent-execution-mode button[aria-checked=true]{background:var(--ag-accent);color:#0d1117}
+#agent-execution-mode[data-state=auto] button[aria-checked=true]{background:#f5a460;color:#241309}
 .agent-access-options{position:absolute;bottom:calc(100% + 10px);left:-6px;width:min(390px,calc(100vw - 265px));min-width:235px;background:var(--ag-card);border:1px solid var(--ag-line);border-radius:14px;padding:10px;box-shadow:0 12px 35px #0005;z-index:30}
 .agent-access-options>strong{display:block;font-size:11px;color:var(--ag-muted);padding:2px 5px 9px;font-weight:500}
 .agent-access-options button{display:block;text-align:left;width:100%;padding:8px;background:transparent;border:1px solid transparent;border-radius:8px;min-width:0}
@@ -55,4 +75,78 @@ body[data-agent-view=tasks] .grid>main{display:flex;flex-direction:column;min-he
 #agent-review-dock{top:105px;right:18px;bottom:18px;width:340px;z-index:10}body.agent-review-open{padding-right:378px}
 #review.action{padding:15px;border-radius:12px;border-color:var(--ag-line);background:var(--ag-card)}#review.action h2{font-size:16px}#review>.row{bottom:-15px;padding:10px 0}#review>.row button{min-height:38px;font-size:12px}
 @media(max-width:1150px){body,body.agent-review-open{padding:0 18px 18px 192px}#agent-studio-nav{width:174px}#agent-review-dock{position:relative;inset:auto;width:auto;margin:10px 0 18px}#review.action{max-height:55vh}.agent-access-options{width:min(390px,calc(100vw - 225px))}}
-@media(max-width:650px){body,body.agent-review-open{padding:0 10px 12px 62px}#agent-studio-nav{width:52px;padding:14px 4px;gap:7px}#agent-studio-nav .agent-nav-brand{text-align:center;margin:0 0 10px;font-size:20px}#agent-studio-nav .agent-nav-brand:after,#agent-studio-nav button span,#agent-recent-tasks,.agent-sidebar-note{display:none}#agent-studio-nav button,#agent-studio-nav button:nth-of-type(n){justify-content:center;padding:8px;min-height:34px}#agent-sidebar-actions button{font-size:10px;white-space:normal;padding:4px;line-height:1.4}header #companion-mode{font-size:10px;padding:4px}header h1{font-size:13px}body>header{height:56px;gap:5px}#status{font-size:10px}#agent-task-progress{padding:14px 0;min-height:190px}#agent-compose{padding:10px;bottom:8px}#goal{min-height:70px}.agent-access-options{min-width:0;width:calc(100vw - 90px);left:0}#agent-task-options summary span{display:none}.agent-task-controls button{font-size:10px;padding:4px 6px}#review.action{max-height:60vh}.card{padding:14px}}
+@media(max-width:650px){body,body.agent-review-open{padding:0 10px 12px 62px}#agent-studio-nav{width:52px;padding:14px 4px;gap:7px}#agent-studio-nav .agent-nav-brand{text-align:center;margin:0 0 10px;font-size:20px}#agent-studio-nav .agent-nav-brand:after,#agent-studio-nav button span,#agent-recent-tasks,.agent-sidebar-note{display:none}#agent-studio-nav button,#agent-studio-nav button:nth-of-type(n){justify-content:center;padding:8px;min-height:34px}#agent-sidebar-actions button{font-size:10px;white-space:normal;padding:4px;line-height:1.4}header #companion-mode{font-size:10px;padding:4px}header h1{font-size:13px}body>header{height:56px;gap:5px}#status{font-size:10px}#agent-task-progress{padding:14px 0;min-height:190px}#agent-compose{padding:10px;bottom:8px}#goal{min-height:70px}.agent-access-options{min-width:0;width:calc(100vw - 90px);left:0}#agent-task-options summary span{display:none}.agent-task-controls button{font-size:10px;padding:4px 6px}#agent-execution-mode button{font-size:10px;padding:3px 7px}#review.action{max-height:60vh}.card{padding:14px}}
+
+/* Recent task rows and their actions menu */
+#tasks .task-row{display:flex;align-items:stretch;gap:4px;margin:0 0 6px}
+#tasks .task-row .task-open{flex:1 1 auto;min-width:0;text-align:left;overflow-wrap:anywhere}
+#tasks .task-row.pinned .task-open{border-color:var(--ag-accent)}
+#tasks .task-row .task-menu-button,#agent-recent-tasks #tasks .task-row .task-menu-button{display:grid;place-items:center;justify-content:center;align-content:center;align-self:center;flex:0 0 32px;box-sizing:border-box;width:32px;max-width:32px;min-width:32px;height:32px;min-height:32px;margin:0;padding:0;line-height:1;text-align:center;border-radius:9px}
+#tasks .task-row .task-menu-button::before{content:'';display:block;width:3px;height:3px;border-radius:50%;background:currentColor;box-shadow:-6px 0 currentColor,6px 0 currentColor}
+#tasks .task-row .task-rename{flex:1 1 auto;min-width:0;font-size:12px;min-height:36px;padding:6px 8px}
+.agent-task-menu{position:fixed;z-index:40;min-width:216px;max-width:min(300px,calc(100vw - 16px));display:flex;flex-direction:column;gap:2px;padding:8px;background:var(--ag-card);border:1px solid var(--ag-line);border-radius:14px;box-shadow:0 12px 35px #0005}
+.agent-task-menu button{display:block;width:100%;text-align:left;min-height:0;background:transparent;border:1px solid transparent;border-radius:9px;padding:8px 9px}
+.agent-task-menu button:hover,.agent-task-menu button:focus{background:var(--ag-input);border-color:var(--ag-line)}
+.agent-task-menu button span{display:block;font-size:12px}
+.agent-task-menu button small{display:block;font-size:10px;line-height:1.5;color:var(--ag-muted);white-space:normal}
+.agent-task-menu button.danger span{color:#ff9c9c}
+
+/* ── Right rail: outstanding approval above, task inspector below ───────────────
+   Everything in here renders only recorded values (step status, measured seconds,
+   run.usage), so an empty panel means nothing was measured rather than a guess. */
+#agent-right-rail{display:flex;flex-direction:column;gap:12px;min-height:0}
+#agent-review-dock{position:static;inset:auto;width:auto;z-index:auto;flex:0 1 auto;min-height:0}
+#review.action{max-height:100%}
+#agent-inspector{display:none;padding:14px;margin:0;border:1px solid var(--ag-line);border-radius:12px;background:var(--ag-card);color:var(--ag-ink)}
+body[data-agent-view=tasks] #agent-inspector{display:block;flex:1 1 auto;min-height:0;overflow:auto}
+#agent-inspector>h2{display:none}
+#agent-inspector h3{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--ag-muted);font-weight:600;margin:0 0 7px}
+#agent-inspector div+h3{margin-top:16px}
+#agent-inspector p{font-size:11px;color:var(--ag-muted);margin:0;line-height:1.6}
+.inspector-row{display:flex;align-items:baseline;gap:10px;padding:4px 0;border-bottom:1px solid var(--ag-conn-line);font-size:11px}
+.inspector-row:last-child{border-bottom:0}
+.inspector-key{flex:0 0 84px;color:var(--ag-muted)}
+.inspector-value{flex:1 1 auto;min-width:0;text-align:right;overflow-wrap:anywhere}
+.process-row{display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid var(--ag-conn-line);font-size:11px}
+.process-row:last-child{border-bottom:0}
+.process-row .dot{width:7px;height:7px;border-radius:50%;background:var(--ag-muted2);flex:0 0 auto}
+.process-row[data-status=pending] .dot{background:#e7c56a}
+.process-row[data-status=completed] .dot{background:#6fc79a}
+.process-row[data-status=failed] .dot,.process-row[data-status=rejected] .dot,.process-row[data-status=cancelled] .dot,.process-row[data-status=expired] .dot{background:#e58aa0}
+.process-row[data-status=running] .dot{background:var(--ag-accent);animation:agent-pulse 1.1s ease-in-out infinite}
+.process-row span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.process-row small{flex:0 0 auto;color:var(--ag-muted);text-align:right;font-variant-numeric:tabular-nums}
+@keyframes agent-pulse{50%{opacity:.3}}
+@media(prefers-reduced-motion:reduce){.process-row[data-status=running] .dot{animation:none}}
+@media(min-width:1151px){
+ #agent-right-rail{position:fixed;right:18px;top:105px;bottom:18px;width:340px;z-index:10}
+ #agent-review-dock{max-height:60%}
+ body[data-agent-view=tasks],body[data-agent-view=tasks].agent-review-open{padding:0 378px 20px 228px}
+}
+@media(max-width:1150px){#agent-right-rail{margin:0 0 14px}}
+
+/* Activity list, composer footer and the controls that moved into the composer. */
+#progress .agent-processed{border-left:0;padding:8px 0;font-size:12px}
+#progress .agent-processed>summary{color:var(--ag-ink);font-variant-numeric:tabular-nums}
+#progress .agent-processed details{margin:3px 0}
+#agent-usage-bar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:8px;padding-top:7px;border-top:1px solid var(--ag-line);font-size:10px;color:var(--ag-muted)}
+#agent-usage-bar progress{flex:1 1 56px;min-width:56px;height:4px;accent-color:var(--ag-accent);border:0}
+#agent-usage-bar span{flex:1 1 100%;min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+@media(min-width:700px){#agent-usage-bar span{flex:0 1 auto}}
+#agent-compose>.row{flex-wrap:wrap}
+#agent-compose>.row label{margin:0;display:flex;align-items:center;gap:6px;font-size:10px;color:var(--ag-muted);flex:0 1 auto;min-width:0}
+#agent-compose>.row select{width:auto;max-width:236px;min-height:31px;font-size:11px;padding:4px 7px;border-radius:8px}
+#agent-access-menu>summary{font-size:12px;font-weight:600;padding:7px 13px;border:1px solid var(--ag-line);border-radius:20px;background:var(--ag-card);color:var(--ag-ink)}
+#agent-access-menu[data-mode=balanced]>summary{color:#8fd6a8;border-color:color-mix(in srgb,#8fd6a8 45%,var(--ag-line))}
+#agent-access-menu[data-mode=full]>summary{color:#f0a95f;border-color:color-mix(in srgb,#f0a95f 55%,var(--ag-line))}
+#tasks .task-row.child{margin-left:16px}
+#tasks .task-row.child .task-open{font-size:11px;border-style:dashed;background:transparent}
+/* Keep light-mode actions, errors and inactive controls readable. */
+:root[data-ui-theme=light] :is(#create,#native-send,.agent-server-link){background:var(--ag-accent);color:#fff}
+:root[data-ui-theme=light] #agent-execution-mode button[aria-checked=true]{color:#fff}
+:root[data-ui-theme=light] #agent-execution-mode[data-state=auto] button[aria-checked=true]{color:#241309}
+:root[data-ui-theme=light] #agent-access-menu[data-mode=balanced]>summary{color:#236b43}
+:root[data-ui-theme=light] #agent-access-menu[data-mode=full]>summary{color:#8b4500}
+:root[data-ui-theme=light] .agent-task-menu button.danger span{color:#9d2440}
+:root[data-ui-theme=light] :is(button:disabled,input:disabled,select:disabled,textarea:disabled){opacity:1;color:var(--ag-muted);background:var(--ag-input);cursor:not-allowed}
+:root[data-ui-theme=light] :is(input,textarea)::placeholder{color:var(--ag-muted);opacity:1}

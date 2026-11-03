@@ -7,6 +7,7 @@ import time
 import uuid
 
 from agent_runtime import digest
+from wallclock_schedule import validate as validate_schedule, next_due
 
 # These tools cannot write files or mutate connected services. Other actions
 # always become a normal pending approval, even when saved in a workflow.
@@ -38,6 +39,11 @@ class AgentAutomations:
                     and isinstance(item.get('next_run'),(int,float)) and isinstance(item.get('workspace'),str)
                     and isinstance(item.get('goal'),str) and isinstance(item.get('name'),str)
                     and self._valid_event(item.get('event'))}
+        for key in list(self.items):
+            try:
+                self.items[key]['schedule']=validate_schedule(self.items[key].get('schedule'))
+                if self.items[key].get('schedule') and self.items[key].get('event'):raise ValueError('Conflicting triggers')
+            except ValueError:self.items.pop(key)
         for item in self.items.values():
             if item.get('status')=='running':item.update(status='interrupted',paused=True)
             try:
@@ -59,18 +65,20 @@ class AgentAutomations:
     def list(self):
         with self.lock:return [copy.deepcopy({k:v for k,v in x.items() if k!='template'})|{'steps':len(x.get('template',[]))} for x in self.items.values()]
 
-    def create(self,run_id,name,minutes,approved=False,mode='steps',planner='current',event=None):
+    def create(self,run_id,name,minutes,approved=False,mode='steps',planner='current',event=None,schedule=None):
         if approved is not True:raise ValueError('Approve this exact recurring workflow first.')
         if not isinstance(name,str) or not 1<=len(name.strip())<=100:raise ValueError('Enter a workflow name of up to 100 characters.')
         if type(minutes) is not int or not 5<=minutes<=43200:raise ValueError('Choose an interval between 5 minutes and 30 days.')
         if mode not in ('steps','goal'):raise ValueError('Choose the approved-steps or replan-the-goal automation type.')
         if mode=='goal' and not isinstance(planner,str):raise ValueError('Choose the AI that replans each cycle.')
         if event is not None and not self._valid_event(event):raise ValueError('Watch path must stay inside the workspace and the debounce must be between 60 seconds and 24 hours.')
+        schedule=validate_schedule(schedule)
+        if schedule and event:raise ValueError('Choose a wall-clock schedule or an event trigger, not both.')
         run=self.runtime.state(run_id)
         if mode=='goal':
             item={'id':uuid.uuid4().hex,'name':name.strip(),'goal':run['goal'],'workspace':run['workspace'],'workspace_identity':workspace_identity(run['workspace']),
-                  'mode':'goal','planner':planner,'minutes':minutes,'event':copy.deepcopy(event),
-                  'next_run':time.time()+minutes*60,'paused':False,'status':'scheduled','last_run_id':None,'last_error':'','created_at':time.time()}
+                  'mode':'goal','planner':planner,'minutes':minutes,'event':copy.deepcopy(event),'schedule':schedule,
+                  'next_run':next_due({'schedule':schedule,'minutes':minutes},time.time()),'paused':False,'status':'scheduled','last_run_id':None,'last_error':'','created_at':time.time()}
             with self.lock:
                 if len(self.items)>=30:raise ValueError('Remove an old automation before adding another (limit 30).')
                 self.items[item['id']]=item;self.save()
@@ -88,7 +96,7 @@ class AgentAutomations:
                 template.append({'tool':action['tool'],'arguments':action['arguments'],'schema_hash':action['schema_hash'],
                                  'bindings':{k:v for k,v in action['bindings'].items() if k!='connection'}})
         item={'id':uuid.uuid4().hex,'name':name.strip(),'goal':run['goal'],'workspace':run['workspace'],'workspace_identity':workspace_identity(run['workspace']),
-              'mode':'steps','minutes':minutes,'event':copy.deepcopy(event),'next_run':time.time()+minutes*60,'paused':False,'status':'scheduled','template':template,
+              'mode':'steps','minutes':minutes,'event':copy.deepcopy(event),'schedule':schedule,'next_run':next_due({'schedule':schedule,'minutes':minutes},time.time()),'paused':False,'status':'scheduled','template':template,
               'last_run_id':None,'last_error':'','created_at':time.time()}
         with self.lock:
             if len(self.items)>=30:raise ValueError('Remove an old automation before adding another (limit 30).')
@@ -101,7 +109,7 @@ class AgentAutomations:
             item=self.items.get(identifier)
             if not item:raise ValueError('Automation not found.')
             if identifier in self.running:raise ValueError('Wait for the current run to finish before changing it.')
-            item.update(paused=paused,next_run=time.time()+item['minutes']*60,status='paused' if paused else 'scheduled');self.save()
+            item.update(paused=paused,next_run=next_due(item,time.time()),status='paused' if paused else 'scheduled');self.save()
         return {'ok':True}
 
     def remove(self,identifier):
@@ -123,7 +131,7 @@ class AgentAutomations:
             item=self.items.get(identifier)
             if not item or item['paused']:raise ValueError('Resume this automation before running it.')
             if identifier in self.running:return {'skipped':True}
-            self.running.add(identifier);item.update(status='running',next_run=time.time()+item['minutes']*60);self.save();template=copy.deepcopy(item)
+            self.running.add(identifier);item.update(status='running',next_run=next_due(item,time.time()));self.save();template=copy.deepcopy(item)
         try:
             if template.get('workspace_identity')!=workspace_identity(template['workspace']):raise ValueError('The approved workspace changed. Review the folder and recreate this automation.')
             run=self.runtime.new_run(template['goal'],template['workspace'],False)
@@ -170,10 +178,10 @@ class AgentAutomations:
             if identifier in self.running:return {'skipped':True}
             previous=item.get('last_run_id')
             if previous and self.runtime.runs.get(previous,{}).get('status') not in (None,'completed','cancelled','blocked'):
-                item['next_run']=time.time()+item['minutes']*60;self.save()
+                item['next_run']=next_due(item,time.time());self.save()
                 return {'skipped':True,'reason':'The previous run still waits for review or has failed; open its task.'}
             self.running.add(identifier)
-            item.update(status='running',next_run=time.time()+item['minutes']*60);self.save();snapshot=copy.deepcopy(item)
+            item.update(status='running',next_run=next_due(item,time.time()));self.save();snapshot=copy.deepcopy(item)
         try:
             if snapshot.get('workspace_identity')!=workspace_identity(snapshot['workspace']):raise ValueError('The approved workspace changed. Review the folder and recreate this automation.')
             if self.planner_getter is None:raise ValueError('No planner source is connected for goal automations.')

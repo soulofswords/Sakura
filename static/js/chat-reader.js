@@ -1,13 +1,14 @@
 // Read-only speech queue. It never generates replies or requests camera access.
 export default class ChatReader {
-    constructor({speak, play, stopAudio, status, onEnabled = () => {}}) {
-        Object.assign(this, {speak, play, stopAudio, status, onEnabled});
+    constructor({speak, play, stopAudio, status, onEnabled = () => {}, onSentiment = () => {}}) {
+        Object.assign(this, {speak, play, stopAudio, status, onEnabled, onSentiment});
         this.generation = 0; this.enabled = false; this.queue = []; this.seen = new Set();
     }
     start() { this.stop(); this.enabled = true; this.onEnabled(true); }
     stop() {
         ++this.generation; this.enabled = false; this.queue = []; this.seen.clear();
         this.onEnabled(false);
+        this.onSentiment(null);
         this.controller?.abort(); this.controller = null; this.stopAudio();
     }
     enqueue(messages) {
@@ -30,15 +31,16 @@ export default class ChatReader {
             while (this.enabled && generation === this.generation && this.queue.length) {
                 const message = this.queue.shift();
                 if (Date.now() - message.timestamp > 90000) continue;
-                const text = `${message.author || 'Viewer'} says, ${message.text}`.slice(0,600);
+                const source=message.source==='twitch'?' on Twitch':message.source==='youtube'?' on YouTube':'';
+                const text = `${message.author || 'Viewer'}${source} says, ${message.text}`.slice(0,600);
                 this.status(text);
                 try {
                     const audio = await this.speak(text, controller.signal);
                     if (!this.enabled || generation !== this.generation) return;
-                    if (audio) await this.play(audio);
+                    if (audio) {this.onSentiment(message.text);await this.play(audio);}
                 } catch (error) {
                     if (generation === this.generation) this.status(`Chat Reader: ${error.message}`);
-                }
+                } finally {this.onSentiment(null);}
             }
         } finally { if (this.running === generation) this.running = null; }
     }

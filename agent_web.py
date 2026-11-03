@@ -326,7 +326,8 @@ def fetch(url, characters=12000):
             host = _vetted(location)
             with _pinned(host):
                 response = requests.get(location, headers={'User-Agent': USER_AGENT},
-                                        timeout=(5, READ_SECONDS), allow_redirects=False, stream=True)
+                                        timeout=(5, READ_SECONDS), allow_redirects=False, stream=True,
+                                        proxies={'http':'','https':'','all':''})
             visits.append(location)
             if response.status_code not in (301, 302, 303, 307, 308):
                 break

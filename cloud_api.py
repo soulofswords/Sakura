@@ -24,8 +24,12 @@ def validate(provider,model='',endpoint='',vision=None):
     base,default,default_vision=PROVIDERS[provider]
     if provider=='compatible':
         parsed=urlsplit(endpoint)
-        if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError('Enter an HTTPS API base URL without a password, query or fragment, for example https://your-provider.example/v1.')
+        # A proxy on this PC (FreeLLMAPI, LM Studio, Ollama's shim) speaks plain http on loopback;
+        # requiring https there would rule out the one endpoint that never leaves the machine.
+        local=parsed.hostname in ('127.0.0.1','::1','localhost')
+        if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or (
+                parsed.scheme!='https' and not (local and parsed.scheme=='http')):
+            raise ValueError('Enter an HTTPS API base URL, or http://127.0.0.1:PORT/v1 for a proxy on this PC, without a password, query or fragment.')
         base=endpoint.rstrip('/')
     model=model.strip() or default
     if not re.fullmatch(r'[A-Za-z0-9._:/-]{1,150}',model):raise ValueError('Enter the exact model ID from your provider.')

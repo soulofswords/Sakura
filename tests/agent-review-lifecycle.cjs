@@ -1,6 +1,8 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync('static/assets/agent.html','utf8');
-const start=source.indexOf('function renderRun(run)'),end=source.indexOf('function renderTools()',start);
+// The step list, the inspector rail and the composer usage strip render from the same record,
+// so the slice starts at the helpers renderRun calls rather than at renderRun alone.
+const start=source.indexOf('const SETTLED_STEPS'),end=source.indexOf('function renderTools()',start);
 assert(start>=0&&end>start);
 const calls=[];
 // A <select> answers to a value and an option list, and losing every option
@@ -14,8 +16,11 @@ const select = {
     append(...items) { this.options.push(...items); },
 };
 const progress = { replaceChildren() {}, append() {} };
-const context = { current: null, state: { runs: [] }, $: id => id === 'knowledge-step' ? select : progress,
-    node: () => ({ append() {} }), button() {}, renderReview: value => calls.push(value), Option };
+const context = { window:{}, current: null, state: { runs: [] }, $: id => id === 'knowledge-step' ? select : progress,
+    node: () => ({ append() {}, dataset: {} }), button() {}, renderReview: value => calls.push(value), Option,
+    // The thread and the planner picker belong to other cards; this harness only follows the review.
+    renderThread() {}, applyRunPlanner() {}, browserUI: {render() {}},
+    document: { createElement: () => ({ append() {} }), body: { dataset: {} } } };
 vm.createContext(context);vm.runInContext(source.slice(start,end),context);
 const run={id:'r',goal:'Write draft',workspace:'test',steps:[{id:'a',tool:'files.write',arguments:{},status:'pending'}]};
 context.renderRun(run);assert.equal(calls.at(-1).id,'a');

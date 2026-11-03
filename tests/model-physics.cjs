@@ -74,6 +74,9 @@ for (const mode of ['subtle', 'lively', 'off', 'normal', 'subtle', 'normal']) {
 }
 assert.equal(resets, 1);
 assert.deepEqual(joint.settings, { stiffness: 2, gravityPower: .7, dragForce: .9 });
+viewer.vrmSpringTuning={stiffness:.5,gravity:2,drag:.5};sync.call(viewer);sync.call(viewer);
+assert.deepEqual(joint.settings,{stiffness:1,gravityPower:1.4,dragForce:.45},'Per-model spring tuning does not compound between updates');
+viewer.vrmSpringTuning=null;sync.call(viewer);assert.deepEqual(joint.settings,{stiffness:2,gravityPower:.7,dragForce:.9});
 console.log('PASS: tail pivot, scaled rigs, fixed-step equivalence, stall cap, deep matrices, VRM Sets, Off reset and exact Normal restoration');
 
 function authoredRig(count, broken = false) {

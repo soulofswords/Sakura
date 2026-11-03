@@ -31,6 +31,13 @@ export default class AvatarTracking {
         this.poseTrackingEnabled=Boolean(enabled);
         this.worker?.postMessage({type:'pose-enabled',enabled:this.poseTrackingEnabled});
     }
+    publishStyleHints(sample){
+        const face=sample?.face;
+        if(!Array.isArray(face?.landmarks)||face.landmarks.length<6||sample?.distanceAssist?.faceConfirmed===false){globalThis.sakuraCameraExpression=null;return;}
+        const allowed=['mouthSmileLeft','mouthSmileRight','browInnerUp','eyeBlinkLeft','eyeBlinkRight'];
+        const values=Object.fromEntries((Array.isArray(face.blendshapes)?face.blendshapes:[]).filter(row=>allowed.includes(row.categoryName)&&typeof row.score==='number'&&Number.isFinite(row.score)).map(row=>[row.categoryName,Math.max(0,Math.min(1,row.score))]));
+        globalThis.sakuraCameraExpression=Object.keys(values).length?{at:Date.now(),values}:null;
+    }
     async start(deviceId = '', backend = this.backend) {
         this.stop();
         this.backend = ['mediapipe','leap_motion','nvidia_gpu'].includes(backend) ? backend : 'mediapipe';
@@ -107,6 +114,7 @@ export default class AvatarTracking {
                     sample.headPoseFiltered=true;
                     sample.handTrackingEnabled = this.handTrackingEnabled;
                     this.viewer.updateUserTracking(sample);
+                    this.publishStyleHints(sample);
                     const pose = sample.pose?.landmarks;
                     const shouldersVisible = pose?.[11]?.visibility > .35 && pose?.[12]?.visibility > .35;
                     const bodyStatus = this.handTrackingEnabled
@@ -280,6 +288,7 @@ export default class AvatarTracking {
         }
     }
     stop() {
+        globalThis.sakuraCameraExpression=null;
         ++this.session;
         this.cancelInit?.();
         this.enabled = false;

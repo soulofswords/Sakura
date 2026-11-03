@@ -1,4 +1,4 @@
-:root[data-ui-theme="light"]{--mobile-bg:#edf2f8;--mobile-card:#fff;--mobile-input:#f0f4fa;--mobile-text:#27364b;--mobile-muted:#526279;--mobile-border:#d8e3ee;--mobile-button:#e9f4fb;--mobile-accent:#147caf;--mobile-active:#d4eaff}
+:root[data-ui-theme="light"]{--mobile-bg:#edf2f8;--mobile-card:#fff;--mobile-input:#f0f4fa;--mobile-text:#27364b;--mobile-muted:#526279;--mobile-border:#d8e3ee;--mobile-button:#e9f4fb;--mobile-accent:#075f8a;--mobile-active:#d4eaff}
 :root[data-ui-theme="dark"]{--mobile-bg:#171b21;--mobile-card:#20242b;--mobile-input:#292f38;--mobile-text:#edf1f7;--mobile-muted:#b5c1d0;--mobile-border:#414b59;--mobile-button:#303c4b;--mobile-accent:#91ceff;--mobile-active:#254d70}
 html[data-ui-theme],html[data-ui-theme] body{background:var(--mobile-bg);color:var(--mobile-text)}
 html[data-ui-theme] :is(section,.local-setup-dialog){background:var(--mobile-card);color:var(--mobile-text);border-color:var(--mobile-border)}
@@ -20,3 +20,54 @@ html[data-ui-theme] .local-model-fullscreen #local-status,html[data-ui-theme] #l
 html[data-ui-theme] #local-mic{background:#c92135;color:#fff;border-color:#ffb3b8}
 html[data-ui-theme] #local-mic.listening{background:#ed243c;color:#fff}
 html[data-ui-theme] #notice{color:var(--mobile-muted)}
+/* A quiet, single-column phone layout; IDs and native actions stay the same. */
+html{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.5}
+body{box-sizing:border-box;max-width:680px;margin:0 auto;padding:20px 16px calc(24px + env(safe-area-inset-bottom));font-size:15px}
+*,*::before,*::after{box-sizing:border-box}
+.hidden{display:none!important}
+body>h1{display:flex;align-items:center;gap:8px;font-size:23px;margin:4px 0 2px;font-weight:650;letter-spacing:-.5px}
+body>h1 img{width:34px!important;height:34px!important;margin-right:0!important}
+#mode-description{margin:0 0 20px;color:var(--mobile-muted);font-size:14px}
+section{margin:12px 0;padding:18px;border-radius:16px;box-shadow:none}
+h2{font-size:18px;line-height:1.35;margin:0 0 14px;font-weight:650}
+h3{font-size:15px;margin:18px 0 10px}
+label{display:block;margin-top:12px;line-height:1.45}
+small{display:block;font-size:12px;line-height:1.55;margin:6px 0 12px}
+input,select,textarea,button{font:inherit;max-width:100%;border-radius:11px;min-height:46px;padding:11px 12px}
+input[type=checkbox]{min-height:auto;width:18px!important;height:18px;vertical-align:middle;margin-right:8px;accent-color:var(--mobile-accent)}
+button{font-weight:600;transition:background .15s,border-color .15s}
+button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--mobile-accent);outline-offset:3px}
+nav{gap:8px;flex-wrap:wrap}nav button{flex:1 1 100px;width:auto;white-space:normal}
+#app-modes{border:0;padding:0;background:transparent!important;display:grid;grid-template-columns:1fr;gap:10px}
+#app-modes h2{margin:0 0 2px}
+#app-modes button{text-align:left;padding:17px 18px;background:var(--mobile-card);color:var(--mobile-text);margin:0;border-color:var(--mobile-border)}
+#app-modes button small{font-weight:400;margin:4px 0 0}
+#app-modes button br{display:none}
+#app-modes button:first-of-type{border-color:var(--mobile-accent)}
+.mobile-appearance{margin-top:18px;padding:12px 16px}
+.mobile-appearance label{margin:0;font-size:13px}
+.mobile-appearance select{margin-bottom:0}
+.mobile-appearance small{margin-bottom:0}
+#change-mode{width:auto;min-height:40px;font-size:13px;padding:8px 12px;margin:0 0 8px}
+details{border:1px solid var(--mobile-border);border-radius:12px;margin:12px 0;background:var(--mobile-card)}
+summary{padding:13px 14px;min-height:46px;font-weight:600;cursor:pointer;overflow-wrap:anywhere}
+details>section{border:0;margin:0;padding-top:0}
+.phone-setting-group{padding:0 12px 10px}
+.phone-setting-group:not([open]){padding-bottom:0}
+.phone-setting-group>summary{margin:0 -12px}
+#local-status,#status{font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+#local-message,#message{min-height:90px;resize:vertical}
+#local-send,#send,#connect{background:var(--mobile-accent);color:var(--mobile-bg);border-color:transparent}
+#local-conversation p{line-height:1.65;overflow-wrap:anywhere;padding:10px 0;margin:0;border-bottom:1px solid var(--mobile-border)}
+#local-conversation p:last-child{border-bottom:0}
+#controls>nav{position:sticky;top:0;z-index:5;background:var(--mobile-bg);padding:8px 0}
+#controls>nav button{flex:1 1 60px;font-size:12px;padding:10px 6px}
+#discovered-pcs button,#saved-pcs button{text-align:left}
+#expressions{grid-template-columns:repeat(2,minmax(0,1fr))}
+#expressions button{overflow-wrap:anywhere}
+@media(min-width:520px){#app-modes{grid-template-columns:1fr 1fr}#app-modes h2{grid-column:1/-1}}
+@media(prefers-reduced-motion:reduce){button{transition:none}}
+html[data-ui-theme="light"] a{color:var(--mobile-accent);text-decoration:underline;text-underline-offset:2px}
+html[data-ui-theme="light"] :is(button:disabled,input:disabled,select:disabled,textarea:disabled){opacity:1!important;color:var(--mobile-muted);background:var(--mobile-input);cursor:not-allowed}
+html[data-ui-theme="light"] :is(#local-send,#send,#connect){color:#fff}
+html[data-ui-theme="light"] :is(input,textarea)::placeholder{color:var(--mobile-muted);opacity:1}

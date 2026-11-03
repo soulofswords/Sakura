@@ -8,6 +8,16 @@ import httpx
 from mobile_link import MobileLink
 
 class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_phone_deck_only_runs_saved_slots_and_requires_pairing(self):
+        from unittest.mock import patch
+        with patch('hotkey_deck.execute',return_value={'ok':True,'pose':'greeting_wave'}) as execute:
+            response=await self.client.post('/command',json={'type':'deck','id':'wave'})
+            self.assertEqual(response.status_code,401);execute.assert_not_called()
+            await self.pair()
+            response=await self.client.post('/command',json={'type':'deck','id':'wave','command':'powershell.exe'})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(execute.call_args.args[1],'wave')
+            self.assertEqual(self.link.poll({})['commands'],[{'type':'deck-pose','name':'greeting_wave'}])
     async def test_phone_performance_metrics_are_bounded_and_fresh(self):
         await self.pair()
         payload={'face':{},'hands':[],'trackingMetrics':{'sequence':12,'cameraFps':60,'processedFps':58,'uploadedFps':57,'processingMs':14,'unexpected':'ignored'}}
@@ -105,6 +115,40 @@ class MobileLinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post('/command',json={**result,'model_id':'wrong'})).status_code,409)
         self.assertEqual((await self.client.post('/command',json=result)).status_code,200)
         self.assertEqual((await self.client.get('/state')).json()['transfer_request']['status'],'received')
+    async def test_a_ticked_batch_is_served_one_model_per_phone_tap(self):
+        from unittest.mock import patch
+        await self.pair()
+        folder=Path(self.directory.name)/'batch';folder.mkdir()
+        models=[]
+        for index in range(3):
+            model=folder/('model%d.pmx'%index);model.write_bytes(b'pmx'+bytes([index]));models.append(model)
+        first_id=(await self.client.post('/command',json={'type':'request-model'})).json()['request_id']
+        self.assertEqual(self.link.poll({})['commands'],[{'type':'request-model','request_id':first_id}],'An empty queue still asks the PC user.')
+        with patch('config.BASE_DIR',Path(self.directory.name)):
+            self.assertEqual(self.link.queue_selection(models,[0,1,2],folder,'pmx'),3)
+            self.link.stage_next(first_id)
+            names=[self.link.model_transfer['name']]
+            for _ in range(2):
+                # The phone taps Add model again and the PC answers from the queue, so the
+                # native picker must stay shut and no request-model command may be queued.
+                response=await self.client.post('/command',json={'type':'request-model'})
+                self.assertEqual(response.status_code,200)
+                self.assertEqual(self.link.poll({})['commands'],[],'A queued batch must not wake the picker.')
+                self.assertEqual((await self.client.get('/state')).json()['transfer_request']['status'],'ready')
+                names.append(self.link.model_transfer['name'])
+            self.assertEqual(names,['model0','model1','model2'])
+            self.assertEqual((await self.client.get('/state')).json()['model_queue'],0)
+            await self.client.post('/command',json={'type':'request-model'})
+            self.assertEqual([command['type'] for command in self.link.poll({})['commands']],['request-model'],'A spent batch asks the PC user again.')
+    async def test_cancelling_the_pc_dialog_drops_the_rest_of_the_batch(self):
+        await self.pair()
+        folder=Path(self.directory.name)/'abandoned';folder.mkdir()
+        models=[folder/('model%d.pmx'%index) for index in range(2)]
+        for model in models:model.write_bytes(b'pmx')
+        self.assertEqual(self.link.queue_selection(models,[0,1],folder,'pmx'),2)
+        request_id=(await self.client.post('/command',json={'type':'request-model'})).json()['request_id']
+        self.link.transfer_result(request_id,'cancelled')
+        self.assertEqual(self.link.model_queue,[],'Closing the dialog must not leave a model waiting to be pushed.')
     async def test_phone_requests_picker_and_cancel_is_not_tracking(self):
         self.assertEqual((await self.client.post('/command',json={'type':'request-model'})).status_code,401)
         await self.pair()

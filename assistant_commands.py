@@ -11,6 +11,17 @@ from urllib.parse import quote_plus
 
 def normalize(text, assistant_name="Sakura"):
     """Speech/name cleanup shared by command routing and background sequences."""
+    # Typed text must keep its capitalisation, so only the command before it is normalised.
+    pieces = re.split(r'(\btype\b\s*:?\s+)', text, maxsplit=1, flags=re.I)
+    if len(pieces) == 3:
+        head = _normalize_plain(pieces[0] + pieces[1], assistant_name)
+        tail = pieces[2].strip().rstrip('.!?')
+        if tail:
+            return head + ' ' + tail
+    return _normalize_plain(text, assistant_name)
+
+
+def _normalize_plain(text, assistant_name="Sakura"):
     command = re.sub(r"\s+", " ", text.lower().replace("’", "'")).strip().rstrip('.!?')
     command = re.sub(r'\bu\b', 'you', command)
     name = re.escape(str(assistant_name).lower().strip() or 'sakura')
@@ -23,19 +34,35 @@ def normalize(text, assistant_name="Sakura"):
         previous = command
         command = re.sub(r'^(?:(?:ok(?:ay)?|alright)(?: then)?|(?:hey )?sakura)[,!. ]+', '', command)
         command = re.sub(r'^(?:please|(?:what )?(?:can|could|would) you(?: please)?|i want you to)[, ]+', '', command)
+        # Continuations carry a discourse lead-in: "Now, decrease it to 20%" is one command.
+        command = re.sub(r'^(?:now|so|and|but|well|then|also)[, ]+', '', command)
         if command == previous:
             break
     command = re.sub(r'[, ]+please$', '', command).strip().rstrip('.!?')
     return re.sub(r'\byou tube\b', 'youtube', command)
 
 
-def background_sequence(text, computer_access=False, assistant_name="Sakura", channel="desktop"):
+def background_sequence(text, computer_access=False, assistant_name="Sakura", channel="desktop", bindings=None):
     """Start an explicit multi-step sequence without blocking the reply. None when it is not one."""
     from assistant_tools import start_sequence
-    return start_sequence(normalize(text, assistant_name), computer_access, assistant_name, channel)
+    return start_sequence(normalize(text, assistant_name), computer_access, assistant_name, channel, bindings)
 
 
-def run_command(text, computer_access=False, assistant_name="Sakura", channel="desktop"):
+def run_command(text, computer_access=False, assistant_name="Sakura", channel="desktop", bindings=None):
+    # Parsed from the raw sentence so typed text keeps its capitalisation.
+    from desktop_control import parse_command, parse_media, execute_action
+    # Media keys are handled by Windows globally, so they never need the focused window
+    # that desktop.press requires. Parsed first so they cannot be read as ordinary keys.
+    media = parse_media(text)
+    if media:
+        if not computer_access:
+            return 'Enable computer access in Settings first, and I can press media keys for you.'
+        return execute_action('media.press', {'key': media})['reply']
+    desktop = parse_command(text)
+    if desktop:
+        if not computer_access:
+            return 'Enable computer access in Settings first, and I can click, type or press keys for you.'
+        return execute_action(desktop['action'], desktop['arguments'])['reply']
     from assistant_reminders import reminders
     command = normalize(text, assistant_name)
     from calendar_chat import calendar_command
@@ -43,7 +70,7 @@ def run_command(text, computer_access=False, assistant_name="Sakura", channel="d
     if calendar_reply is not None:return calendar_reply
     # Use the same speech/name normalization for local utilities as app commands.
     from assistant_tools import handle_command
-    tool_reply=handle_command(command,computer_access,assistant_name,channel)
+    tool_reply=handle_command(command,computer_access,assistant_name,channel,bindings)
     if tool_reply is not None:return tool_reply
     reminder_reply = reminders.command(command)
     if reminder_reply is not None:
@@ -57,7 +84,7 @@ def run_command(text, computer_access=False, assistant_name="Sakura", channel="d
         return steam_reply
     browser_names = {'chrome': ('Google Chrome', 'Google/Chrome/Application/chrome.exe'),
                      'edge': ('Microsoft Edge', 'Microsoft/Edge/Application/msedge.exe')}
-    browser_match = re.fullmatch(r'(?:open|launch|start) (?:(?:google|microsoft) )?(chrome|edge)(?: browser)?', command)
+    browser_match = re.fullmatch(r'(?:open|launch|start|run|use) (?:(?:the|google|microsoft) )?(chrome|edge)(?: browser)?', command)
     if browser_match:
         browser = browser_match.group(1)
         label, relative = browser_names[browser]
@@ -91,7 +118,7 @@ def run_command(text, computer_access=False, assistant_name="Sakura", channel="d
     target = None
     label = None
     for name, (display, url) in sites.items():
-        if command in {f'open {name}', f'launch {name}', f'go to {name}', f'start {name}'}:
+        if command in {f'open {name}', f'launch {name}', f'go to {name}', f'start {name}', f'run {name}', f'use {name}'}:
             target, label = url, display
             break
     if command in {'search', 'do a search', 'search something', 'search google', 'search youtube'}:
@@ -115,7 +142,9 @@ def run_command(text, computer_access=False, assistant_name="Sakura", channel="d
             return f'Opening {label}.' if webbrowser.open(target, new=2) else f"I couldn't open {label} in your browser."
         except OSError:
             return f"I couldn't open {label} in your browser."
-    app_match = re.fullmatch(r'(?:open|launch|start) (.{1,100})', command)
+    app_match = re.fullmatch(r'(?:open|launch|start|run) (.{1,100})', command)
+    if not app_match:
+        app_match = re.fullmatch(r'use (?:the )?(calculator|notepad|paint)', command)
     if app_match:
         label = app_match.group(1)
         if not computer_access:

@@ -73,6 +73,14 @@ def test_colibri_managed_launch_uses_gpu_without_shell_or_download(tmp_path):
         runtime._shutdown()
 
 
+def test_runtime_status_probe_follows_the_colibri_launcher(tmp_path):
+    runtime=LocalAI(tmp_path/'private');engine=runtime.root/'colibri-runtime';engine.mkdir(parents=True)
+    (engine/'qwen38.exe').write_bytes(b'')
+    assert runtime.status()['runtimes']['colibri'] is False
+    (engine/'coli').write_text('')
+    assert runtime.status()['runtimes']['colibri'] is True
+
+
 def test_colibri_unsupported_grammar_is_not_sent(tmp_path):
     runtime=LocalAI(tmp_path);runtime.loaded='q38';runtime.loaded_engine='colibri';runtime.worker=Mock();runtime.worker.poll.return_value=None;runtime.port=1234
     reply=Mock(status_code=200);reply.json.return_value={'choices':[{'message':{'content':'{"done":true}'}}]}

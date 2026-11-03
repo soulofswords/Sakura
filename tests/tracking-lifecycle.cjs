@@ -22,10 +22,11 @@ const ChatReader=load('static/js/chat-reader.js','ChatReader');
  assert.equal(lastWorker.messages.at(-2).type,'hands-enabled');assert.equal(lastWorker.messages.at(-2).enabled,false);
  assert.equal(lastWorker.messages.at(-1).type,'pose-enabled');assert.equal(lastWorker.messages.at(-1).enabled,false);
  assert.equal(tracking.viewer.userTrackingSample.handTrackingEnabled,false);assert.deepEqual(tracking.viewer.userTrackingSample.hands,[]);
- lastWorker.onmessage({data:{type:'result',face:{landmarks:[{}]},hands:[{landmarks:[{}]}],pose:{landmarks:[{}]},timestamp:1}});
+ lastWorker.onmessage({data:{type:'result',face:{landmarks:Array.from({length:6},()=>({})),blendshapes:[{categoryName:'mouthSmileLeft',score:.7}]},hands:[{landmarks:[{}]}],pose:{landmarks:[{}]},timestamp:1}});
  assert.equal(tracking.viewer.userTrackingSample.handTrackingEnabled,false);assert.deepEqual(tracking.viewer.userTrackingSample.hands,[]);assert.equal(tracking.viewer.userTrackingSample.pose,null,'an in-flight frame must not restore body tracking after the switch is turned off');
  tracking.setHandTracking(true);tracking.setPoseTracking(true);assert.equal(lastWorker.messages.at(-1).enabled,true);assert.equal(tracking.viewer.userTrackingSample.handTrackingEnabled,true);
- tracking.stop();assert(b.track.stopped);assert(lastWorker.terminated);
+ assert(globalThis.sakuraCameraExpression,'A fresh frame publishes only the permitted expression hint');
+ tracking.stop();assert(b.track.stopped);assert(lastWorker.terminated);assert.equal(globalThis.sakuraCameraExpression,null,'Stopping tracking clears the optional camera hint');
  // Cancellation during worker initialization resolves the pending start.
  globalThis.Worker=class{terminate(){}postMessage(){}};
  const third=tracking.start();const c=stream();waiting[2](c);await new Promise(r=>setTimeout(r,0));tracking.stop();await third;assert(c.track.stopped);assert.equal(tracking.stream,null);

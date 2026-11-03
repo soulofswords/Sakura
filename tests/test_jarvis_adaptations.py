@@ -48,15 +48,57 @@ def test_planner_loops_warn_then_block_and_allow_real_progress():
     assert not loop_check([a,a,a],'files.read',{'path':'new.txt'})['blocked']
 
 
+def test_loop_guard_sees_repeats_even_when_preparation_rewrote_the_stored_arguments():
+    proposed={'url':'https://github.com/openai/codex'}
+    clone={'tool':'repo.clone','arguments':{**proposed,'folder':'codex'},'status':'completed'}
+    assert not loop_check([clone],'repo.clone',proposed)['warning']
+    assert loop_check([dict(clone),dict(clone)],'repo.clone',proposed)['warning']
+    assert loop_check([dict(clone)]*3,'repo.clone',proposed)['blocked']
+    assert not loop_check([dict(clone)]*3,'repo.clone',{'url':'https://github.com/other/repo'})['blocked']
+    assert not loop_check([dict(clone)]*3,'shell.run',{'command':'npm install'})['blocked']
+
+
 def test_skill_import_provenance_aliases_dependencies_and_no_execution(tmp_path):
     skills=AgentSkills(tmp_path/'skills.json');skills.save('base','Read current sources and verify the answer.')
     item=skills.import_markdown('---\nname: research\ndescription: Research a topic\nallowed-tools: ["Read", "WebSearch"]\ndependencies: ["base"]\n---\nRead the source and search for confirming evidence.','reviewed.md')
     assert item['required_tools']==['files.read','web.search'] and item['script_execution'] is False
     assert len(item['provenance']['sha256'])==64
-    assert skills.resolve('research',['files.read','web.search'])['dependency_guidance'][0]['name']=='base'
+    assert skills.resolve('research',['files.read','web.search'])[0]['dependency_guidance'][0]['name']=='base'
     with pytest.raises(ValueError,match='unavailable'):skills.resolve('research',['files.read'])
     with pytest.raises(ValueError,match='cycle'):skills.import_markdown('---\nname: cycle\ndependencies: ["cycle"]\n---\nRead the current source and verify it.')
     with pytest.raises(ValueError):skills.import_markdown('---\nname: unsafe\nname: other\n---\nRead the source and verify it.')
+
+
+def test_several_skills_resolve_in_order_and_auto_pick_ranks_by_goal_overlap(tmp_path):
+    skills=AgentSkills(tmp_path/'skills.json')
+    skills.save('pdf-export','Extract the text of a PDF document and summarise its tables.')
+    skills.save('repo-setup','Clone a git repository, install its dependencies and run the build command.')
+    skills.save('cv-polish','Read a resume and write a polished new document draft.')
+    chosen=skills.resolve(['repo-setup','pdf-export'],['files.read','shell.run'])
+    assert [item['name'] for item in chosen]==['repo-setup','pdf-export']
+    assert skills.resolve(['repo-setup','repo-setup',''],['files.read','shell.run'])[0]['name']=='repo-setup'
+    assert skills.relevant('clone this repository and install its dependencies') ==['repo-setup']
+    assert skills.relevant('nothing related at all')==[]
+    assert skills.resolve(['missing'],['files.read'],tolerant=True)==[]
+    with pytest.raises(ValueError,match='Missing required skill'):skills.resolve(['missing'],['files.read'])
+
+
+def test_a_long_goal_does_not_drag_unrelated_procedures_onto_the_task(tmp_path):
+    """Every starter skill repeats the same safety wording, and a long goal used to attach three
+    of them on words like "app", "launch" and "read". The self-repair procedure then rewrote the
+    plan, so a repository setup spent its first three steps running app.diagnostics."""
+    skills=AgentSkills(tmp_path/'skills.json')
+    guard=('Use only tools actually present in the current tool catalogue. Read the current instructions '
+           'and keep credentials local. Ask for approval before edits and confirm outcomes from results.')
+    skills.save('brag',guard+' Read the selected project README and UI, identify features, then draft a 20 second video storyboard about the app version.')
+    skills.save('sakura-self-repair',guard+' Repair Sakura itself when the app hangs, goes blank, dies on launch, loses its settings, or the avatar, voice and GPU model fail.')
+    skills.save('product-price-monitor',guard+' Collect the item, currency, region and target price, then check the page on a schedule and alert the running total.')
+    setup=("Set up God's Eye View from this GitHub repository on my computer. Read the current README, check the prerequisites, "
+           "install it, and launch the default keyless version. Then walk me through enabling photorealistic 3D and voice in the "
+           "app's POWER UP panel. Guide me through any new API keys I need, but keep API keys local.")
+    assert skills.relevant(setup)==[]
+    assert skills.relevant('monitor the price of this product and tell me when it drops below thirty dollars')==['product-price-monitor']
+    assert skills.relevant('repair sakura itself when the app hangs and redeploy the local copy')==['sakura-self-repair']
 
 
 def test_knowledge_is_workspace_scoped_and_reindexes_without_duplicates(tmp_path):

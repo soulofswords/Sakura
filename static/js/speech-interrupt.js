@@ -2,7 +2,7 @@ export function isSpeechInterrupt(text, wakePhrase = 'hey sakura') {
     let value=String(text).toLowerCase().replace(/[,.!?।]/gu,' ').replace(/\s+/gu,' ').trim();
     const wake=String(wakePhrase).toLowerCase().trim();
     if(wake && value.startsWith(wake+' '))value=value.slice(wake.length).trim();
-    return /^(?:(?:please )?(?:stop(?: speaking| talking)?|wait(?: a second| a moment)?|hold on|pause)(?: please)?|रुको|रुक जाओ|बस|ruko|ruk jao)$/u.test(value);
+    return /^(?:(?:please )?(?:stop(?: speaking| talking)?|wait(?: a second| a moment)?|hold on|pause|रुको|रुक जाओ|बस|ruko|ruk jao)(?: please)?)(?:\s+(?:(?:please )?(?:stop(?: speaking| talking)?|wait(?: a second| a moment)?|hold on|pause|रुको|रुक जाओ|बस|ruko|ruk jao)(?: please)?)){0,5}$/u.test(value);
 }
 
 // Runs only while speech plays and the user has enabled/used microphone input.

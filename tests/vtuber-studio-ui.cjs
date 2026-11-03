@@ -6,7 +6,7 @@ const {chromium}=require('playwright');
   const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   let html=fs.readFileSync('static/index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<link[^>]*rel="stylesheet"[^>]*>/g,'');
-  html=html.replace('</head>','<style>'+fs.readFileSync('static/css/style.css','utf8')+'\n'+fs.readFileSync('static/css/vtuber-studio.css','utf8')+'\n'+fs.readFileSync('static/css/appearance.css','utf8')+'</style></head>');
+  html=html.replace('</head>','<style>'+fs.readFileSync('static/css/style.css','utf8')+'\n'+fs.readFileSync('static/css/vtuber-studio.css','utf8')+'\n'+fs.readFileSync('static/css/studio-polish.css','utf8')+'\n'+fs.readFileSync('static/css/appearance.css','utf8')+'</style></head>');
   await page.route('http://sakura-ui.test/**',route=>route.fulfill({contentType:'text/html',body:html}));
   await page.goto('http://sakura-ui.test/');
   await page.evaluate(()=>{

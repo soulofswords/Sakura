@@ -43,12 +43,13 @@ async def check():
   async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url=origin,headers={'Origin':origin}) as client:
    for path in ['/','/api/models','/api/voices','/api/settings','/api/identity','/api/version']:
     response=await client.get(path);assert response.status_code==200,(path,response.text)
-   assert (await client.get('/api/version')).json()['version']=='1.0.2'
+   assert (await client.get('/api/version')).json()['version']==('2.0' if edition=='vtuber' else '1.0.2')
    assert (await client.get('/static/js/pmx-stage.js')).status_code==200
    assert (await client.get('/api/scenery/assets?kind=stage')).status_code==200
    settings=(await client.get('/api/settings')).json();assert settings['product_edition']==edition
    voices=(await client.get('/api/voices')).json()['presets']
-   assert sum(p.get('backend')=='kokoro' for p in voices)==22
+   assert sum(p.get('backend')=='kokoro' for p in voices)==10
+   assert sum(p.get('backend')=='kokoro' and p.get('language')=='English' for p in voices)==6
    from config import TTS_BACKEND
    assert TTS_BACKEND=='kokoro'
    from kokoro_speech import ASSETS, ASSETS_DIR, _hash

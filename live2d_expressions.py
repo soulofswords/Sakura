@@ -17,8 +17,13 @@ def discover_live2d_expressions(model_file: Path) -> list[dict[str, str]]:
     root = model_file.parent
     display_names: dict[str, str] = {}
     references: list[dict[str, str]] = []
+    if not isinstance(settings, dict):
+        return []
     refs = settings.get("FileReferences") or {}
-    for expression in refs.get("Expressions") or []:
+    if not isinstance(refs, dict):
+        refs = {}
+    expressions = refs.get("Expressions")
+    for expression in expressions if isinstance(expressions, list) else []:
         if isinstance(expression, dict) and isinstance(expression.get("File"), str):
             references.append({"Name": str(expression.get("Name") or ""), "File": expression["File"]})
 
@@ -30,10 +35,13 @@ def discover_live2d_expressions(model_file: Path) -> list[dict[str, str]]:
             data = json.loads(config.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
-        for hotkey in data.get("Hotkeys") or []:
+        if not isinstance(data, dict):
+            continue
+        hotkeys = data.get("Hotkeys")
+        for hotkey in hotkeys if isinstance(hotkeys, list) else []:
             filename = hotkey.get("File") if isinstance(hotkey, dict) else None
             name = hotkey.get("Name") if isinstance(hotkey, dict) else None
-            if filename and name and hotkey.get("Action") in {"ToggleExpression", "SetExpression", "Set/UnsetExpression"}:
+            if isinstance(filename, str) and isinstance(name, str) and hotkey.get("Action") in ("ToggleExpression", "SetExpression", "Set/UnsetExpression"):
                 display_names[Path(filename).name.casefold()] = str(name).strip()
 
     display_file = refs.get("DisplayInfo")
@@ -44,10 +52,13 @@ def discover_live2d_expressions(model_file: Path) -> list[dict[str, str]]:
             cdi = json.loads(cdi_file.read_text(encoding="utf-8-sig"))
         except (ValueError, OSError, UnicodeError, json.JSONDecodeError):
             cdi = {}
+        parameters = cdi.get("Parameters", []) if isinstance(cdi, dict) else []
+        if not isinstance(parameters, list):
+            parameters = []
         parameter_names = {
             str(parameter.get("Id")): str(parameter.get("Name")).strip()
-            for parameter in cdi.get("Parameters", [])
-            if parameter.get("Id") and parameter.get("Name")
+            for parameter in parameters
+            if isinstance(parameter, dict) and parameter.get("Id") and parameter.get("Name")
         }
     else:
         parameter_names = {}
@@ -78,11 +89,11 @@ def discover_live2d_expressions(model_file: Path) -> list[dict[str, str]]:
             data = json.loads(candidate.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
-        if data.get("Type") != "Live2D Expression" or not isinstance(data.get("Parameters"), list):
+        if not isinstance(data, dict) or data.get("Type") != "Live2D Expression" or not isinstance(data.get("Parameters"), list):
             continue
         name = reference["Name"].strip() or display_names.get(candidate.name.casefold(), "")
         if not name:
-            labels = list(dict.fromkeys(parameter_names.get(str(parameter.get("Id")), "") for parameter in data["Parameters"]))
+            labels = list(dict.fromkeys(parameter_names.get(str(parameter.get("Id")), "") for parameter in data["Parameters"] if isinstance(parameter, dict)))
             labels = [label for label in labels if label]
             name = " / ".join(labels) if labels else candidate.name.removesuffix(".exp3.json")
         # A display label can be reused by several VTube Studio hotkeys.

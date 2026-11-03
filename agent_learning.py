@@ -39,7 +39,7 @@ class AgentLearning:
             rows=d.get('procedures',[]);entry=next((x for x in rows if x['id']==fingerprint),None)
             if entry:entry['successes']+=1;entry['updated_at']=time.time()
             else:
-                if len(rows)>=100:return False
+                if len(rows)>=200:return False
                 rows.append({'id':fingerprint,'category':label,'tools':tools,'successes':1,'updated_at':time.time(),'source':'verified-completed-actions','source_run':source})
             d.update(procedures=rows,seen=(d.get('seen',[])+[source])[-500:]);self._save(d)
         return True

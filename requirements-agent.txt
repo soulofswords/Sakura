@@ -2,5 +2,7 @@
 mcp==1.30.0
 jsonschema>=4.20,<5
 python-docx>=1.1,<2.0
+reportlab>=4.2,<6
 playwright>=1.48,<2
 nvidia-ml-py>=12,<14
+tzdata>=2026.6

@@ -1,4 +1,4 @@
-:root[data-ui-theme="light"]{--ui-card:#fff;--ui-wash:#edf2f8;--ui-input:#f0f4fa;--ui-ink:#27364b;--ui-muted:#526279;--ui-line:#d8e3ee;--ui-button:#e9f4fb;--ui-accent:#147caf;--ui-stage:#e6ebf1}
+:root[data-ui-theme="light"]{--ui-card:#fff;--ui-wash:#edf2f8;--ui-input:#f0f4fa;--ui-ink:#27364b;--ui-muted:#526279;--ui-line:#d8e3ee;--ui-button:#e9f4fb;--ui-accent:#075f8a;--ui-stage:#e6ebf1}
 :root[data-ui-theme="dark"]{--ui-card:#20242b;--ui-wash:#171b21;--ui-input:#292f38;--ui-ink:#edf1f7;--ui-muted:#b5c1d0;--ui-line:#414b59;--ui-button:#303c4b;--ui-accent:#91ceff;--ui-stage:#11151a}
 :root[data-ui-theme]{--sakura-pink:var(--ui-accent)!important;--text-primary:var(--ui-ink)!important;--text-muted:var(--ui-muted)!important;--panel-bg:var(--ui-card)!important;--panel-border:var(--ui-line)!important;--bg-grad-1:var(--ui-stage)!important;--bg-grad-2:var(--ui-stage)!important;--user-bubble:var(--ui-button)!important;--sakura-bubble:var(--ui-input)!important}
 html[data-ui-theme] body.studio-ui-active{--studio-ink:var(--ui-ink);--studio-muted:var(--ui-muted);--studio-card:var(--ui-card);--studio-line:var(--ui-line);--studio-wash:var(--ui-wash);--text-primary:var(--ui-ink);--text-muted:var(--ui-muted)}
@@ -62,3 +62,15 @@ html[data-ui-theme] #chat-panel :is(.panel-header,.input-area){border-color:var(
 html[data-ui-theme] #chat-panel :is(#screen-view-status,#chat-attachment-tray small){color:var(--ui-muted)!important;border-color:var(--ui-line)!important}
 html[data-ui-theme] #chat-panel .message.sakura{border-color:var(--ui-line)!important}
 html[data-ui-theme] #chat-bubble-btn{background:var(--ui-button)!important;color:var(--ui-accent)!important;border-color:var(--ui-line)!important}
+/* Light surfaces need dark text even on legacy dark-only links and controls. */
+html[data-ui-theme="light"] :is(.modal-card,#studio-panel,#companion-panel,#vtuber-collab-dialog,#chat-panel) a{color:var(--ui-accent)!important;text-decoration:underline;text-underline-offset:2px}
+html[data-ui-theme="light"] #chat-panel :is(.panel-header,#screen-view-status){background:var(--ui-card)!important}
+html[data-ui-theme="light"] :is(#agent-mode-toggle,#morph-toggle-btn,#chat-bubble-btn){background:var(--ui-button)!important;color:var(--ui-accent)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme="light"] :is(.modal-card,#studio-panel,#companion-panel,#vtuber-collab-dialog,#chat-panel) :is(button:disabled,input:disabled,select:disabled,textarea:disabled){opacity:1!important;color:var(--ui-muted)!important;background:var(--ui-input)!important;cursor:not-allowed}
+html[data-ui-theme="light"] :is(.modal-card,#studio-panel,#companion-panel,#vtuber-collab-dialog,#chat-panel) :is(input,textarea)::placeholder{color:var(--ui-muted)!important;opacity:1}
+html[data-ui-theme="light"] :is(.modal-card,#studio-panel,#companion-panel) input[type=file]::file-selector-button{color:var(--ui-accent);background:var(--ui-button);border:1px solid var(--ui-line);border-radius:6px;padding:5px 8px}
+html[data-ui-theme="light"] :is(#companion-toolbar,#companion-panel,#studio-panel,.modal-card,#theme-popover) button:not(.studio-background-swatch){background:var(--ui-button)!important;color:var(--ui-accent)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme="light"] :is(#companion-toolbar,#companion-panel,#studio-panel) :is(.dropdown-menu,.dropdown-item,.dropdown-trigger){background:var(--ui-input)!important;color:var(--ui-ink)!important;border-color:var(--ui-line)!important}
+html[data-ui-theme="light"] body:is(.companion-ui-active,.studio-ui-active){--studio-ink:var(--ui-ink);--studio-muted:var(--ui-muted);--sakura-pink:var(--ui-accent)!important}
+html[data-ui-theme="light"] #top-bar .badge{color:var(--ui-accent)!important;background:var(--ui-button)!important}
+html[data-ui-theme="light"] .studio-camera-choices button span{color:var(--ui-muted)!important}

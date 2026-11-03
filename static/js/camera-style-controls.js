@@ -1,0 +1,10 @@
+/* Merely opening this section never starts a camera or changes consent. */
+export function installCameraStyleControls(){
+ if(window.SAKURA_EDITION==='vtuber'||document.getElementById('camera-delivery-hints'))return;
+ const host=document.getElementById('companion-camera-group');if(!host)return;
+ const section=document.createElement('fieldset');section.id='camera-delivery-hints';section.className='setting-group';section.innerHTML='<legend>Camera-aware conversation</legend><label><input type="checkbox" role="switch" aria-label="Camera delivery hints"> Let visible facial movements gently adjust reply delivery</label><p>Optional. Works with face tracking, including Sakura Mobile. Hints affect wording, not facts, permissions or Friend/Teacher mode. They do not establish how you feel.</p><p role="status"></p>';
+ host.append(section);const toggle=section.querySelector('input'),status=section.querySelector('[role=status]');toggle.disabled=true;
+ const read=async()=>{try{const response=await fetch('/api/features/status');if(!response.ok)return;const data=await response.json();toggle.checked=data.camera_style===true;toggle.disabled=false;status.textContent=toggle.checked?'Enabled · uses fresh cues only while a camera task is active.':'Off · replies do not use facial delivery hints.';}catch(_){status.textContent='Camera preference could not be loaded. Reopen Camera & tracking to retry.';}};
+ toggle.onchange=async()=>{toggle.disabled=true;try{const response=await fetch('/api/features/camera-style',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:toggle.checked})});const data=await response.json();if(!response.ok)throw Error(data.detail||data.error||'Could not update camera delivery hints.');if(!data.camera_style)globalThis.sakuraCameraExpression=null;status.textContent=data.camera_style?'Enabled · fresh visible cues may inform delivery.':'Off · facial delivery hints cleared.';}catch(error){toggle.checked=!toggle.checked;status.textContent=error.message;}finally{toggle.disabled=false;}};
+ window.addEventListener('sakura-camera-style-refresh',read);void read();
+}

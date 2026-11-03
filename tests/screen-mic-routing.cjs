@@ -7,6 +7,7 @@ const ctx={trackingOnly:false,vtuberEnabled:false,aiVtuberStarting:false,gameAct
     startDesktopListening:async()=>{starts++;ctx.continuousMic.enabled=true;},
     screenReactBtn:{setAttribute(){}},screenViewBtn:{setAttribute(){}},screenViewStatus:{classList:{toggle(){}}},
     ScreenShare:class{constructor(fn){callback=fn;} enabled=false;}};
+ctx.window={dispatchEvent(){}};ctx.Event=class{};
 vm.createContext(ctx);vm.runInContext(shareBlock+'\nthis.share=screenShare;',ctx);
 (async()=>{
     ctx.share.enabled=true;callback(true,false);await Promise.resolve();assert.equal(starts,1);
@@ -16,7 +17,8 @@ vm.createContext(ctx);vm.runInContext(shareBlock+'\nthis.share=screenShare;',ctx
     const block=source.slice(source.indexOf('async function startDesktopListening('),source.indexOf('let chatReplyGeneration'));
     assert.ok(block.includes('continuousMic.start(selectedMicId)'),'must slice the real startDesktopListening, not an empty range');
     let selected;
-    Object.assign(ctx,{selectedMicId:'chosen-microphone',autoGameEnabled:false,listeningStatus:{}});
+    let agentMode=false;
+    Object.assign(ctx,{selectedMicId:'chosen-microphone',autoGameEnabled:false,listeningStatus:{},document:{body:{classList:{contains:()=>agentMode}}}});
     ctx.continuousMic.start=async id=>{selected=id;};vm.runInContext(block,ctx);
     ctx.aiVtuberStarting=false;await ctx.startDesktopListening(true);assert.equal(selected,'chosen-microphone','explicit Listen uses the selected device');
     selected='unset';await ctx.startDesktopListening();assert.equal(selected,'chosen-microphone','explicit listening survives screen/background refresh');
@@ -25,5 +27,12 @@ vm.createContext(ctx);vm.runInContext(shareBlock+'\nthis.share=screenShare;',ctx
     let wakeSync=0;ctx.nativeWake={async sync(){wakeSync++;}};
     await ctx.startDesktopListening(true);assert.equal(selected,'chosen-microphone','explicit mic works with wake phrase enabled');assert.equal(wakeSync,1);
     selected=null;ctx.vtuberEnabled=true;await ctx.startDesktopListening(true);assert.equal(selected,null);
+    ctx.vtuberEnabled=false;agentMode=true;await ctx.startDesktopListening(true);assert.equal(selected,null,'Agent mode must not restart Companion capture');
+    const clickBlock=source.slice(source.indexOf("continuousMicBtn.addEventListener('click', async () => {"),source.indexOf('    installCompactCompanionControls('));
+    let onClick,explicitStarts=0;
+    const clickContext={continuousMicBtn:{addEventListener:(_,fn)=>{onClick=fn;}},speechInterrupt:{stop(){}},clearTimeout(){},interruptFollowupTimer:null,interruptFollowupUntil:0,speechInputUsed:false,temporaryFollowupMic:false,continuousMic:{enabled:false},nativeWake:{enabled:()=>true},wakeWordToggle:{checked:true},saveAppSettings:async()=>{},startDesktopListening:async explicit=>{if(explicit)explicitStarts++;}};
+    vm.createContext(clickContext);vm.runInContext(clickBlock,clickContext);await onClick();
+    assert.equal(explicitStarts,1,'One mic click switches wake listening to explicit recording');
+    assert.equal(clickContext.wakeWordToggle.checked,false);
     console.log('PASS: selected microphone on explicit listen, automatic wake-word gate, explicit off preserved, screen stop and AI VTuber microphone exclusion');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -18,7 +18,7 @@ class Context {
     createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
     createAnalyser() { return { fftSize: 1024, getFloatTimeDomainData(a) { a.fill(amplitude); } }; }
 }
-const context = { Blob, MediaRecorder: Recorder, Float32Array, performance: { now: () => time },
+const context = { setTimeout,clearTimeout,Blob, MediaRecorder: Recorder, Float32Array, performance: { now: () => time },
     window: { AudioContext: Context }, navigator: { mediaDevices: {
         async getUserMedia() { return { getTracks: () => [track] }; } } },
     setInterval(fn) { timer = fn; return 1; }, clearInterval() { timer = null; } };
@@ -48,6 +48,11 @@ const tick = async () => { time += 50; timer?.(); await new Promise(r => setImme
     assert.equal(recordings[0].state, 'inactive', 'No recording during assistant reply');
     release(); await new Promise(r => setImmediate(r));
     assert.equal(recordings.at(-1).state, 'recording', 'Listening resumes after speech ends');
+    const beforePause=submitted;
+    mic.pauseCapture();assert.equal(mic.enabled,true,'Pausing output capture preserves microphone opt-in');
+    assert.equal(recordings.at(-1).state,'inactive','Speaker playback discards an in-progress chunk');
+    await new Promise(r=>setImmediate(r));assert.equal(submitted,beforePause,'Own speaker audio never submits as a new utterance');
+    mic.resumeCapture();await new Promise(r=>setTimeout(r,650));assert.equal(recordings.at(-1).state,'recording','Listening resumes after the speaker-tail guard');
     mic.stop(); await new Promise(r => setImmediate(r));
     assert.equal(track.stopped, true);
     assert.equal(submitted, 1, 'Pause discards unfinished recording');

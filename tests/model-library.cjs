@@ -120,6 +120,10 @@ const assert = require('node:assert/strict');
   await page.clock.fastForward(60001);
   assert.equal(requests.filter(path=>path.endsWith('/models')).length,beforeClosed,'A closed cloud gallery does not poll the service.');
   assert.equal(await page.locator('[data-cloud-library]').count(),2,'Both studio modes get the same library.');
+  await page.locator('[data-companion-content="character"]').evaluate(el=>el.hidden=true);
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('sakura-open-cloud-library',{detail:{query:'sample'}})));
+  await page.waitForFunction(()=>document.querySelector('[data-studio-content="models"] [data-library-search]').value==='sample');
+  assert.equal(await card.isVisible(),true,'Spoken cloud request opens the actual authenticated cloud browser');
   assert.deepEqual(errors,[]);
   console.log('PASS: cloud-only sign-in, account flow, safe names, download and selector refresh.');
  } finally { await browser.close(); }

@@ -58,4 +58,46 @@ class AgentSkills:
         dependencies=[self._resolve(dep,items,tools,set(visiting)) for dep in item.get('dependencies',[])]
         return {**item,'dependency_guidance':dependencies}
 
-    def resolve(self,name,tools):return self._resolve(name,self.list(),tools)
+    def resolve(self,names,tools,tolerant=False):
+        """Resolve several skills into procedures, keeping order and dropping duplicates."""
+        items=self.list()
+        wanted=[names] if isinstance(names,str) else list(names or [])
+        result=[];seen=set()
+        for name in wanted:
+            if not isinstance(name,str) or not name.strip() or name in seen:continue
+            seen.add(name)
+            try:result.append(self._resolve(name,items,tools))
+            except ValueError:
+                if not tolerant:raise
+        return result
+
+    STOPWORDS={'the','and','for','with','that','this','from','then','than','into','about','your','you','are','was','will','have','has','its','can','all','not','use','each','once','more','most','other','very','when','where','which','while','after','before','new','old','out','off','per','via'}
+    # Every starter skill repeats the same scaffolding ("read the current instructions", "ask",
+    # "keep", "app"), so a shared term proves nothing. A long goal used to attach three unrelated
+    # procedures on words like that, and the repair skill then rewrote the plan's first steps.
+    DISTINCTIVE_SHARE=0.1
+    MIN_DISTINCTIVE_MATCHES=2
+    MIN_GOAL_COVERAGE=0.1
+
+    def relevant(self,goal,limit=3):
+        """Name the installed skills whose own wording matches a goal, most specific match first."""
+        words=set(re.findall(r'[a-z0-9]{3,}',str(goal).lower()))-self.STOPWORDS
+        if not words:return []
+        library=[(str(item.get('name','')),
+                  set(re.findall(r'[a-z0-9]{3,}',(str(item.get('name',''))+' '+str(item.get('instructions',''))).lower()))-self.STOPWORDS)
+                 for item in self.list()]
+        if not library:return []
+        frequency={}
+        for _,tokens in library:
+            for token in tokens:frequency[token]=frequency.get(token,0)+1
+        shared=max(1,round(self.DISTINCTIVE_SHARE*len(library)))
+        scored=[]
+        for name,tokens in library:
+            distinctive=[token for token in words&tokens if frequency[token]<=shared]
+            # Two terms that belong to this skill, and enough of them that the goal is really
+            # about the skill rather than passing near it on the way to something else.
+            if len(distinctive)<self.MIN_DISTINCTIVE_MATCHES:continue
+            if len(distinctive)/len(words)<self.MIN_GOAL_COVERAGE:continue
+            # A term every skill already uses separates nothing, so weight each match by how rare it is here.
+            scored.append((-round(sum(1.0/frequency[token] for token in distinctive),4),name))
+        return [name for _,name in sorted(scored)[:limit]]

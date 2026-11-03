@@ -1,0 +1,22 @@
+/* Shared finishing pass: preserve the current PC studio navigation and features. */
+html[data-ui-theme] :is(#companion-panel,#studio-panel,.studio-docked){box-shadow:0 8px 28px #00000014;border-color:var(--ui-line)}
+:is(#companion-panel,#studio-panel) .studio-panel-header{padding:18px 20px;gap:12px}
+:is(#companion-panel,#studio-panel) .studio-panel-header h2{font-size:20px;line-height:1.3;margin:2px 0 0;letter-spacing:-.3px}
+:is(#companion-panel,#studio-panel) .studio-panel-header small{font-size:10px;letter-spacing:1.3px}
+:is(#companion-panel,#studio-panel) .studio-panel-body{padding:14px;scrollbar-width:thin;overscroll-behavior:contain}
+:is(#companion-panel,#studio-panel) .studio-card{padding:16px;margin-bottom:12px;box-shadow:none}
+:is(#companion-panel,#studio-panel) .studio-card h3{font-size:14px;line-height:1.4;margin:0 0 12px;font-weight:650}
+:is(#companion-panel,#studio-panel) p{line-height:1.6;overflow-wrap:anywhere}
+:is(#companion-panel,#studio-panel) button{line-height:1.4;min-height:36px}
+:is(#companion-panel-close,#studio-panel-close){flex:0 0 32px;display:grid;place-items:center;width:32px;height:32px;min-height:32px!important;padding:0!important;font-size:22px;line-height:1!important}
+:is(#companion-dock,#studio-dock) .studio-dock-button{box-shadow:0 2px 7px #00000012;transition:transform .15s,box-shadow .15s}
+:is(#companion-dock,#studio-dock) .studio-dock-button:hover{transform:translateY(-1px)}
+:is(#companion-dock,#studio-dock) .studio-dock-button:focus-visible{outline:2px solid var(--ui-accent,#168fd5);outline-offset:4px}
+.studio-actions{gap:8px}
+@media(max-width:650px){
+ :is(#companion-panel,#studio-panel) .studio-panel-header{padding:14px}
+ :is(#companion-panel,#studio-panel) .studio-panel-body{padding:10px}
+ :is(#companion-panel,#studio-panel) .studio-card{padding:14px}
+ :is(#companion-dock,#studio-dock){gap:8px}
+}
+@media(prefers-reduced-motion:reduce){:is(#companion-dock,#studio-dock) .studio-dock-button{transition:none}}

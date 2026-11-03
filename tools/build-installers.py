@@ -80,6 +80,8 @@ def app_files():
         yield BASE/'docs'/(Path(name).stem+'.md'),'Sakura/kokoro-assets/'+name
     for file in BASE.glob('*.py'):
         yield file, 'Sakura/' + file.name
+    # Public HTTP client only; proprietary implementation remains in the core.
+    yield BASE/'sakura_sdk.py','Sakura/sdk/sakura_sdk.py'
     for name in ('requirements.txt','requirements-macos.txt','run-macos.command',
                  'setup-macos.command','setup-rvc-macos.command','requirements-rvc.txt',
                  'requirements-agent.txt'):

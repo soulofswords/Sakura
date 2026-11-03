@@ -16,7 +16,11 @@ TEXT_EXTENSIONS={'.txt','.md','.csv','.json','.log','.py','.js','.html','.xml','
 IMAGE_EXTENSIONS={'.png','.jpg','.jpeg','.webp'}
 
 
-def extract_attachment(filename,data):
+def extract_attachment(filename,data,max_text=MAX_TEXT,allow_unknown_text=False):
+    """Turn one attached file into text or an image. max_text=None keeps the whole text, which the
+    agent's paged file read needs so it can report a true character count for the file.
+    allow_unknown_text also reads names with no known extension; the chat uploader leaves it off so a
+    random binary download is still refused by the same message it always showed."""
     if not data or len(data)>MAX_BYTES:raise ValueError('Choose a non-empty file of up to 10 MB.')
     name=re.split(r'[/\\]',filename or 'attachment')[-1]
     name=re.sub(r'[\x00-\x1f]','',name)[:180]
@@ -40,7 +44,7 @@ def extract_attachment(filename,data):
             parts=[];length=0
             for page in reader.pages[:150]:
                 part=page.extract_text() or '';parts.append(part);length+=len(part)
-                if length>MAX_TEXT:break
+                if max_text is not None and length>max_text:break
             text='\n'.join(parts)
             result['truncated']=len(reader.pages)>len(parts)
         except ValueError:raise
@@ -55,13 +59,14 @@ def extract_attachment(filename,data):
                 ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
                 text='\n'.join(''.join(p.itertext()) for p in root.findall('.//w:p',ns))
         except (zipfile.BadZipFile,KeyError,ElementTree.ParseError) as error:raise ValueError('The DOCX file could not be read.') from error
-    elif extension in TEXT_EXTENSIONS:
+    elif extension in TEXT_EXTENSIONS or allow_unknown_text:
         try:text=data.decode('utf-16') if data.startswith((b'\xff\xfe',b'\xfe\xff')) else data.decode('utf-8-sig')
         except UnicodeDecodeError:text=data.decode('cp1252',errors='replace')
         if '\x00' in text:raise ValueError('This appears to be a binary file. Attach a PDF, DOCX, text file or image.')
     else:raise ValueError('Supported: PDF, DOCX, text, Markdown, CSV, JSON, code, PNG, JPEG and WebP.')
     if not text.strip():raise ValueError('No readable text was found. For a scanned PDF, attach its page as an image.')
-    result.update(text=text[:MAX_TEXT],truncated=result['truncated'] or len(text)>MAX_TEXT)
+    result.update(text=text if max_text is None else text[:max_text],
+                  truncated=result['truncated'] or (max_text is not None and len(text)>max_text))
     return result
 
 

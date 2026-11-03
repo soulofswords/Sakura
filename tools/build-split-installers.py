@@ -44,6 +44,7 @@ def edition_sources(edition,stage):
     source=source.replace('Desktop Companion',display)
     if edition=='vtuber':
         source=source.replace('Sakura Companion','Sakura VTuber')
+        source=source.replace('AssemblyVersion("1.0.0.0")','AssemblyVersion("2.0.0.0")')
         begin=source.index(' static string ChooseMode(');end=source.index(' [STAThread]',begin)
         source=source[:begin]+''' static string ChooseMode(string project,out string key){key="";return "vtuber";}
  static string PythonPath(string project){foreach(string candidate in new[]{Path.Combine(project,"venv","Scripts","python.exe"),Path.Combine(project,"runtime","python.exe")})if(File.Exists(candidate))return candidate;return "";}
@@ -62,6 +63,7 @@ def edition_sources(edition,stage):
     for name,source in [('Installer.cs',installer),('Uninstall.cs',uninstaller)]:
         source=source.replace('Desktop Companion.exe',launcher)
         if edition=='vtuber':
+            source=source.replace('AssemblyVersion("1.1.0.0")','AssemblyVersion("2.0.0.0")').replace('SetValue("DisplayVersion","1.1.0")','SetValue("DisplayVersion","2.0")')
             source=source.replace('Sakura Companion',display).replace('SakuraCompanion','SakuraVTuber')
             source=source.replace('downloaded AI','voice profiles')
             source=source.replace('No character, voice or AI models are bundled. Import your own later.','Import your own character models and voice profiles after installation.')
@@ -91,7 +93,9 @@ def edition_sources(edition,stage):
         html=html.replace('/static/assets/companion-vtuber.png','/static/assets/vtuber-app.png')
         html=html.replace('<strong>Sakura Companion</strong>','<strong>Sakura VTuber</strong>')
     (stage/'index.html').write_text(html,encoding='utf-8')
-    (stage/'product.json').write_text(json.dumps({'edition':edition,'display_name':display}),encoding='utf-8')
+    metadata={'edition':edition,'display_name':display}
+    if edition=='vtuber':metadata['version']='2.0'
+    (stage/'product.json').write_text(json.dumps(metadata),encoding='utf-8')
     return display,launcher
 
 def build_edition(edition,output,work):
@@ -146,13 +150,15 @@ def build_edition(edition,output,work):
 def main():
     # unittest subprocesses need the same test-helper path that pytest supplies.
     os.environ['PYTHONPATH']=os.pathsep.join([str(BASE),str(BASE/'tests'),os.environ.get('PYTHONPATH','')])
-    # The desktop runtime bundles the release-gate Playwright dependency rather
-    # than vendoring node_modules in the product tree.  Preserve any caller
-    # path and make every Node subprocess (including the stage-item gate) use
-    # the same deterministic module resolution.
-    bundled_node_modules=Path.home()/'.cache'/'codex-runtimes'/'codex-primary-runtime'/'dependencies'/'node'/'node_modules'
-    if bundled_node_modules.is_dir():
-        os.environ['NODE_PATH']=os.pathsep.join([str(bundled_node_modules),os.environ.get('NODE_PATH','')])
+    # The release gate reads Playwright from this tree's own node_modules (see package.json), so it
+    # keeps running when a borrowed copy in another tool's cache disappears.  That folder is
+    # development-only and no build ships it.  A caller path is preserved, and the old desktop
+    # runtime bundle stays last for a PC that has not run npm install yet.
+    gate_node_modules=[BASE/'node_modules',
+                       Path.home()/'.cache'/'codex-runtimes'/'codex-primary-runtime'/'dependencies'/'node'/'node_modules']
+    search_path=os.pathsep.join([str(path) for path in gate_node_modules if path.is_dir()]+[os.environ.get('NODE_PATH','')])
+    if search_path:
+        os.environ['NODE_PATH']=search_path
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,default=Path('C:/AI/Installer ready'));parser.add_argument('--edition',choices=['both','vtuber','companion'],default='both')
     args=parser.parse_args();reports=args.output/'split-build-reports';reports.mkdir(parents=True,exist_ok=True)
     root=BASE/'tools/edition-work';root.mkdir(exist_ok=True)
@@ -165,17 +171,28 @@ def main():
             subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         subprocess.run([sys.executable,'-m','unittest','tests.test_product_editions','tests.test_startup_modes','tests.test_tracking_mode',
             'tests.test_model_import','tests.test_model_rig_validation','tests.test_native_model_picker','tests.test_native_clipboard','tests.test_pmx_editor','tests.test_pmx_appearance_reference','tests.test_texture_diagnostics','tests.test_model_repairs','tests.test_mobile_link','tests.test_voice_catalog','tests.test_voice','tests.test_speech_fallback','tests.test_kokoro_speech','tests.test_screen_audio','tests.test_dance_commands','tests.test_nvidia_ar_setup','tests.test_vbridger_receiver',
-            'tests.test_agent_runtime','tests.test_agent_api','tests.test_agent_linkedin','tests.test_agent_calendar','tests.test_calendar_agenda','tests.test_calendar_chat','tests.test_calendar_interview','tests.test_calendar_titles','tests.test_agent_mcp','tests.test_astra_strict','tests.test_normal_responses','tests.test_search_confirmation','tests.test_learned_answers','tests.test_local_clock','tests.test_chat_attachments','tests.test_medium_responses','tests.test_response_evidence','tests.test_factual_grounding','tests.test_hardware_metrics','tests.test_system_tools','tests.test_broadcast_effects','tests.test_model_library_confirm','tests.test_hindi_conversation','tests.test_reply_filler','tests.test_stt_commands','tests.test_persona_grounding','tests.test_shared_memory_claims','tests.test_session_greeting','tests.test_speech_decoration','tests.test_avatar_gestures','tests.test_direct_laugh','tests.test_game_laugh','tests.test_news_speech','tests.test_local_news','tests.test_app_branding','tests.test_pc_response_audit','tests.test_desktop_wake','tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_cloud_api','tests.test_companion_camera','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_assistant_commands','tests.test_assistant_reminders','tests.test_assistant_updates','tests.test_weather_dates','tests.test_reaction_repeats','tests.test_reinstall_settings','tests.test_bytecode_build','tests.test_release_payload','tests.test_cursor_stream','tests.test_mobile_tls','tests.test_phone_permissions','tests.test_rvc_safe_load','-q'],cwd=BASE,check=True)
+            'tests.test_agent_runtime','tests.test_agent_api','tests.test_agent_linkedin','tests.test_agent_calendar','tests.test_calendar_agenda','tests.test_calendar_chat','tests.test_calendar_interview','tests.test_calendar_titles','tests.test_agent_mcp','tests.test_astra_strict','tests.test_normal_responses','tests.test_search_confirmation','tests.test_learned_answers','tests.test_local_clock','tests.test_chat_attachments','tests.test_medium_responses','tests.test_response_evidence','tests.test_factual_grounding','tests.test_hardware_metrics','tests.test_system_tools','tests.test_device_followups','tests.test_broadcast_effects','tests.test_model_library_confirm','tests.test_hindi_conversation','tests.test_reply_filler','tests.test_stt_commands','tests.test_persona_grounding','tests.test_shared_memory_claims','tests.test_session_greeting','tests.test_speech_decoration','tests.test_avatar_gestures','tests.test_direct_laugh','tests.test_game_laugh','tests.test_news_speech','tests.test_local_news','tests.test_app_branding','tests.test_pc_response_audit','tests.test_desktop_wake','tests.test_screen_snapshot','tests.test_chat_endpoint','tests.test_cloud_api','tests.test_companion_camera','tests.test_conversation_context_fix','tests.test_llm_context','tests.test_assistant_commands','tests.test_assistant_reminders','tests.test_assistant_updates','tests.test_weather_dates','tests.test_reaction_repeats','tests.test_reinstall_settings','tests.test_bytecode_build','tests.test_release_payload','tests.test_cursor_stream','tests.test_mobile_tls','tests.test_phone_permissions','tests.test_rvc_safe_load','-q'],cwd=BASE,check=True)
         for script in sorted((BASE/'static/js').glob('*.js')):subprocess.run(['node','--check',str(script)],check=True)
+        subprocess.run([sys.executable,'-m','pytest','tests/test_memory_workbench.py','tests/test_encrypted_backup.py','tests/test_gpu_routing.py','tests/test_hotkey_deck.py','tests/test_twitch_chat.py','tests/test_setup_guide_state.py','-q'],cwd=BASE,check=True)
+        for name in ('proactive-state.cjs','agent-memory-workbench.cjs','phone-hotkey-deck.cjs','live-chat-controls.cjs','companion-mode-switch.cjs','memory-archaeology.cjs','calendar-context-reminder.cjs','agent-growth.cjs','personal-features.cjs'):
+            subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
+        subprocess.run([sys.executable,'-m','pytest','tests/test_mode_isolation.py','tests/test_memory_archaeology.py','-q'],cwd=BASE,check=True)
         subprocess.run(['node',str(BASE/'tests/render-budget.cjs')],cwd=BASE,check=True)
         subprocess.run(['node',str(BASE/'tests/live2d-controls.cjs')],cwd=BASE,check=True)
+        subprocess.run(['node',str(BASE/'tests/live2d-csp.cjs')],cwd=BASE,check=True)
+        subprocess.run(['node',str(BASE/'tests/first-run-guide.cjs')],cwd=BASE,check=True)
+        subprocess.run(['node',str(BASE/'tests/setup-auto-navigation.cjs')],cwd=BASE,check=True)
+        subprocess.run(['node',str(BASE/'tests/agent-policy-navigation.cjs')],cwd=BASE,check=True)
+        subprocess.run(['node',str(BASE/'tests/theme-text-contrast.cjs')],cwd=BASE,check=True)
+        for name in ['companion-room.cjs','companion-room-browser.cjs','phone-conversations.cjs']:
+            subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         subprocess.run([sys.executable,str(BASE/'tools/check-mobile-provider-errors.py')],cwd=BASE,check=True)
         subprocess.run([sys.executable,str(BASE/'tools/check-mobile-location.py')],cwd=BASE,check=True)
         subprocess.run([sys.executable,str(BASE/'tools/check-mobile-wake.py')],cwd=BASE,check=True)
         subprocess.run([sys.executable,str(BASE/'tools/check-wake-download.py')],cwd=BASE,check=True)
-        for name in ['model-presentation.cjs','media-microphone.cjs','imported-greeting.cjs','game-laughter.cjs','app-branding.cjs','hand-presentation.cjs','screen-memory.cjs','avatar-preview.cjs','camera-preview.cjs','companion-camera.cjs','companion-camera-comments.cjs','assistant-reminders.cjs','mobile-link-controls.cjs','ai-vtuber-screen.cjs','game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-repair-store.cjs','model-physics.cjs','physics-collisions.cjs',
+        for name in ['model-presentation.cjs','media-microphone.cjs','agent-companion-mic.cjs','imported-greeting.cjs','game-laughter.cjs','app-branding.cjs','hand-presentation.cjs','screen-memory.cjs','avatar-preview.cjs','camera-preview.cjs','companion-camera.cjs','companion-camera-comments.cjs','assistant-reminders.cjs','mobile-link-controls.cjs','ai-vtuber-screen.cjs','game-mode.cjs','model-switching.cjs','model-controls-presentation.cjs','model-rig-monitor.cjs','model-repair-store.cjs','model-physics.cjs','physics-collisions.cjs',
             'reaction-expressions.cjs','auto-expressions.cjs','head-pose-filter.cjs','live2d-head-smooth.cjs','live2d-framing.cjs','vrm-framing.cjs','live2d-tracking-recovery.cjs','model-dance.cjs','expression-editor.cjs','expression-stacking.cjs','live2d-face-mapping.cjs','avatar-retarget.cjs','vrm-head-pitch.cjs','glasses-tracking.cjs','broadcast-camera.cjs','webcam-arm-rig.cjs','tracking-lifecycle.cjs','tracking-distance.cjs','tracking-distance-worker.cjs',
-            'utility-request.cjs','desktop-wake-controls.cjs','voice-runtime.cjs','startup-presentation.cjs','live-screen.cjs','screen-mic-routing.cjs','screen-capture.cjs','screen-share.cjs','screen-audio.cjs','continuous-mic.cjs','speech-interrupt.cjs','speech-pipeline.cjs','texture-diagnostics.cjs','pmx-materials.cjs','pmx-nose-skin.cjs','vrm-gloss.cjs','opacity-boost.cjs','model-bones.cjs','model-mouth-tab.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs','direct-reply-reaction-pause.cjs','cursor-gpu-picking.cjs','cursor-stream.cjs','eye-tracking.cjs','model-drag-hit.cjs','part-appearance.cjs','stage-items.cjs','companion-studio-navigation.cjs','vtuber-studio-ui.cjs','mobile-appearance.cjs','texture-diagnostics-ui.cjs','pmx-reference-lighting.cjs','pmx-toon-colour.cjs','pmx-appearance-controls.cjs','pmx-appearance-generic.cjs','pmx-alpha-reference.cjs','pmx-part-colour.cjs','pmx-ice-colour.cjs','pmx-rectangle-toon.cjs','pmx-memory.cjs']:
+            'utility-request.cjs','desktop-wake-controls.cjs','voice-runtime.cjs','startup-presentation.cjs','live-screen.cjs','screen-mic-routing.cjs','screen-capture.cjs','screen-share.cjs','screen-audio.cjs','continuous-mic.cjs','speech-interrupt.cjs','speech-pipeline.cjs','texture-diagnostics.cjs','pmx-materials.cjs','pmx-nose-skin.cjs','vrm-gloss.cjs','opacity-boost.cjs','model-bones.cjs','model-mouth-tab.cjs','pmx-layers.cjs','pmx-shaders.cjs','lip-sync.cjs','chat-reader-mouth.cjs','chat-reader-motion.cjs','voice-switching.cjs','post-speech-motion.cjs','direct-reply-reaction-pause.cjs','cursor-gpu-picking.cjs','cursor-stream.cjs','eye-tracking.cjs','model-drag-hit.cjs','part-appearance.cjs','stage-items.cjs','companion-studio-navigation.cjs','vtuber-studio-ui.cjs','mobile-appearance.cjs','texture-diagnostics-ui.cjs','pmx-reference-lighting.cjs','pmx-toon-colour.cjs','pmx-appearance-controls.cjs','pmx-appearance-generic.cjs','pmx-alpha-reference.cjs','pmx-alpha-cutout.cjs','agent-browser-panel.cjs','companion-defaults.cjs','pmx-part-colour.cjs','pmx-ice-colour.cjs','pmx-rectangle-toon.cjs','pmx-memory.cjs']:
             subprocess.run(['node',str(BASE/'tests'/name)],cwd=BASE,check=True)
         with tempfile.TemporaryDirectory(prefix='release-',dir=root) as temp:
             results=[]

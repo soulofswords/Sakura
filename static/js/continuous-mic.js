@@ -28,7 +28,7 @@ export default class ContinuousMic {
     }
 
     _record(generation) {
-        if (!this.enabled || generation !== this.generation) return;
+        if (!this.enabled || this.suspended || generation !== this.generation || this.recorder?.state==='recording') return;
         const recorder = new MediaRecorder(this.stream);
         this.recorder = recorder;
         const chunks = [];
@@ -43,7 +43,7 @@ export default class ContinuousMic {
         recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
         recorder.onstop = async () => {
             clearInterval(this.timer);
-            if (!this.enabled || generation !== this.generation) return;
+            if (!this.enabled || this.suspended || generation !== this.generation) return;
             if (speechMs >= minimumSpeech && chunks.length) {
                 this.onStatus('Preparing reply…');
                 // No recorder runs while recognizing/generating/playing a reply.
@@ -77,7 +77,19 @@ export default class ContinuousMic {
         }, 50);
     }
 
+    pauseCapture() {
+        this.suspended=true;clearTimeout(this.resumeTimer);clearInterval(this.timer);
+        if(this.recorder?.state==='recording')this.recorder.stop();
+    }
+
+    resumeCapture() {
+        clearTimeout(this.resumeTimer);
+        const generation=this.generation;
+        this.resumeTimer=setTimeout(()=>{if(!this.enabled||generation!==this.generation)return;this.suspended=false;this._record(generation);},600);
+    }
+
     stop() {
+        clearTimeout(this.resumeTimer);this.suspended=false;
         ++this.generation;
         this.enabled = false;
         clearInterval(this.timer);

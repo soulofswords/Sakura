@@ -6,16 +6,16 @@ export default class ModelDance {
     async prepare(style){if(style==='greeting_wave')await this.importedGreeting.load();}
     // Companion tracking keeps the AI choreography; the clip simply takes over
     // the bones while it plays and the tracked pose resumes when it ends.
-    supported(){const v=this.viewer;return !!(v.model&&!v.live2d&&(!v.vtuberTrackingMode||v.companionTracking)&&(!v.userTracking||v.companionTracking)&&v.animationBones?.torso&&v.animationBones?.leftArm&&v.animationBones?.rightArm);}
-    start(style='groove'){
-        if(!this.supported())return false;
+    supported(manual=false){const v=this.viewer;return !!(v.model&&!v.live2d&&(manual||this.active?.manual||((!v.vtuberTrackingMode||v.companionTracking)&&(!v.userTracking||v.companionTracking)))&&v.animationBones?.torso&&v.animationBones?.leftArm&&v.animationBones?.rightArm);}
+    start(style='groove',options={}){
+        if(!this.supported(options.manual===true))return false;
         const v=this.viewer;
         if(['chest_tap','greeting_wave'].includes(style)&&!['chest','rightArm','rightElbow','rightWrist'].every(key=>v.animationBones[key]?.bone))return false;
         this.stop(true);
         const imported=style==='greeting_wave'?this.importedGreeting.begin():null;
         if(style==='greeting_wave'&&!imported)return false;
         if(!['groove','step','wave','twist','disco','march','victory','defeat','laugh','laugh_bend','hands_both','hand_left','hand_right','chest_tap','greeting_wave'].includes(style))return false;
-        this.active={style,time:0,root:v.model,blend:0,stopping:false,
+        this.active={style,time:0,root:v.model,blend:0,stopping:false,manual:options.manual===true,
             basePosition:v.model.position.clone(),baseRotation:v.model.rotation.clone(),imported};
         // Always start from a finite pose. A previous idle gesture supplies
         // the blend-in; the physics solver keeps hair/clothing inertia.

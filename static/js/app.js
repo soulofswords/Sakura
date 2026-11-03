@@ -1,8 +1,12 @@
-import {installCompactCompanionControls} from './compact-companion-controls.js?v=155';
+import {installPersonalControls} from './personal-feature-controls.js?v=2';
+import {wakeCommand} from './sleep-state.js?v=1';
+import {installCameraStyleControls} from './camera-style-controls.js?v=1';
+import {installCompanionRoom} from './companion-room.js?v=wake-walk4';
+import {installCompactCompanionControls} from './compact-companion-controls.js?v=mic-resize1103';
 import {installStageItems} from './stage-items.js?v=scenery1028';
 import { appendEvidence } from './response-evidence.js?v=medium103';
-import {installChatAttachments} from './chat-attachments.js?v=files105';
-import {installSystemTools} from './system-tools.js?v=metrics93';
+import {installChatAttachments} from './chat-attachments.js?v=context106';
+import {installSystemTools} from './system-tools.js?v=live-count94';
 import {installLocalModelManager,updateLocalModelChoices} from './local-model-manager.js?v=native-choice137';
 installLocalModelManager();
 installSystemTools();
@@ -20,40 +24,63 @@ import {finishStartupPresentation} from './startup-presentation.js?v=startup106'
 import {installScreenAudio} from './screen-audio.js?v=media90';
 import {installSpoutControls} from './spout-output.js?v=instances152';
 import {installVirtualCamera} from './virtual-camera.js?v=sakura3';
-import {installMobileLink} from './mobile-link.js?v=connected-avatar78';
+import {installMobileLink} from './mobile-link.js?v=camera-style1103';
 import {installCameraPreview} from './camera-preview.js?v=1';
 import CompanionCamera, {CompanionCameraModes} from './companion-camera.js?v=phone-modes108';
-import {installReminders} from './assistant-reminders.js?v=1';
-import {installExpressionEditor} from './expression-editor.js?v=irida101';
+import {installReminders} from './assistant-reminders.js?v=calendar-context1103';
+import {installExpressionEditor} from './expression-editor.js?v=emotion146';
 import {installModelSettings} from './model-settings.js?v=reference-generic110';
-import {installVtuberCollab} from './vtuber-collab.js?v=collab3';
-import ModelViewer from './model-viewer.js?v=reference-generic134';
-import AvatarTracking from './avatar-tracking.js?v=nvidia-fixes142';
+import {installVtuberCollab} from './vtuber-collab.js?v=shared-context4';
+import ModelViewer from './model-viewer.js?v=emotion140';
+import AvatarTracking from './avatar-tracking.js?v=camera-style145';
 import {installBroadcastCamera} from './broadcast-camera.js?v=1';
-import ChatReader from './chat-reader.js?v=lean1';
+import ChatReader from './chat-reader.js?v=both1103';
 import LipSync from './lip-sync.js?v=fbx89';
 import RvcVoiceChanger from './rvc-voice-changer.js?v=audio-route5';
 import EyeTracking from './eye-tracking.js?v=cursor-gpu6';
 import ScreenShare from './screen-share.js?v=timeline63';
 import ScreenMemory from './screen-memory.js?v=timeline63';
 import {utilityRequest} from './utility-request.js?v=1';
-import {desktopWakeControls} from './desktop-wake-controls.js?v=manual-mic116';
-import ContinuousMic from './continuous-mic.js?v=quiet-mic105';
-import {createSpeechInterrupt,isSpeechInterrupt} from './speech-interrupt.js?v=interrupt104';
-import { speakPhrases } from './speech-pipeline.js?v=latency94';
+import {desktopWakeControls} from './desktop-wake-controls.js?v=agent-isolation1102';
+import ContinuousMic from './continuous-mic.js?v=echo-isolation1103';
+import {installCompanionDefaults} from './companion-defaults.js?v=label2';
+import {installCharacterVoice} from './character-voice.js?v=1';
+import {installVrmSpringControls} from './vrm-spring-controls.js?v=1';
+import {installBackupControls} from './backup-controls.js?v=1';
+import {installHotkeyDeckControls} from './hotkey-deck-controls.js?v=1';
+import {installLiveChatControls} from './live-chat-controls.js?v=both1103';
+import './memory-archaeology.js?v=calendar-context1103';
+import {installInitiativeControls} from './proactive-state.js?v=1';
+import {createSpeechInterrupt,isSpeechInterrupt} from './speech-interrupt.js?v=interrupt105';
+import { speakPhrases as runSpeechPhrases } from './speech-pipeline.js?v=latency94';
+const speakPhrases=(text,generate,play,isCurrent=()=>true)=>companionSleeping?Promise.resolve():runSpeechPhrases(text,generate,play,()=>!companionSleeping&&isCurrent());
 import {createVoiceRuntime} from './voice-runtime.js?v=1';
 
 const continuousMicBtn = document.getElementById('continuous-mic-btn');
 const listeningStatus = document.getElementById('listening-status');
 const chatAttachments=installChatAttachments({notice:text=>addMessage(text,'sakura')});
 let lastMicActivity = Date.now();
+let companionSleeping=false,sleepMicTemporary=false,sleepMicEpoch=0;
+function wakeCompanion(){if(!viewer?.companionRoom?.act('home'))window.dispatchEvent(new CustomEvent('sakura-companion-sleep',{detail:{sleeping:false}}));}
+window.addEventListener('sakura-companion-sleep',async event=>{
+    companionSleeping=event.detail?.sleeping===true;const epoch=++sleepMicEpoch;
+    if(companionSleeping){
+        lipSync?.stop();speechInterrupt.stop();viewer?.reactionExpressions?.clear();
+        listeningStatus.textContent='Sleeping · say wake up Sakura or your wake phrase. Tasks and automations continue.';
+        if(nativeWake.enabled()&&!continuousMic.enabled){
+            await nativeWake.pause(true);if(epoch!==sleepMicEpoch||!companionSleeping)return;
+            sleepMicTemporary=true;try{await continuousMic.start(selectedMicId);if(epoch!==sleepMicEpoch&&!companionSleeping)continuousMic.stop();}catch{sleepMicTemporary=false;listeningStatus.textContent='Sleeping · click the microphone and say wake up Sakura';}
+        }
+    }else{if(sleepMicTemporary){sleepMicTemporary=false;continuousMic.stop();await nativeWake.pause(companionSleeping);}listeningStatus.textContent='Awake · ready to listen';}
+});
 let lastDirectReplyAt = 0;
+let speechRecognitionBusy = 0;
 const continuousMic = new ContinuousMic(blob => {
     if(chatBusy||lipSync?.isPlaying)return;
     return sendAudioForSTT(blob, { continuous: true });
 }, status => {
     if (status !== 'Listening…') lastMicActivity = Date.now();
-    listeningStatus.textContent = status;
+    listeningStatus.textContent = companionSleeping?'Sleeping · say wake up Sakura or your wake phrase':status;
     continuousMicBtn.setAttribute('aria-pressed', String(continuousMic.enabled));
     continuousMicBtn.textContent = continuousMic.enabled ? '🎤 Pause mic' : '🎤 Listen';
 });
@@ -61,7 +88,7 @@ window.addEventListener('pagehide', () => continuousMic.stop());
 let speechInputUsed=false, interruptFollowupUntil=0, interruptFollowupTimer=null, temporaryFollowupMic=false;
 const speechInterrupt=createSpeechInterrupt({
     createMic:(...args)=>new ContinuousMic(...args),
-    allowed:()=>!trackingOnly&&!vtuberEnabled&&!aiVtuberStarting&&(speechInputUsed||continuousMic.enabled||nativeWake.enabled()),
+    allowed:()=>!document.body.classList.contains('agent-mode')&&!trackingOnly&&!vtuberEnabled&&!aiVtuberStarting&&(speechInputUsed||continuousMic.enabled||nativeWake.enabled()),
     wakePhrase:()=>currentSettings.wake_word||'hey sakura',
     recognize:async blob=>{
         const form=new FormData();form.append('audio',blob,'interrupt.webm');
@@ -70,17 +97,19 @@ const speechInterrupt=createSpeechInterrupt({
         return (await response.json()).text||'';
     },
     interrupt:async()=>{
+        if(document.body.classList.contains('agent-mode'))return;
         document.getElementById('interrupt-btn').click();
         interruptFollowupUntil=Date.now()+15000;
         listeningStatus.textContent='Paused. Ask your next question.';
         if(!continuousMic.enabled){
             if(nativeWake.enabled())await nativeWake.pause(true);
+            if(document.body.classList.contains('agent-mode'))return;
             temporaryFollowupMic=true;
             try{await continuousMic.start(selectedMicId);}
-            catch(error){temporaryFollowupMic=false;interruptFollowupUntil=0;await nativeWake.pause(false);listeningStatus.textContent='Speech stopped. Click the microphone to ask your next question.';return;}
+            catch(error){temporaryFollowupMic=false;interruptFollowupUntil=0;await nativeWake.pause(companionSleeping);listeningStatus.textContent='Speech stopped. Click the microphone to ask your next question.';return;}
             clearTimeout(interruptFollowupTimer);
             interruptFollowupTimer=setTimeout(()=>{
-                interruptFollowupUntil=0;temporaryFollowupMic=false;continuousMic.stop();void nativeWake.pause(false);
+                interruptFollowupUntil=0;temporaryFollowupMic=false;continuousMic.stop();void nativeWake.pause(companionSleeping);
             },15000);
         }
     },
@@ -88,6 +117,7 @@ const speechInterrupt=createSpeechInterrupt({
 window.addEventListener('pagehide',()=>{speechInterrupt.stop();clearTimeout(interruptFollowupTimer);});
 
 async function startDesktopListening(explicit = false) {
+    if(document.body.classList.contains('agent-mode'))return;
     if (trackingOnly) return;
     if (vtuberEnabled || aiVtuberStarting) return;
     if(explicit)continuousMic.userRequested=true;
@@ -100,6 +130,7 @@ async function startDesktopListening(explicit = false) {
         listeningStatus.textContent='Microphone off · click Listen or enable the wake phrase';
         return;
     }
+    if(document.body.classList.contains('agent-mode'))return;
     try { await continuousMic.start(selectedMicId); }
     catch (err) {
         continuousMic.stop();
@@ -180,10 +211,11 @@ const screenShare = new ScreenShare((enabled, starting) => {
     screenViewStatus.classList.toggle('sharing', enabled);
     screenViewStatus.textContent = enabled ? `Live screen + audio · AI receives recent frames via ${currentSettings.llm_provider === 'ollama' ? 'local Ollama' : currentSettings.llm_provider}`
         : starting ? 'Choose a screen or window in the browser picker' : 'Screen off · Capture stopped';
+    window.dispatchEvent(new Event('sakura-screen-state'));
 });
 window.addEventListener('pagehide', () => screenShare.stop());
 const screenAudio = installScreenAudio(() => !trackingOnly && screenShare.enabled,
-    () => !!lipSync?.isPlaying || chatBusy || reactionBusy || vtuberSpeaking, fetch, () => vtuberEnabled || aiVtuberStarting);
+    () => !!lipSync?.isPlaying || chatBusy || reactionBusy || vtuberSpeaking || companionSleeping, fetch, () => vtuberEnabled || aiVtuberStarting);
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
@@ -405,9 +437,10 @@ let identitySaving = false;
 let identitySaveQueued = false;
 let identityTimer = null;
 let currentSettings = { assistant_name: 'Sakura', wake_word: 'hey sakura', wake_word_enabled: false };
+window.addEventListener('sakura-reply-emotion',event=>{if(['auto','off','happy','concerned','amused','surprised','focused'].includes(event.detail?.value)){currentSettings.avatar_emotion=event.detail.value;viewer?.reactionExpressions?.clear();}});
 let wakeCommandDeadline = 0;
-const nativeWake=desktopWakeControls({continuousMic,settings:()=>currentSettings,blocked:()=>trackingOnly||vtuberEnabled||aiVtuberStarting,
-    receive:async text=>{wakeCommandDeadline=0;chatInput.value=text;await handleSendMessage();},status:text=>{listeningStatus.textContent=text;}});
+const nativeWake=desktopWakeControls({continuousMic,settings:()=>currentSettings,blocked:()=>document.body.classList.contains('agent-mode')||trackingOnly||vtuberEnabled||aiVtuberStarting,
+    receive:async text=>{wakeCommandDeadline=0;if(companionSleeping)wakeCompanion();chatInput.value=text;await handleSendMessage();},status:text=>{listeningStatus.textContent=text;}});
 
 
 // ─────────────────────────── Custom Dropdown System ───────────────────────────
@@ -630,6 +663,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         agentModeButton.textContent=enabled?'Companion mode':'Agent mode';
         agentModeButton.setAttribute('aria-pressed',String(enabled));
         if(enabled){
+            continuousMic.stop();speechInterrupt.stop();clearTimeout(interruptFollowupTimer);
+            ++chatReplyGeneration;replyController?.abort();
+            if(mediaRecorder?.state==='recording')mediaRecorder.stop();
+            isRecording=false;micBtn.classList.remove('recording');
+            await nativeWake.sync(true);
             if(agentFrame.src==='about:blank')agentFrame.src='/agent?embedded=1';
             document.body.classList.remove('transparent-mode');document.documentElement.classList.remove('transparent-mode');
         }else{
@@ -735,8 +773,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         // An explicitly chosen expression (PC editor or phone) is a manual
         // override: it pauses reactions so the pick stays visible and the
         // phone can switch away from whatever the PC had selected.
-        viewer.areAiExpressionsAutomatic = () => reactionsEnabled && !trackingOnly && (!viewer.vtuberTrackingMode || !!viewer.companionTracking) && !viewer.manualExpressions?.size;
+        viewer.replyEmotion=()=>currentSettings.avatar_emotion||'auto';
+        viewer.areAiExpressionsAutomatic = () => currentSettings.avatar_emotion!=='off' && !trackingOnly && (!viewer.vtuberTrackingMode || !!viewer.companionTracking) && !viewer.manualExpressions?.size;
         installStageItems(viewer);
+        installCompanionRoom(viewer);
         installSpoutControls(()=>viewer);
         installVirtualCamera(()=>viewer);
         window.sakuraExpressionEditor = installExpressionEditor(()=>viewer, ()=>selectedPmxPath || lastGoodModelUrl || 'none');
@@ -753,16 +793,19 @@ window.addEventListener('DOMContentLoaded', async () => {
         updateGlitchFixUI();
         lipSync = new LipSync(viewer);
         window.sakuraAgentSpeak=text=>{
+            if(companionSleeping)return Promise.resolve();
             const safe=String(text||'').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,'').trim().slice(0,420);
             if(!safe)return Promise.resolve();
             agentSpeechQueue=agentSpeechQueue.catch(()=>{}).then(async()=>{
+                if(companionSleeping)return;
                 const response=await fetch('/api/tts/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:safe})});
                 const speech=await response.json();if(!response.ok)throw Error(speech.error||'Speech is unavailable.');
-                if(speech.audio&&lipSync)await lipSync.playWithLipSync(speech.audio);
+                if(speech.audio&&lipSync&&!companionSleeping)await lipSync.playWithLipSync(speech.audio);
             });
             return agentSpeechQueue;
         };
         lipSync.onAudioActive=async value=>{
+            if(value)continuousMic.pauseCapture();else continuousMic.resumeCapture();
             await nativeWake.audioActive(value);
             if(value)void speechInterrupt.start(selectedMicId);
             else if(!chatBusy)speechInterrupt.stop();
@@ -780,7 +823,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupAvatarTracking();
     const companionCameraModes=new CompanionCameraModes({objectCamera:companionCamera,avatarTracking,viewer});
     installCameraPreview(()=>avatarTracking,()=>viewer);
-    installReminders(()=>!trackingOnly&&!vtuberEnabled,()=>selectedSpeakerId);
+    installPersonalControls();
+    installCameraStyleControls();
+    installReminders(()=>!trackingOnly&&!vtuberEnabled&&!companionSleeping,()=>selectedSpeakerId);
     const cameraToggle=document.getElementById('companion-camera-enabled');
     const companionCameraMode=document.getElementById('companion-camera-mode');
     const companionFaceTrackingOptions=document.getElementById('companion-face-tracking-options');
@@ -855,6 +900,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.body.classList.toggle('tracking-only', trackingOnly);
         viewer?.setVtuberTrackingMode(trackingOnly);
         await loadModelsList();
+        window.sakuraCompanionDefaultsReady=true;
+        window.dispatchEvent(new Event('sakura-companion-ready'));
     } catch (err) {
         console.warn('Initial data load warning:', err);
     }
@@ -1001,7 +1048,7 @@ function setupEvents() {
         const wasTemporary=temporaryFollowupMic;
         if(wasTemporary)continuousMic.stop();
         temporaryFollowupMic=false;
-        if (nativeWake.enabled()){wakeWordToggle.checked=false;await saveAppSettings();}
+        if (nativeWake.enabled()){const wasEnabled=continuousMic.enabled;wakeWordToggle.checked=false;await saveAppSettings();if(wasEnabled){sleepMicTemporary=false;continuousMic.userRequested=false;continuousMic.stop();}else await startDesktopListening(true);}
         else if (continuousMic.enabled) {continuousMic.userRequested=false;continuousMic.stop();}
         else if(!wasTemporary)startDesktopListening(true);
     });
@@ -1096,7 +1143,7 @@ function setupEvents() {
         finally { setTimeout(screenReactionLoop, gameActive ? 1000 : 2000); }
     }
     setTimeout(screenReactionLoop, 1000);
-    const screenMemory=new ScreenMemory(screenShare,()=>!trackingOnly,
+    const screenMemory=new ScreenMemory(screenShare,()=>!trackingOnly&&!companionSleeping,
         ()=>chatBusy||reactionBusy||isRecording||!!lipSync?.isPlaying||vtuberSpeaking);
     const screenMemoryTimer=setInterval(()=>screenMemory.tick(),2000);
     window.addEventListener('pagehide',()=>{clearInterval(screenMemoryTimer);screenMemory.stop();},{once:true});
@@ -1117,8 +1164,14 @@ function setupEvents() {
     chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleSendMessage(); });
     clearBtn.addEventListener('click', handleClearChat);
     document.getElementById('vtuber-mode-btn').addEventListener('click', () => {
+        if(trackingOnly||window.SAKURA_EDITION==='vtuber')return;
         openSettingsModal();
-        document.querySelector('.tab-btn[data-tab="assistant"]')?.click();
+        const tab=document.querySelector('.tab-btn[data-tab="assistant"]');tab?.click();
+        // The settings strip may be horizontally scrolled or reparented by
+        // the studio shell. Explicitly activate the real assistant pane.
+        document.querySelectorAll('#settings-modal .tab-content').forEach(pane=>pane.classList.toggle('active',pane.id==='tab-assistant'));
+        document.querySelectorAll('#settings-modal .tab-btn').forEach(button=>button.classList.toggle('active',button===tab));
+        document.getElementById('vtuber-start-btn')?.scrollIntoView({block:'center'});
     });
     document.getElementById('vtuber-start-btn').addEventListener('click', async () => {
         const status = document.getElementById('vtuber-status');
@@ -1134,7 +1187,7 @@ function setupEvents() {
         try {
             await enableAiVtuberScreen();
             const response = await fetch('/api/vtuber/connect', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({link: document.getElementById('youtube-chat-link').value.trim()})});
+                body: JSON.stringify({service:document.getElementById('cohost-service')?.value||'youtube',twitch_link:document.getElementById('cohost-twitch-link')?.value.trim()||'',link: document.getElementById('youtube-chat-link').value.trim(),twitch_username:document.getElementById('cohost-twitch-username')?.value.trim()||'',twitch_token:document.getElementById('cohost-twitch-token')?.value||''})});
             const data = await response.json();
             if (!response.ok) throw new Error(data.error);
             ++vtuberGeneration;
@@ -1145,13 +1198,13 @@ function setupEvents() {
             await screenAudio.sync();
             vtuberQueue = [];
             lastViewerReply = '';
-            status.textContent = 'YouTube chat + live screen + computer audio · microphone excluded';
+            status.textContent = ({youtube:'YouTube',twitch:'Twitch',both:'YouTube + Twitch'}[document.getElementById('cohost-service')?.value]||'YouTube')+' chat + live screen + computer audio · microphone excluded';
             document.getElementById('vtuber-mode-btn').textContent = 'AI VTuber on';
         } catch (error) {
             if(!vtuberEnabled) {aiVtuberStarting=false; restoreAiVtuberScreen(); if(vtuberResumeMic) await startDesktopListening(true);}
             status.textContent = error.message;
         }
-        finally { aiVtuberStarting = false; button.disabled = false; }
+        finally { const token=document.getElementById('cohost-twitch-token');if(token)token.value='';aiVtuberStarting = false; button.disabled = false; }
     });
     document.getElementById('vtuber-stop-btn').addEventListener('click', async () => {
         vtuberEnabled = false;
@@ -1177,6 +1230,14 @@ function setupEvents() {
         else checkGameMode();
     });
     setInterval(checkGameMode, 2000);
+    installCompanionDefaults({blocked:()=>trackingOnly||window.SAKURA_EDITION==='vtuber',screen:screenShare,screenButton:screenViewBtn,reactionButton:screenReactBtn,gameButton,status:listeningStatus});
+    installCharacterVoice({getModel:()=>selectedPmxPath,applyVoice:applyVoiceById,getVoice:()=>currentVoiceId,blocked:()=>trackingOnly||chatBusy||reactionBusy});
+    installVrmSpringControls(viewer,()=>selectedPmxPath);
+    installBackupControls();
+    installHotkeyDeckControls();
+    installLiveChatControls();
+    if(window.SAKURA_EDITION!=='vtuber')window.installMemoryArchaeology?.(document.getElementById('system-tools'));
+    installInitiativeControls();
     document.getElementById('clear-memory-desktop').addEventListener('click', handleClearChat);
     window.addEventListener('sakura-chat-session-ended',()=>{
         document.getElementById('interrupt-btn').click();
@@ -1249,6 +1310,7 @@ function setupEvents() {
     document.getElementById('dance-stop-btn').onclick=()=>viewer?.dance?.stop();
     document.getElementById('interrupt-btn').addEventListener('click', () => {
         speechInterrupt.stop();
+        viewer?.companionRoom?.stop();
         viewer?.dance?.stop();
         ++chatReplyGeneration;
         replyController?.abort();
@@ -1258,7 +1320,7 @@ function setupEvents() {
         hideSpeechBubble();
         viewer?.setActivity('idle');
         lastMicActivity = Date.now();
-        void nativeWake.pause(false);
+        void nativeWake.pause(companionSleeping);
     });
     const chooseModelPackage=async(input,kind)=>{
         if(!window.pywebview?.api.import_model_package){document.getElementById(input).click();return;}
@@ -1319,7 +1381,7 @@ function setupEvents() {
         finally{companionViewChanging=false;}
     };
     bgToggleBtn.addEventListener('click', window.toggleCompanionView);
-    document.getElementById('restore-companion-controls').addEventListener('click', window.toggleCompanionView);
+    document.getElementById('restore-companion-controls')?.addEventListener('click', window.toggleCompanionView);
     document.getElementById('overlay-ui-btn').addEventListener('click', () => {
         if (trackingOnly || document.body.classList.contains('native-library')) window.toggleStreamingControls();
         else window.toggleCompanionView();
@@ -2108,6 +2170,7 @@ async function loadModelFromUrl(url, recovering = false) {
         if (result.notice) addMessage(result.notice, 'sakura');
         lastGoodModelUrl = url;
         selectedPmxPath = decodeURIComponent(url.replace(/^\/models\//, ''));
+        window.dispatchEvent(new Event('sakura-character-loaded'));
         window.sakuraExpressionEditor?.refresh();
         await window.sakuraModelSettings?.refresh();
         glitchModelKey = selectedPmxPath;
@@ -2465,6 +2528,7 @@ async function playTestAudioTone() {
 // ─────────────────────────── Chat & AI ───────────────────────────
 async function handleSendMessage() {
     if (trackingOnly) return;
+    if(companionSleeping){const wake=wakeCommand(chatInput.value,currentSettings.wake_word||'hey sakura');if(!wake.wake){listeningStatus.textContent='Sleeping · say wake up Sakura or your wake phrase';return;}wakeCompanion();chatInput.value=wake.command;if(!wake.command)return;}
     if(chatAttachments.busy()){listeningStatus.textContent='Wait for the file to finish loading.';return;}
     const attachedIds=chatAttachments.ids();
     const text = chatInput.value.trim()||(attachedIds.length?'What is this file? Please summarize its contents.':'');
@@ -2474,8 +2538,7 @@ async function handleSendMessage() {
     lastDirectReplyAt = Date.now();
     cameraReactionController?.abort();
     chatBusy = true;
-    await nativeWake.pause(true);
-    await voiceSaveQueue;
+    window.dispatchEvent(new CustomEvent('sakura-task-progress',{detail:{active:true}}));
     const generation = ++chatReplyGeneration;
     // Load/verify local speech while the AI generates the answer, not after.
     const voiceReady=ensureKokoroReady().then(()=>({}),error=>({error}));
@@ -2489,6 +2552,8 @@ async function handleSendMessage() {
     viewer?.setActivity('thinking');
 
     try {
+        await nativeWake.pause(true);
+        await voiceSaveQueue;
         const plainGreeting = /^(?:hello|hi|hey|hii+|hiya|namaste|नमस्ते)[!.\s]*$/iu.test(text);
         const noVision=attachedIds.length>0||plainGreeting||utilityRequest(text);
         const screenImage = noVision ? null : await screenShare.snapshot();
@@ -2500,7 +2565,7 @@ async function handleSendMessage() {
             signal: controller.signal,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, game_name:gameActive?detectedGameName:null, attachments:attachedIds, ai_vtuber:vtuberEnabled, screen_frames: noVision ? [] : screenShare.recentFrames(), defer_audio: true, avatar_can_dance:!!viewer?.dance?.supported(), avatar_can_greet:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_can_chest_tap:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
+            body: JSON.stringify({ text, camera_expression:Date.now()-(window.sakuraCameraExpression?.at||0)<3000?window.sakuraCameraExpression.values:undefined,shared_context:window.sakuraSharedContext||[], game_name:gameActive?detectedGameName:null, attachments:attachedIds, ai_vtuber:vtuberEnabled, screen_frames: noVision ? [] : screenShare.recentFrames(), defer_audio: true, avatar_room:!trackingOnly?viewer?.companionRoom?.capabilities():undefined, avatar_can_dance:!!viewer?.dance?.supported(), avatar_can_greet:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_can_chest_tap:!!viewer?.dance?.supported()&&['chest','rightArm','rightElbow','rightWrist'].every(k=>viewer.animationBones?.[k]?.bone), avatar_dance_style:viewer?.dance?.active?.style||null, ...(screenImage ? { screen_image: screenImage } : {}), ...(avatarImage ? { avatar_image: avatarImage } : {}), ...(cameraImage && companionCamera.enabled ? {camera_image:cameraImage} : {}) }),
         });
         const data = await res.json();
         if(generation!==chatReplyGeneration)return;
@@ -2513,6 +2578,12 @@ async function handleSendMessage() {
                 data.speech_reply='The texture check finished. Its results are in Model Settings, under Texture remapping.';
             }
         }
+        if(data.avatar_model){
+            try{await loadModelFromUrl('/models/'+data.avatar_model.split('/').map(encodeURIComponent).join('/'));if(selectedPmxPath!==data.avatar_model||!viewer?.model||viewer._displayLoading)throw Error('The requested model was not successfully loaded.');data.reply='Changed to '+data.avatar_model.split('/').at(-1).replace(/\.(pmx|vrm)$/i,'')+'.';}
+            catch(error){data.reply='The outfit did not load: '+error.message;}
+        }
+        if(data.avatar_picker)window.dispatchEvent(new CustomEvent('sakura-open-avatar-picker',{detail:{query:data.avatar_query??(typeof data.avatar_picker==='string'?data.avatar_picker:''),cloud:!!data.avatar_cloud}}));
+        if(data.avatar_expression)window.sakuraExpressionEditor?.applyByLabel?.(data.avatar_expression);
         if (data.reply) {
             let presented = false;
             const presentReply = () => {
@@ -2529,8 +2600,8 @@ async function handleSendMessage() {
             };
             if (generation !== chatReplyGeneration) return;
             let speechGestureStarted=false;
-            const startSpeechGesture=()=>{if(!speechGestureStarted&&['chest_tap','greeting_wave'].includes(data.avatar_motion)&&generation===chatReplyGeneration){speechGestureStarted=true;viewer?.dance?.start(data.avatar_motion);}};
-            if(data.avatar_motion==='stop')viewer?.dance?.stop();
+            const startSpeechGesture=()=>{if(!speechGestureStarted&&['chest_tap','greeting_wave'].includes(data.avatar_motion)&&generation===chatReplyGeneration){speechGestureStarted=true;viewer?.companionRoom?.stop();viewer?.dance?.start(data.avatar_motion);}};
+            if(data.avatar_motion==='stop'){viewer?.dance?.stop();viewer?.companionRoom?.stop();}
             else if(['groove','step','wave','twist','disco','march','hands_both','hand_left','hand_right'].includes(data.avatar_motion)){
                 viewer?.dance?.start(data.avatar_motion);
                 if(['groove','step','wave','twist','disco','march'].includes(data.avatar_motion))document.getElementById('dance-style').value=data.avatar_motion;
@@ -2539,6 +2610,9 @@ async function handleSendMessage() {
             // local speech generation. Speech starts as soon as its first
             // short phrase arrives below.
             presentReply();
+            if(typeof data.avatar_motion==='string'&&data.avatar_motion.startsWith('room:')){
+                if(!viewer?.companionRoom?.act(data.avatar_motion.slice(5)))listeningStatus.textContent='Room motion could not start. Check room controls and stop tracking or dancing first.';
+            }
             const indicator = document.getElementById('typing-indicator');
             if (indicator) indicator.textContent = 'Preparing voice…';
             try {
@@ -2587,7 +2661,7 @@ async function handleSendMessage() {
         removeTypingIndicator();
         if (generation === chatReplyGeneration && err.name !== 'AbortError') addMessage(`⚠️ ${err.message || 'Could not connect to the backend server.'}`, 'sakura');
     } finally {
-        if (generation === chatReplyGeneration){chatBusy = false;speechInputUsed=false;speechInterrupt.stop();await nativeWake.pause(false);}
+        if (generation === chatReplyGeneration){chatBusy = false;window.dispatchEvent(new CustomEvent('sakura-task-progress',{detail:{active:false}}));speechInputUsed=false;speechInterrupt.stop();await nativeWake.pause(companionSleeping);}
         if (generation === chatReplyGeneration) lastDirectReplyAt = Date.now();
         if (generation === chatReplyGeneration && !lipSync?.isPlaying) viewer?.setActivity('idle');
         if (generation === chatReplyGeneration) viewer?.reactionExpressions?.stop();
@@ -2693,6 +2767,7 @@ async function leaveGameMode() {
 
 async function checkGameMode() {
     if (trackingOnly || viewer?._displayLoading || viewer?._modelSwitchQueue) return;
+    if (speechRecognitionBusy > 0) return;
     if (!autoGameEnabled || autoGameBusy || !window.pywebview?.api?.game_status) return;
     autoGameBusy = true;
     try {
@@ -2720,7 +2795,7 @@ async function checkGameMode() {
         }
         if (gameReady || chatBusy || reactionBusy || lipSync?.isPlaying) return;
         if (!autoGameEnabled) return;
-        if (!screenShare.enabled) { await screenShare.toggle(); gameStartedScreen = screenShare.enabled; }
+        if (!screenShare.enabled && window.sakuraCompanionScreenRequested!==false) { await screenShare.toggle(); gameStartedScreen = screenShare.enabled; }
         if (!screenShare.enabled) throw new Error('Screen access was not enabled.');
         if (!autoGameEnabled) return;
         // Screen reactions must not depend on microphone permission succeeding.
@@ -2758,6 +2833,7 @@ function restoreAiVtuberScreen() {
 }
 
 async function pollVtuberChat() {
+    if(companionSleeping)return;
     if (trackingOnly) return;
     if (!vtuberEnabled || vtuberPollBusy) return;
     vtuberPollBusy = true;
@@ -2784,12 +2860,12 @@ async function pollVtuberChat() {
                 body: JSON.stringify({author: message.author, text: message.text, avatar_can_dance:!!viewer?.dance?.supported(),avatar_dance_style:viewer?.dance?.active?.style||null,screen_image: screenShare.enabled ? await screenShare.snapshot() : null, screen_frames: screenShare.recentFrames()})});
             const result = await replyResponse.json();
             if (!replyResponse.ok) throw new Error(result.error);
-            if (!current() || !result.reply || result.reply.trim() === '[QUIET]') return;
+            if (!current() || !result.reply || /^\s*\[QUIET\]/i.test(result.reply)) return;
             addMessage(`${message.author}: ${message.text}`, 'user');
             addMessage(result.reply, 'sakura');
             resumeMic = continuousMic.enabled;
             if (resumeMic) continuousMic.stop();
-            if(result.avatar_motion==='stop')viewer?.dance?.stop();
+            if(result.avatar_motion==='stop'){viewer?.dance?.stop();viewer?.companionRoom?.stop();}
             else if(['groove','step','wave','twist','disco','march'].includes(result.avatar_motion))viewer?.dance?.start(result.avatar_motion);
             if(result.performance_audio){
                 viewer?.setEmotionFromText(result.reply);
@@ -2820,7 +2896,11 @@ async function pollVtuberChat() {
 }
 
 async function reactToScreen(initialCheck = false) {
+    if(companionSleeping)return;
     if (trackingOnly || viewer?._displayLoading || viewer?._modelSwitchQueue) return;
+    // Human input has priority even in multiplayer. Transcription may take
+    // longer than the recent-mic grace period on a cold CPU Whisper model.
+    if (speechRecognitionBusy > 0 || Date.now() - lastMicActivity < 6000) return;
     const gameWatch=gameActive&&gameReady&&!initialCheck&&currentSettings.game_play_mode==='multiplayer';
     if (!gameWatch&&!initialCheck && Date.now() - lastDirectReplyAt < 30000) return;
     if(gameWatch&&Date.now()-lastGameWatch<10000)return;
@@ -2836,6 +2916,7 @@ async function reactToScreen(initialCheck = false) {
     let expressionStarted=false;
     try {
         const screen_image = await screenShare.snapshot();
+        if (speechRecognitionBusy > 0 || chatBusy || Date.now() - lastMicActivity < 6000) return;
         const response = await fetch('/api/chat', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({text: 'Screen companion reaction', screen_image, screen_frames: screenShare.recentFrames(), screen_reaction: true, screen_check: initialCheck, game_watch:gameWatch, ai_vtuber: vtuberScreens, defer_audio: true}),
@@ -2847,10 +2928,11 @@ async function reactToScreen(initialCheck = false) {
             if(!['laugh','laugh_bend'].includes(data.game_result))viewer?.dance?.start(data.game_result);
             viewer?.reactionExpressions?.begin(data.reply,['victory','laugh','laugh_bend'].includes(data.game_result)?'happy':'concerned');
         }
-        if (!data.reply || data.reply.trim() === '[QUIET]' || generation !== chatReplyGeneration ||
+        if (!data.reply || /^\s*\[QUIET\]/i.test(data.reply) || generation !== chatReplyGeneration ||
             (!initialCheck && Date.now() - lastDirectReplyAt < 30000) ||
-            (!reactionsEnabled && !vtuberScreens && !initialCheck) || !screenShare.enabled || chatBusy || (!initialCheck && Date.now() - lastMicActivity < 6000)) return;
+            (!reactionsEnabled && !vtuberScreens && !initialCheck) || !screenShare.enabled || chatBusy || speechRecognitionBusy > 0 || Date.now() - lastMicActivity < 6000) return;
         const normalizedReaction = data.reply.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+        if(window.sakuraProactive&&!window.sakuraProactive.consider({reply:data.reply,event:data.game_result,manual:initialCheck,busy:chatBusy||speechRecognitionBusy>0}))return;
         if (!initialCheck && normalizedReaction === lastReactionText) return;
         lastReactionText = normalizedReaction;
         if(!gameWatch&&!initialCheck&&!trackingOnly&&(!viewer?.vtuberTrackingMode||!!viewer?.companionTracking)&&
@@ -2892,8 +2974,9 @@ async function reactToScreen(initialCheck = false) {
 }
 
 async function reactToCamera() {
+    if(companionSleeping)return;
     const ready=()=>companionCamera.enabled&&document.getElementById('companion-camera-mode')?.value==='objects'&&!trackingOnly&&!vtuberEnabled&&!aiVtuberStarting&&
-        document.getElementById('companion-camera-comments').checked&&!chatBusy&&!isRecording&&
+        document.getElementById('companion-camera-comments').checked&&!chatBusy&&!isRecording&&speechRecognitionBusy===0&&
         !lipSync?.isPlaying&&Date.now()-lastDirectReplyAt>=60000&&Date.now()-lastMicActivity>=10000;
     if(!ready()||reactionBusy)return;
     const camera_image=companionCamera.snapshot();if(!camera_image)return;
@@ -2906,7 +2989,7 @@ async function reactToCamera() {
         const response=await fetch('/api/chat',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({text:'Optional camera comment',camera_image,camera_reaction:true,defer_audio:true})});
         const data=await response.json();
         if(!response.ok)throw new Error(data.error||'Camera observation unavailable.');
-        if(!active()||!data.reply||data.reply.trim()==='[QUIET]')return;
+        if(!active()||!data.reply||/^\s*\[QUIET\]/i.test(data.reply))return;
         addMessage(data.reply,'sakura');lastDirectReplyAt=Date.now();
         viewer?.setEmotionFromText(data.reply);
         if(viewer?.areAiExpressionsAutomatic?.())cameraExpressionStarted=!!viewer.reactionExpressions?.begin(data.reply,data.emotion);
@@ -2939,25 +3022,28 @@ async function handleClearChat() {
 
 // ─────────────────────────── Voice / STT ───────────────────────────
 async function handleToggleMic() {
+    if(document.body.classList.contains('agent-mode'))return;
     if (vtuberEnabled || aiVtuberStarting) { listeningStatus.textContent = "AI VTuber uses computer audio and chat; microphone is excluded."; return; }
     if (!isRecording) {
+        if(lipSync?.isPlaying)document.getElementById('interrupt-btn').click();
         await nativeWake.pause(true);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {...(selectedMicId ? {deviceId:{exact:selectedMicId}} : {}),autoGainControl:false},
             });
+            if(document.body.classList.contains('agent-mode')){stream.getTracks().forEach(t=>t.stop());return;}
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
             mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
             mediaRecorder.onstop = async () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 stream.getTracks().forEach(t => t.stop());
-                try{await sendAudioForSTT(audioBlob);}finally{await nativeWake.pause(false);}
+                try{await sendAudioForSTT(audioBlob);}finally{await nativeWake.pause(companionSleeping);}
             };
             mediaRecorder.start();
             isRecording = true;
             micBtn.classList.add('recording');
-        } catch (err) { await nativeWake.pause(false);alert('Could not access microphone: ' + err.message); }
+        } catch (err) { await nativeWake.pause(companionSleeping);alert('Could not access microphone: ' + err.message); }
     } else {
         if (mediaRecorder?.state !== 'inactive') mediaRecorder.stop();
         isRecording = false;
@@ -2975,16 +3061,19 @@ function extractWakeCommand(raw, phrase) {
 }
 
 async function sendAudioForSTT(blob, options = {}) {
+    if(document.body.classList.contains('agent-mode'))return;
     if (trackingOnly || vtuberEnabled || aiVtuberStarting) return;
     const continuous = options.continuous === true;
     const captureGeneration = continuousMic.generation;
     if (continuous && !continuousMic.enabled) return;
+    speechRecognitionBusy++;
     showTypingIndicator();
     const formData = new FormData();
     formData.append('audio', blob, 'speech.webm');
     try {
-        const res  = await fetch('/api/stt', { method: 'POST', body: formData });
+        const res  = await fetch('/api/stt', { method: 'POST', body: formData, signal:AbortSignal.timeout(90000) });
         const data = await res.json();
+        if(document.body.classList.contains('agent-mode'))return;
         if (!res.ok) throw new Error(data.error || `Speech recognition failed (${res.status})`);
         removeTypingIndicator();
         if (vtuberEnabled || aiVtuberStarting) return;
@@ -2992,6 +3081,7 @@ async function sendAudioForSTT(blob, options = {}) {
         if (continuous && (!continuousMic.enabled || continuousMic.generation !== captureGeneration)) return;
         if (data.text?.trim()) {
             const raw = data.text.trim();
+            if(companionSleeping){const wake=wakeCommand(raw,currentSettings.wake_word||'hey sakura');if(!wake.wake)return;wakeCompanion();if(wake.command){chatInput.value=wake.command;await handleSendMessage();}return;}
             if(isSpeechInterrupt(raw,currentSettings.wake_word||'hey sakura')&&(chatBusy||lipSync?.isPlaying)){
                 document.getElementById('interrupt-btn').click();
                 interruptFollowupUntil=Date.now()+15000;
@@ -3006,8 +3096,8 @@ async function sendAudioForSTT(blob, options = {}) {
             speechInputUsed=!continuous;
             // Speaker playback can reach the microphone despite browser echo cancellation.
             // Automatic listening needs explicit address while media audio is active.
-            const mediaWake = continuous && (gameActive ? currentSettings.game_play_mode==='multiplayer' : screenAudio.playbackActive());
-            if ((currentSettings.wake_word_enabled && !continuousMic.userRequested) || mediaWake) {
+            const mediaWake = continuous && !continuousMic.userRequested && (gameActive ? currentSettings.game_play_mode==='multiplayer' : screenAudio.playbackActive());
+            if ((continuous && currentSettings.wake_word_enabled && !continuousMic.userRequested) || mediaWake) {
                 const query = extractWakeCommand(raw, currentSettings.wake_word || 'hey sakura');
                 if (query !== null) {
                     if (!query) {
@@ -3034,19 +3124,54 @@ async function sendAudioForSTT(blob, options = {}) {
             }
         } else if (!continuous) {
             addMessage('*(I could not hear a clear phrase. Check the selected microphone, then hold the mic button while speaking.)*', 'sakura');
+        } else {
+            listeningStatus.textContent='No clear speech recognized. Check the selected microphone and try again.';
         }
     } catch (err) {
         removeTypingIndicator();
+        listeningStatus.textContent=`Speech recognition failed: ${err.message}. Click the microphone to retry.`;
         addMessage(`⚠️ Speech recognition failed: ${err.message}`, 'sakura');
         console.error('STT failed:', err);
+    } finally {
+        removeTypingIndicator();
+        speechRecognitionBusy = Math.max(0, speechRecognitionBusy - 1);
     }
 }
 
 // ─────────────────────────── UI Helpers ───────────────────────────
+const SERVER_URL = /https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?(?:\/[^\s<>"'`)\]]{0,200})?/g;
+// An address a task actually served on this machine is the useful part of the reply, so it is
+// shown as a highlighted link. Only loopback hosts are linked: an address that came out of a
+// model reply or a fetched page is not trusted enough to stand out as actionable.
+function appendWithServerLinks(target, text) {
+    const source = String(text ?? '');
+    let last = 0, match;
+    SERVER_URL.lastIndex = 0;
+    while ((match = SERVER_URL.exec(source))) {
+        let url = match[0], tail = '';
+        while (/[.,;:!?]$/.test(url)) { tail = url.slice(-1) + tail; url = url.slice(0, -1); }
+        if (match.index > last) target.append(document.createTextNode(source.slice(last, match.index)));
+        if (url) {
+            const link = document.createElement('a');
+            link.className = 'server-link'; link.href = url; link.textContent = url;
+            link.target = '_blank'; link.rel = 'noopener noreferrer';
+            target.append(link);
+        }
+        if (tail) target.append(document.createTextNode(tail));
+        last = match.index + match[0].length;
+    }
+    if (last < source.length) target.append(document.createTextNode(source.slice(last)));
+    if (!source) target.textContent = '';
+}
+
 function addMessage(text, sender, evidence = null) {
+    if(sender==='sakura'&&evidence&&typeof text==='string'&&text.trim()!=='[QUIET]'){
+        window.sakuraLatestReply=text;
+        window.dispatchEvent(new CustomEvent('sakura-companion-reply',{detail:{text}}));
+    }
     const msg = document.createElement('div');
     msg.className = `message ${sender}`;
-    msg.textContent = text;
+    appendWithServerLinks(msg, text);
     // Only backend replies carry provenance. Startup notices, model loading
     // progress and UI errors are not factual AI answers and must not display
     // a misleading "Unknown" verification badge.
@@ -3318,6 +3443,12 @@ function setupAvatarTracking() {
     avatarTracking.setHandTracking(handsEnabled);
     window.addEventListener('sakura-physics-status-changed',()=>updatePhysicsUI(viewer?.physics?.mode));
     const reader = new ChatReader({
+        onSentiment:text=>{
+            if(!text){viewer?.reactionExpressions?.stop();return;}
+            if(!document.getElementById('reader-sentiment')?.checked||viewer?.manualExpressions?.size)return;
+            const mood=/\b(?:haha|lol|love|awesome|great|happy|congrats)\b/i.test(text)?'happy':/\b(?:sad|sorry|lost|unhappy|disappointed)\b/i.test(text)?'concerned':null;
+            if(mood)viewer?.reactionExpressions?.begin(text,mood);
+        },
         onEnabled: enabled => { if (viewer) viewer.chatReaderActive = enabled; },
         status: message => { status.textContent = message; },
         stopAudio: () => lipSync?.stop(),
@@ -3371,12 +3502,13 @@ function setupAvatarTracking() {
             const pauseData = await paused.json();
             if (!paused.ok) throw new Error(pauseData.error);
             const response = await fetch('/api/chat-reader/connect', {method:'POST', headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({link:document.getElementById('reader-chat-link').value.trim()})});
+                body:JSON.stringify({service:document.getElementById('reader-service')?.value||'youtube',twitch_link:document.getElementById('reader-twitch-link')?.value.trim()||'',link:document.getElementById('reader-chat-link').value.trim(),twitch_username:document.getElementById('reader-twitch-username')?.value.trim()||'',twitch_token:document.getElementById('reader-twitch-token')?.value||''})});
+            if(document.getElementById('reader-twitch-token'))document.getElementById('reader-twitch-token').value='';
             const data = await response.json();
             if (!response.ok) throw new Error(data.error);
-            reader.start(); status.textContent='Chat Reader on · camera off · waiting for YouTube chat';
+            reader.start(); status.textContent='Chat Reader on · camera off · waiting for live chat';
         } catch(error) { status.textContent=error.message; }
-        finally { switching=false; }
+        finally { if(document.getElementById('reader-twitch-token'))document.getElementById('reader-twitch-token').value='';switching=false; }
     });
     document.getElementById('chat-reader-stop').addEventListener('click', async () => {
         await stopReader(); status.textContent='Chat Reader off · AI remains paused';
@@ -3711,6 +3843,24 @@ function setupAvatarTracking() {
     });
     mode.addEventListener('click', async () => {
         modal.classList.remove('hidden');
+        if(!trackingOnly&&!switching){
+            switching=true;mode.disabled=true;
+            resumeMic=continuousMic.enabled;
+            ++chatReplyGeneration;replyController?.abort();continuousMic.stop();lipSync?.stop();
+            vtuberEnabled=false;++vtuberGeneration;vtuberQueue=[];reactionsEnabled=false;autoGameEnabled=false;
+            gameActive=false;gameReady=false;
+            document.getElementById('auto-game-btn').textContent='🎮 Auto game off';document.getElementById('auto-game-btn').setAttribute('aria-pressed','false');
+            screenReactBtn.textContent='💬 Reactions off';screenReactBtn.setAttribute('aria-pressed','false');
+            companionCamera.stop();if(screenShare.enabled)screenShare.stop();
+            try{
+                await stopReader();await stopVtuberVoiceChanger();
+                const response=await fetch('/api/tracking/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:true})});
+                const data=await response.json();if(response.ok||data.tracking_only===true){setUI(true);viewer.setVtuberTrackingMode(true);}
+                if(!response.ok)throw Error(data.error||'Could not switch to VTuber mode.');
+                status.textContent='VTuber mode · choose camera tracking, Chat Reader or voice changer';
+            }catch(error){status.textContent=error.message;}
+            finally{switching=false;mode.disabled=false;}
+        }
         try { await refreshCameras(); } catch (error) { status.textContent = error.message; }
     });
     document.getElementById('chat-reader-mode-btn').addEventListener('click',()=> {
@@ -3787,11 +3937,9 @@ function setupAvatarTracking() {
     document.getElementById('tracking-restore-ai').addEventListener('click',async()=> {
         if(switching) return;
         switching=true; start.disabled=true; stop.disabled=true;
-        await stopVtuberVoiceChanger();
-        avatarTracking.stop();
-        await stopReader();
-        status.textContent='Restoring assistant mode…';
         try {
+            await stopVtuberVoiceChanger();avatarTracking.stop();await stopReader();
+            status.textContent='Restoring assistant mode…';
             const response=await fetch('/api/tracking/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:false})});
             const data=await response.json();
             if(!response.ok) throw new Error(data.error || 'Could not restore AI.');
@@ -3809,7 +3957,7 @@ function setupAvatarTracking() {
             status.textContent='AI paused · choose your camera and start face, shoulder and arm tracking';
             if(data.startup_mode === 'vtuber') {
                 viewer.setVtuberTrackingMode(true);
-                document.getElementById('tracking-restore-ai').hidden = true;
+                document.getElementById('tracking-restore-ai').hidden = window.SAKURA_EDITION==='vtuber';
                 modal.classList.remove('hidden');
                 refreshCameras().catch(error=>{status.textContent=error.message;});
             }

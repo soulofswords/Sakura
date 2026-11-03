@@ -93,6 +93,20 @@ class AgentHistory:
                             (match,workspace,workspace)).fetchall()
         return {'results':[dict(zip(('id','goal','status','workspace','created_at','snippet'),row)) for row in rows]}
 
+    def recent(self,limit=5):
+        """The newest archived runs, so a spoken "what was I working on" has records to read.
+
+        Returns nothing when no archive exists yet rather than creating one: the companion reply
+        path must not leave a database behind for a user who has never run a task.
+        """
+        count=max(1,min(int(limit),20))
+        if not self.path.exists():return []
+        with self.lock,closing(self._connect()) as db:
+            rows=db.execute('SELECT id,goal,status,workspace,created FROM sessions '
+                            'ORDER BY created DESC,id LIMIT ?',(count,)).fetchall()
+        return [{'id':row[0],'goal':row[1],'status':row[2],'workspace':row[3],'created_at':row[4]}
+                for row in rows]
+
     def read(self,identifier,workspace=None):
         with self.lock,closing(self._connect()) as db:
             row=db.execute('SELECT record FROM sessions WHERE id=? AND (? IS NULL OR workspace=?)',(identifier,workspace,workspace)).fetchone()

@@ -6,7 +6,7 @@ import {installLive2DControls} from './live2d-controls.js?v=drag-cursor150';
 let runtime;
 function script(src){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(Error('Live2D runtime could not load: '+src));document.head.append(s);});}
 async function ensureRuntime(){
-    runtime ||= (async()=>{await script('/static/vendor/live2d/live2dcubismcore.min.js');await script('/static/vendor/live2d/pixi.min.js');await script('/static/vendor/live2d/cubism4.min.js');})();
+    runtime ||= (async()=>{await script('/static/vendor/live2d/live2dcubismcore.min.js');await script('/static/vendor/live2d/pixi.min.js');await script('/static/vendor/live2d/unsafe-eval.min.js');await script('/static/vendor/live2d/cubism4.min.js');})();
     return runtime;
 }
 export default class Live2DViewer {

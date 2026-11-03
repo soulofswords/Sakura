@@ -6,6 +6,9 @@ PyAudioWPatch==0.2.12.9; sys_platform == "win32"
 soundfile
 numpy
 requests
+certifi>=2026.10.18
+filelock>=4.2.1
+opentelemetry-api>=1.45.1,<1.46
 psutil==7.2.2
 kokoro-onnx==0.6.1
 pygame
@@ -19,8 +22,8 @@ python-multipart
 pywebview
 PySide6==6.8.3
 qtpy
-Pillow
-pypdf>=6.0,<7
+Pillow>=13,<14
+pypdf>=6.21.4,<7
 -r requirements-agent.txt
 pytchat==0.5.5
 
@@ -31,3 +34,7 @@ pytchat==0.5.5
 # Optional Windows-only frame sharing (inactive until user enables it)
 SpoutGL==0.1.1; sys_platform == "win32"
 pyvirtualcam==0.15.0; sys_platform == "win32"
+
+# Local OBS WebSocket deck connection
+websockets>=14,<18
+tzdata>=2026.6

@@ -36,7 +36,7 @@
     window.addEventListener('message',event=>{if(event.origin==='https://models.sakura.invalid'&&event.data?.type==='avatar-ready'&&[...document.querySelectorAll('iframe')].some(frame=>frame.contentWindow===event.source))event.source.postMessage({type:'sakura-appearance',mode},event.origin);});
     document.addEventListener('DOMContentLoaded',()=>{
         if(!document.getElementById('app-modes'))return; // Avatar iframe has no controls.
-        const home=picker();home.id='mobile-appearance-home';document.getElementById('app-modes').before(home);
+        const home=picker();home.id='mobile-appearance-home';document.getElementById('app-modes').after(home);
         document.getElementById('local-stage-panel')?.prepend(picker());
         apply();
     },{once:true});

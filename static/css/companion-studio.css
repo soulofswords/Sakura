@@ -126,7 +126,7 @@ body.companion-ui-active .studio-docked .settings-tabs{background:#fff;border-bo
 body.companion-ui-active .studio-docked .tab-content.active{overflow-y:auto;min-height:0;flex:1;scrollbar-width:thin;scrollbar-color:#b9d2e4 transparent}
 body.companion-ui-active .studio-docked #tracking-hands-enabled{background:#e9f4fb!important;color:#147caf!important;border:1px solid #d3e5f1!important}
 body.companion-ui-active .studio-docked #tracking-hands-enabled[aria-pressed="true"]{background:#168fd5!important;color:#fff!important}
-body.companion-ui-active .studio-docked .tab-btn[data-tab="assistant"],body.companion-ui-active .studio-docked #system-tools{display:none!important}
+body.companion-ui-active .studio-docked #system-tools{display:none!important}
 body.companion-ui-active .studio-docked button{font-size:13px}
 body.companion-ui-active .studio-docked .setting-group label,body.companion-ui-active .studio-docked label{font-size:13px}
 /* Keep the capture background picker compact instead of inheriting full-width fields. */
@@ -207,10 +207,10 @@ body.companion-ui-active:not(.desktop-companion) #companion-statusbar button{fle
 body.companion-ui-active.companion-panel-left :is(#companion-panel,.studio-docked){left:90px!important;right:auto!important}
 @media(max-width:650px){body.companion-ui-active.companion-panel-left :is(#companion-panel,.studio-docked){left:74px!important;right:auto!important}}
 /* The model editor uses the available height rather than stopping above chat. */
-body.companion-ui-active #expression-modal .modal-card{position:relative;padding-bottom:20px}
+body.companion-ui-active :is(#expression-modal,#settings-modal) .modal-card{position:relative;padding-bottom:24px}
 .companion-editor-resize{display:none}
-body.companion-ui-active #expression-modal .companion-editor-resize{display:grid!important;place-items:center;position:absolute;bottom:0;left:0;width:32px;height:22px;padding:0!important;border:0!important;background:var(--ui-button,#e9f4fb)!important;color:var(--ui-accent,#147caf)!important;cursor:nesw-resize;touch-action:none;z-index:5;border-radius:0 8px 0 10px!important}
-body.companion-ui-active.companion-panel-left #expression-modal .companion-editor-resize{left:auto;right:0;cursor:nwse-resize;border-radius:8px 0 10px 0!important}
+body.companion-ui-active :is(#expression-modal,#settings-modal) .companion-editor-resize{display:grid!important;place-items:center;position:absolute;bottom:0;left:0;width:32px;height:22px;padding:0!important;border:0!important;background:var(--ui-button,#e9f4fb)!important;color:var(--ui-accent,#147caf)!important;cursor:nesw-resize;touch-action:none;z-index:5;border-radius:0 8px 0 10px!important}
+body.companion-ui-active.companion-panel-left :is(#expression-modal,#settings-modal) .companion-editor-resize{left:auto;right:0;cursor:nwse-resize;border-radius:8px 0 10px 0!important}
 .companion-part-edit-mode{display:none!important}
 body.companion-ui-active #expression-modal .companion-part-edit-mode{display:flex!important;flex-direction:column;gap:8px;margin:12px 0;font-weight:600}
 body.companion-ui-active #model-part-edit-mode{width:100%}
@@ -227,6 +227,8 @@ body.companion-ui-active #companion-statusbar{left:90px;right:20px;bottom:14px}
 }
 
 /* Camera & tracking pane: two exclusive choices that drive the existing control. */
+body.companion-ui-active.desktop-companion #companion-statusbar{bottom:82px;flex-wrap:wrap;gap:6px}
+body.companion-ui-active.desktop-companion #companion-status-text{flex:1 0 100%;box-sizing:border-box;max-width:100%;max-height:110px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:auto;color:var(--ui-ink)!important}
 .studio-camera-choices{display:grid;gap:8px;margin:0 0 12px}
 .studio-camera-choices button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:10px 12px!important}
 .studio-camera-choices button strong{font-size:13px;line-height:1.3}
@@ -244,3 +246,5 @@ body.companion-ui-active #companion-statusbar{left:90px;right:20px;bottom:14px}
 [data-companion-style][aria-checked="true"] .conversation-switch-track{background:#087fab}
 [data-companion-style][aria-checked="true"] .conversation-switch-track::after{transform:translateX(14px)}
 [data-style-state]{min-width:22px;font-weight:700}
+
+#companion-panel [data-companion-spice][aria-pressed="true"]{outline:2px solid var(--ui-accent,#147caf);outline-offset:1px}

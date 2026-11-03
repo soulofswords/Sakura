@@ -6,13 +6,26 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter,Depends,HTTPException,Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from starlette.concurrency import run_in_threadpool
 from config import BASE_DIR
 from agent_runtime import runtime
 from agent_linkedin import linkedin
 from agent_calendar import google_calendar
 from native_consent import confirm as native_confirm
+
+
+def skill_selection(payload):
+    """Skill names for a plan request. A plain string still works; an empty list means choose automatically."""
+    value=payload.get('skill',[])
+    if isinstance(value,str):value=[value]
+    if not isinstance(value,list) or any(not isinstance(name,str) or len(name)>80 for name in value):
+        raise HTTPException(400,'Attach skills as a list of installed skill names.')
+    names=[]
+    for name in value:
+        name=name.strip()
+        if name and name not in names:names.append(name)
+    return names
 
 
 def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_transcriber=None):
@@ -37,10 +50,15 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     telegram.handler=telegram_reply;telegram.transcriber=voice_transcriber
     from agent_messaging import MessagingGateways
     gateways=MessagingGateways(runtime.store_path.parent,telegram_reply)
+    from memory_workbench import MemoryWorkbench
+    def companion_memory_store():
+        if not enabled():return None
+        return getattr(model_getter('current'),'memory_store',None)
+    workbench=MemoryWorkbench(runtime.store_path.parent,runtime.audit,companion_memory_store)
     from contextlib import asynccontextmanager
     @asynccontextmanager
     async def automation_lifespan(app):
-        automations.start();owner_library.open()
+        automations.start();owner_library.open();workbench.start()
         for starter in (telegram.start,gateways.start):
             try:
                 if enabled():starter()
@@ -50,7 +68,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
         finally:
             # One attempt each, in order: a hung automation thread must not leave the messaging
             # pollers running or a browser worker holding a live page after the window closes.
-            for stopper in (automations.stop,owner_library.close,telegram.stop,gateways.stop,runtime.browser.close):
+            for stopper in (workbench.stop,automations.stop,owner_library.close,telegram.stop,gateways.stop,runtime.browser.close):
                 try:stopper()
                 except Exception:pass
     router.lifespan_context=automation_lifespan
@@ -88,9 +106,76 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
             else:message='The operation failed. Check the connection and retry; no automatic retry was sent.'
             raise HTTPException(400,message) from None
     guard=[Depends(authorize)]
+
+    @router.get('/api/agent/local-ai/devices',dependencies=guard)
+    async def local_ai_devices(backend:str='vulkan'):
+        return await call(local_ai.devices,backend)
+
+    @router.get('/api/agent/rvc-devices',dependencies=guard)
+    async def rvc_devices():
+        import gpu_routing
+        result=await call(gpu_routing.devices);result['selected']=gpu_routing.selected(BASE_DIR);return result
+
+    @router.post('/api/agent/rvc-devices',dependencies=guard)
+    async def rvc_device_save(payload:dict):
+        import gpu_routing
+        return await call(gpu_routing.configure,BASE_DIR,payload.get('device'))
+
+    @router.get('/api/agent/browser/{identifier}/preview', dependencies=guard)
+    async def browser_preview(identifier:str):
+        image = await call(runtime.browser.preview, identifier)
+        return Response(image, media_type='image/png', headers={
+            'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
+
     async def consent(title,details):
         if not await call(native_confirm,title,details):
             raise HTTPException(403,'The native approval was rejected. Nothing was executed.')
+
+    from agent_growth import install as install_growth
+    choose_model,choose_planner=install_growth(router,guard,call,consent,runtime,model_getter,local_ai,provider_status)
+
+    automations.planner_getter=choose_planner
+
+    @router.get('/api/agent/audit',dependencies=guard)
+    async def audit_log():return {'calls':await call(runtime.audit.recent,200)}
+
+    @router.get('/api/agent/memory-workbench',dependencies=guard)
+    async def memory_workbench_status():return await call(workbench.status)
+
+    @router.post('/api/agent/memory-workbench/configure',dependencies=guard)
+    async def memory_workbench_configure(payload:dict):
+        value=payload.get('enabled')
+        if value is True:await consent('Enable deterministic hourly memory maintenance',{'policy':'Retire only unused low-confidence non-user records older than 180 days. No raw rows are deleted. Rebuild entity hints and a labelled activity diary. Runs while Sakura is open.'})
+        return await call(workbench.configure,value)
+
+    @router.post('/api/agent/memory-workbench/consolidate',dependencies=guard)
+    async def memory_consolidate(payload:dict):
+        apply=payload.get('apply') is True
+        if apply:
+            preview=await call(workbench.maintain,False)
+            await consent('Apply deterministic memory consolidation',preview)
+        return await call(workbench.maintain,apply)
+
+    @router.get('/api/agent/memory-workbench/graph',dependencies=guard)
+    async def memory_graph(query:str=''):return {'links':await call(workbench.graph,query)}
+
+    @router.post('/api/agent/memory-workbench/graph',dependencies=guard)
+    async def memory_graph_rebuild():return await call(workbench.rebuild_graph)
+
+    @router.post('/api/agent/memory-workbench/journal',dependencies=guard)
+    async def memory_journal(payload:dict):return await call(workbench.journal,payload.get('day'))
+
+    @router.get('/api/agent/extension-store',dependencies=guard)
+    async def extension_store():
+        from extension_catalog import cards
+        return {'extensions':cards()}
+
+    @router.post('/api/agent/extension-store/add',dependencies=guard)
+    async def extension_add(payload:dict):
+        from extension_catalog import configuration
+        config=await call(configuration,payload.get('id'),payload.get('workspace',''))
+        await consent('Add extension configuration',{'configuration':config,'notice':'No package is started now. Discovery and tool calls still follow the Agent approval flow. Third-party packages may access files/network with your permissions.'})
+        return await call(runtime.connections.save,config)
 
     @router.get('/api/agent/approval-policy',dependencies=guard)
     async def approval_policy():return runtime.approval_policy()
@@ -141,7 +226,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
         native=await call(local_ai.status)
         providers=[{'id':'sakura-native','label':'Sakura Local AI · '+(native['loaded'] or 'load a model'),'ready':bool(native['loaded'])},*providers]
         return {'connections':runtime.connections.public(),'tools':runtime.catalog(),
-                'providers':providers,'automations':automations.list(),'library_sync':owner_library.status(),
+                'providers':[{'id':'auto','label':'Auto · measured model routing','ready':True},*providers],'automations':automations.list(),'library_sync':owner_library.status(),
                 'skills':describe(await call(runtime.skills.list)),'learning':await call(runtime.learning.status),
                 'runs':await call(runtime.states),'command_permissions':runtime.permissions.list(),
                 'linkedin':await call(linkedin.status),'calendar':await call(google_calendar.status)}
@@ -262,7 +347,8 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
         current=await call(model_getter)
         if getattr(current,'conversation_mode',None)=='friend':
             from conversation_modes import teacher_prompt
-            raise HTTPException(409,teacher_prompt())
+            # This route only exists in the Agent panel, so the refusal has to name its goal box.
+            raise HTTPException(409,teacher_prompt(agent=True))
         return await call(runtime.new_run,payload.get('goal'),payload.get('workspace'),payload.get('auto_continue',True))
 
     @router.delete('/api/agent/tasks',dependencies=guard)
@@ -280,32 +366,62 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     @router.delete('/api/agent/history/{identifier}',dependencies=guard)
     async def history_forget(identifier:str):return await call(runtime.history.forget,identifier)
 
+    @router.post('/api/agent/tasks/{identifier}/message',dependencies=guard)
+    async def task_message(identifier:str,payload:dict):
+        """Remember one Agent-mode exchange on its task, so reopening the task shows the thread again.
+
+        Nothing here generates the reply: the panel posts an exchange that already went through the
+        normal chat path, and this only stores what was said.
+        """
+        text=payload.get('text');reply=payload.get('reply')
+        if not isinstance(text,str) or not text.strip():raise HTTPException(400,'Send the message you wrote.')
+        if not isinstance(reply,str) or not reply.strip():raise HTTPException(400,'Send the reply to remember.')
+        if await call(runtime.record_message,identifier,'user',text) is None:
+            raise HTTPException(404,'That task is no longer open, so this exchange has nowhere to live.')
+        return await call(runtime.record_message,identifier,'sakura',reply)
+
+    @router.post('/api/agent/tasks/{identifier}/rename',dependencies=guard)
+    async def task_rename(identifier:str,payload:dict):
+        title=payload.get('title')
+        if not isinstance(title,str) or not title.strip():raise HTTPException(400,'Type the name you want this task to show.')
+        if await call(runtime.rename,identifier,title) is None:
+            raise HTTPException(404,'That task is no longer open.')
+        return await call(runtime.state,identifier)
+
+    @router.post('/api/agent/tasks/{identifier}/pin',dependencies=guard)
+    async def task_pin(identifier:str,payload:dict):
+        if await call(runtime.set_pinned,identifier,bool(payload.get('pinned'))) is None:
+            raise HTTPException(404,'That task is no longer open.')
+        return await call(runtime.state,identifier)
+
+    @router.delete('/api/agent/tasks/{identifier}',dependencies=guard)
+    async def task_delete(identifier:str):
+        if not await call(runtime.delete_run,identifier):raise HTTPException(404,'That task is no longer open.')
+        return {'ok':True,'id':identifier}
+
     @router.post('/api/agent/tasks/{identifier}/plan',dependencies=guard)
     async def plan(identifier:str,payload:dict):
         choice=payload.get('provider','current')
-        if choice not in ('current','ollama','gemini','sakura-native') and not (isinstance(choice,str) and choice.startswith('ollama:')):
-            raise HTTPException(400,'Choose an installed local model or Google Gemini.')
-        try:model=local_ai if choice=='sakura-native' else await call(model_getter,choice)
+        try:model=await choose_model(choice)
         except ValueError as error:raise HTTPException(400,str(error)) from None
-        return await call(runtime.plan,identifier,model,payload.get('skill',''))
+        return await call(runtime.plan,identifier,model,skill_selection(payload))
 
     @router.post('/api/agent/tasks/{identifier}/delegate',dependencies=guard)
     async def delegate(identifier:str,payload:dict):
         choice=payload.get('provider','current')
-        if choice not in ('current','ollama','gemini','sakura-native') and not (isinstance(choice,str) and choice.startswith('ollama:')):
-            raise HTTPException(400,'Choose an installed local model or Google Gemini.')
-        model=local_ai if choice=='sakura-native' else await call(model_getter,choice)
+        try:model=await choose_model(choice)
+        except ValueError as error:raise HTTPException(400,str(error)) from None
         return await call(runtime.delegate_proposal,identifier,model,payload.get('goals'))
 
     @router.post('/api/agent/automations',dependencies=guard)
     async def automation_create(payload:dict):
-        if set(payload)-{'run_id','name','minutes','approved','mode','planner','event'}:raise HTTPException(400,'Unexpected automation fields.')
+        if set(payload)-{'run_id','name','minutes','approved','mode','planner','event','schedule'}:raise HTTPException(400,'Unexpected automation fields.')
         event=payload.get('event')
         if event is not None and (not isinstance(event,dict) or set(event)-{'path','min_seconds'}):raise HTTPException(400,'Event trigger accepts only path and min_seconds.')
         if payload.get('approved') is True:
             await consent('Enable automatic workflow',{'request':payload,'task':await call(runtime.state,payload.get('run_id'))})
         return await call(automations.create,payload.get('run_id'),payload.get('name'),payload.get('minutes'),payload.get('approved',False),
-                          payload.get('mode','steps'),payload.get('planner','current'),event)
+                          payload.get('mode','steps'),payload.get('planner','current'),event,payload.get('schedule'))
 
     @router.get('/api/agent/library-sync',dependencies=guard)
     async def library_sync_state():return await call(owner_library.status)
@@ -361,7 +477,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     async def local_ai_import_detected(payload:dict):return await call(local_ai.import_detected,payload.get('path'))
 
     @router.post('/api/agent/local-ai/load',dependencies=guard)
-    async def local_ai_load(payload:dict):return await call(local_ai.load,payload.get('id'),payload.get('projector',''),payload.get('context',4096),payload.get('gpu_layers',0),payload.get('backend','auto'))
+    async def local_ai_load(payload:dict):return await call(local_ai.load,payload.get('id'),payload.get('projector',''),payload.get('context',4096),payload.get('gpu_layers',0),payload.get('backend','auto'),payload.get('devices',[]))
 
     @router.post('/api/agent/local-ai/unload',dependencies=guard)
     async def local_ai_unload():
@@ -436,13 +552,11 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     @router.post('/api/agent/tasks/{identifier}/resume',dependencies=guard)
     async def resume(identifier:str,payload:dict):
         choice=payload.get('provider','current')
-        if choice not in ('current','ollama','gemini','sakura-native') and not (isinstance(choice,str) and choice.startswith('ollama:')):
-            raise HTTPException(400,'Choose an installed local model or Google Gemini.')
         extra=payload.get('additional_steps',0)
         if type(extra) is not int or not 0<=extra<=500:raise HTTPException(400,'additional_steps must be a whole number from 0 to 500.')
-        try:model=local_ai if choice=='sakura-native' else await call(model_getter,choice)
+        try:model=await choose_model(choice)
         except ValueError as error:raise HTTPException(400,str(error)) from None
-        return await call(runtime.resume,identifier,model,payload.get('skill',''),extra)
+        return await call(runtime.resume,identifier,model,skill_selection(payload),extra)
 
     @router.post('/api/agent/linkedin/configure',dependencies=guard)
     async def linkedin_config(payload:dict,request:Request):

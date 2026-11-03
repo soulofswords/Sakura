@@ -571,9 +571,12 @@ def execute_prepared(path: Path, prepared: dict) -> dict:
             prepared, path, operation, result, diff, base_sha256
         )
         _atomic_write(path, result_data, create, mode)
+        from memory_archaeology import capture_saved
+        context_save=capture_saved('document',str(path),'workspace-file-save')
         return {
             "path": str(path),
             "bytes": len(result_data),
             "sha256": _sha256(result_data),
             "diff": diff,
+            **({'archaeology_save':context_save} if context_save else {}),
         }

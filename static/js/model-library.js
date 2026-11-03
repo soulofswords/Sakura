@@ -16,6 +16,7 @@ if (!document.getElementById('cloud-character-grid-style')) {
     .cloud-library-folder{min-height:110px;min-width:0;max-width:100%;box-sizing:border-box;white-space:normal!important;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px!important}
     .cloud-library-folder>span{min-width:0;max-width:100%;white-space:normal!important;overflow-wrap:anywhere;word-break:normal;text-align:center;line-height:1.4}
     .cloud-download-progress{display:block;width:100%;height:7px;margin:8px 0;accent-color:var(--accent,#47acdf)}
+    .cloud-download-detail{font-size:.74rem;opacity:.85;margin:2px 0 0;text-align:center;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
     .cloud-download-spinner{display:inline-block;width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:middle;margin-right:6px;animation:sakura-download-spin .8s linear infinite}
     @keyframes sakura-download-spin{to{transform:rotate(360deg)}}
     @media(prefers-reduced-motion:reduce){.cloud-download-spinner{animation:none}}`;
@@ -186,18 +187,47 @@ function installCard(host,assetKind='character') {
                 downloads++;
                 button.disabled = true;button.replaceChildren();
                 const spinner=document.createElement('span');spinner.className='cloud-download-spinner';spinner.setAttribute('aria-hidden','true');
-                button.append(spinner,document.createTextNode('Downloading…'));
+                const phase=document.createTextNode('Downloading…');
+                button.append(spinner,phase);
                 row.setAttribute('aria-busy','true');
-                const progress=document.createElement('progress');progress.className='cloud-download-progress';progress.setAttribute('aria-label','Downloading '+displayName);row.append(progress);
+                const total=model.bytes||0;
+                const progress=document.createElement('progress');progress.className='cloud-download-progress';progress.max=total||1;progress.value=0;progress.setAttribute('aria-label','Downloading '+displayName);
+                const detail=document.createElement('p');detail.className='cloud-download-detail';detail.textContent=total?('0 / '+(total/1048576).toFixed(1)+' MB'):'';
+                row.append(progress,detail);
                 status('Downloading and checking ' + model.name + '. You can keep using Sakura.');
+                // Poll the worker thread's in-flight byte count and turn it into a
+                // determinate bar plus downloaded / total, speed and a live ETA.
+                let stop=false,prevBytes=0,prevTime=0,speed=0;
+                const mb=b=>(b/1048576).toFixed(1)+' MB';
+                const poll=async()=>{
+                    while(!stop){
+                        try{
+                            const p=await api('/models/'+encodeURIComponent(model.id)+'/install-progress');
+                            const cap=p.total||total, done=Math.min(p.downloaded||0,cap||p.downloaded||0);
+                            if(cap){progress.max=cap;progress.value=done;}
+                            const now=performance.now();
+                            if(prevTime&&done>=prevBytes){const dt=(now-prevTime)/1000;if(dt>0.05){const inst=(done-prevBytes)/dt;speed=speed?speed*0.6+inst*0.4:inst;}}
+                            prevBytes=done;prevTime=now;
+                            if(p.stage==='installing'){phase.textContent='Installing…';detail.textContent='Verifying and installing '+mb(cap)+'…';}
+                            else{
+                                const bits=[mb(done)+' / '+mb(cap)];
+                                if(speed>0)bits.push(mb(speed)+'/s');
+                                if(speed>65536&&cap>done){const s=(cap-done)/speed;bits.push(s<60?Math.ceil(s)+'s left':Math.ceil(s/60)+'m left');}
+                                detail.textContent=bits.join(' · ');
+                            }
+                        }catch(_){/* a transient poll failure keeps the last reading */}
+                        await new Promise(r=>setTimeout(r,400));
+                    }
+                };
+                poll();
                 try {
                     const result=await api('/models/' + encodeURIComponent(model.id) + '/install', {});
-                    model.installed = true; button.textContent = 'Installed';
+                    stop=true; model.installed = true; button.textContent = 'Installed';
                     if(assetKind==='character')document.getElementById('refresh-models')?.click();
                     else window.dispatchEvent(new CustomEvent('sakura-scenery-installed',{detail:{kind:assetKind,models:result.models||[]}}));
                     status(model.name + ' is installed. Select it from the ' + model.format.toUpperCase() + ' selector.');
-                } catch (error) { status(error.message); button.disabled = false; button.textContent = 'Retry download'; }
-                finally { downloads--;row.removeAttribute('aria-busy');progress.remove(); }
+                } catch (error) { stop=true; status(error.message); button.disabled = false; button.textContent = 'Retry download'; }
+                finally { downloads--;row.removeAttribute('aria-busy');progress.remove();detail.remove(); }
             };
             row.append(pick,label, button); results.append(row);
         }
@@ -235,6 +265,13 @@ function installCard(host,assetKind='character') {
         } catch (error) { status(error.message); }
     };
     get('refresh').onclick = refresh;
+    if(assetKind==='character')window.addEventListener('sakura-open-cloud-library',async event=>{
+        if(!host.getClientRects().length)return;
+        const button=buttons.querySelector('[data-library-format="pmx"]');
+        if(section.hidden||selectedFormat!=='pmx')await button?.onclick();
+        get('search').value=String(event.detail?.query||'').slice(0,120);selectedGame='';render();
+        section.scrollIntoView({block:'start'});
+    });
     const autoRefresh=setInterval(()=>{
         if(!section.hidden&&!get('browse').hidden&&section.getClientRects().length&&document.visibilityState==='visible'&&!downloads&&!get('refresh').disabled)refresh();
     },60000);

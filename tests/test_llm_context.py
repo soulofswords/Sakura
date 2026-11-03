@@ -92,6 +92,36 @@ class ContextTests(unittest.TestCase):
                 llm._request_gemini([{'role':'user','content':'hello'}])
             self.assertEqual(post.call_args.kwargs['json']['generationConfig']['thinkingConfig'], {'thinkingBudget': 0})
 
+    def test_planning_keeps_the_behaviour_rules_and_sheds_catalog_detail(self):
+        instruction='You must propose a real tool for the goal. '*260
+        catalog=json.dumps({'tools':[{'name':'tool'+str(i),'description':'schema detail '*22} for i in range(40)]})
+        messages=[{'role':'system','content':instruction},{'role':'user','content':catalog}]
+        planned=LLM._fit_local_messages([dict(m) for m in messages],8192,1536,planning=True)
+        self.assertEqual(planned[0]['content'],instruction)
+        self.assertLess(len(planned[1]['content']),len(catalog))
+        self.assertIn('[Earlier text shortened]',planned[1]['content'])
+        # The same tight budget on an ordinary reply sheds the system text first, so the
+        # planner exception cannot change companion behaviour.
+        ordinary=LLM._fit_local_messages([dict(m) for m in messages],8192,1536)
+        self.assertLess(len(ordinary[0]['content']),len(instruction)//4)
+
+    def test_agent_task_brief_reaches_the_chat_reply_and_cannot_order_actions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            llm = LLM(Path(folder) / 'memory.json')
+            llm.provider='ollama'; llm.context_length=32768
+            brief='Goal: clone the repo · status failed. - shell.run: failed — timed out after 45 seconds'
+            with patch.object(llm,'_request',return_value='The clone step timed out.') as call:
+                llm.chat('What happened with my task?',agent_task=brief)
+            sent=call.call_args.args[0]
+            system=' '.join(m['content'] for m in sent if m['role']=='system')
+            self.assertIn('Task the user is viewing in Agent mode',system)
+            self.assertIn('timed out after 45 seconds',system)
+            self.assertIn('Never claim a step ran',system)
+            self.assertEqual([m['role'] for m in sent][-1],'user')
+            with patch.object(llm,'_request',return_value='Hello.') as call:
+                llm.chat('Hello there.')
+            self.assertNotIn('Agent mode',json.dumps(call.call_args.args[0]))
+
     def test_reported_context_overflow_retries_once(self):
         failure = Mock(status_code=400)
         failure.json.return_value = {'error': {'code':400,

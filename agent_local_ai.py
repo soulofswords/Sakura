@@ -32,6 +32,18 @@ REPO=re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*')
 
 
 class LocalAI:
+    def devices(self,backend='vulkan'):
+        if backend not in ('vulkan','cuda'):raise ValueError('Choose Vulkan or CUDA for device discovery.')
+        binary=self.root/('runtime-cuda' if backend=='cuda' else 'runtime-vulkan')/'llama-server.exe'
+        if backend=='vulkan' and not binary.is_file():binary=self.root/'runtime/llama-server.exe'
+        if not binary.is_file():return {'devices':[],'message':'Install this inference runtime first.'}
+        result=subprocess.run([str(binary),'--list-devices'],capture_output=True,text=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        rows=[]
+        for line in (result.stdout+'\n'+result.stderr).splitlines():
+            match=re.match(r'\s*((?:Vulkan|CUDA)\d+)\s*:\s*(.{1,240})',line)
+            if match and match[1].lower().startswith(backend):rows.append({'id':match[1],'name':match[2]})
+        return {'devices':rows[:16],'message':'Select devices independently from the RVC worker. VRAM is not pooled across engines.'}
+
     def __init__(self,root=None):
         self.root=Path(root or BASE_DIR/'desktop-profile'/'agent-local-ai');self.lock=threading.RLock();self.generation_lock=threading.Lock()
         self.worker=None;self.owner=None;self.port=None;self.key='';self.loaded=None;self.selection_lock=threading.RLock()
@@ -58,7 +70,7 @@ class LocalAI:
             return {'models':list(copy.deepcopy(self.models).values()),'loaded':self.loaded if alive else None,
                     'runtime_installed':any((self.root/x/'llama-server.exe').is_file() for x in ('runtime','runtime-cuda','runtime-vulkan')),'job':copy.deepcopy(self.job),
                     'engine':getattr(self,'loaded_engine','llama.cpp'),'backend':getattr(self,'loaded_backend',None),
-                    'runtimes':{'cuda':(self.root/'runtime-cuda/llama-server.exe').is_file(),'vulkan':(self.root/'runtime-vulkan/llama-server.exe').is_file() or (self.root/'runtime/llama-server.exe').is_file(),'colibri':(self.root/'colibri-runtime/qwen38.exe').is_file()},
+                    'runtimes':{'cuda':(self.root/'runtime-cuda/llama-server.exe').is_file(),'vulkan':(self.root/'runtime-vulkan/llama-server.exe').is_file() or (self.root/'runtime/llama-server.exe').is_file(),'colibri':(self.root/'colibri-runtime/coli').is_file()},
                     'external_app_required':False}
 
     def background(self,message,function):
@@ -192,7 +204,7 @@ class LocalAI:
             self.models.pop(identifier);self.save()
         return self.status()
 
-    def load(self,identifier,projector='',context=4096,gpu_layers=0,backend='auto'):
+    def load(self,identifier,projector='',context=4096,gpu_layers=0,backend='auto',devices=None):
         if type(context) is not int or not 512<=context<=32768:raise ValueError('Context must be 512–32768 tokens.')
         if type(gpu_layers) is not int or not 0<=gpu_layers<=999:raise ValueError('GPU layers must be 0–999; use 0 for CPU.')
         with self.lock:entry=copy.deepcopy(self.models.get(identifier));vision=copy.deepcopy(self.models.get(projector)) if projector else None
@@ -210,6 +222,12 @@ class LocalAI:
             binary=self.root/('runtime-cuda' if selected=='cuda' else 'runtime-vulkan')/'llama-server.exe'
             if selected!='cuda' and not binary.is_file():binary=self.root/'runtime/llama-server.exe'
         if not binary.is_file():raise ValueError('Install the selected inference runtime first.')
+        if devices is None:devices=[]
+        if not isinstance(devices,list) or len(devices)>16 or any(not isinstance(d,str) for d in devices) or len(set(devices))!=len(devices):raise ValueError('Choose a list of distinct GPU devices.')
+        if devices:
+            if engine=='colibri' or selected=='cpu' or gpu_layers==0:raise ValueError('Explicit multi-GPU placement currently applies to GPU-offloaded llama.cpp models, not Colibri or CPU mode.')
+            available={d['id'] for d in self.devices(selected)['devices']}
+            if not set(devices)<=available:raise ValueError('A selected GPU is unavailable for this runtime. Refresh devices.')
         if projector and (not vision or not vision['projector']):raise ValueError('Choose an installed matching vision projector.')
         if engine!='colibri' and not Path(entry['path']).is_file():raise ValueError('Model file moved or was deleted. Import it again.')
         def launch():
@@ -218,6 +236,9 @@ class LocalAI:
             key='sakura_'+secrets.token_urlsafe(32)
             args=[str(binary),'-m',entry['path'],'--host','127.0.0.1','--port',str(port),'--api-key',key,'-c',str(context),'-ngl',str(0 if selected=='cpu' else gpu_layers),'--alias',identifier]
             if vision:args+=['--mmproj',vision['path']]
+            if devices:
+                args+=['--device',','.join(devices)]
+                if len(devices)>1:args+=['--split-mode','layer','--tensor-split',','.join('1' for _ in devices)]
             if vision and (gpu_layers==0 or selected=='cpu'):args+=['--no-mmproj-offload']
             env=os.environ.copy()
             if engine=='colibri':

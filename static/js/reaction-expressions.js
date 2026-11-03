@@ -27,6 +27,7 @@ export default class ReactionExpressions {
     constructor(viewer){this.viewer=viewer;this.entries=[];}
     begin(text,detectedMood=null){
         const v=this.viewer;if(aiLayersMuted(v)||!v.model||v.areAiExpressionsAutomatic?.()===false)return false;
+        const chosen=v.replyEmotion?.();if(chosen==='off')return false;if(Object.hasOwn(moods,chosen))detectedMood=chosen;
         if(v.areAiExpressionsAutomatic?.())v.clearManualExpression?.();
         this.clear();this.root=v.live2d||v.model;
         const available=availableReactionExpressions(v),mood=Object.hasOwn(moods,detectedMood)?detectedMood:reactionMood(text);

@@ -201,6 +201,16 @@ class AgentBrowser:
         if self.unavailable:raise ValueError(self.unavailable)
         return self.call('_execute',identifier,tool,args,binding)
 
+    def _preview(self, identifier):
+        # Reading the existing viewport never navigates or relaxes routing.
+        # Return pixels, not an embedded website with access to Sakura APIs.
+        page = self._session(identifier)['page']
+        return page.screenshot(type='png', full_page=False, timeout=10000)
+
+    def preview(self, identifier):
+        if self.unavailable:raise ValueError(self.unavailable)
+        return self.call('_preview', identifier)
+
     def _close_task(self,identifier):
         session=self.sessions.pop(identifier,None)
         if session:session['context'].close()

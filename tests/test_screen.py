@@ -73,8 +73,10 @@ class ScreenTests(unittest.TestCase):
             tts.speak_to_file_async=audio
             response=client.post('/api/chat',json={'text':'look','screen_image':'/9j/'})
             self.assertEqual(response.status_code,200)
-            llm.chat.assert_called_with('look','/9j/')
+            self.assertEqual(llm.chat.call_args.args,('look','/9j/',None))
+            self.assertEqual(llm.chat.call_args.kwargs['app_context']['mode'],'Companion')
             client.post('/api/chat',json={'text':'hello'})
-            llm.chat.assert_called_with('hello',None)
+            self.assertEqual(llm.chat.call_args.args,('hello',None,None))
+            self.assertEqual(llm.chat.call_args.kwargs['app_context']['mode'],'Companion')
 
 if __name__=='__main__': unittest.main()

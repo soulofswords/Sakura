@@ -61,3 +61,32 @@ def test_ssh_uses_verified_host_noninteractive_auth_and_quoted_path(tmp_path):
 def test_ssh_target_cannot_inject_options(tmp_path,host):
     with patch('agent_backends.shutil.which',return_value=sys.executable),pytest.raises(ValueError):
         prepare({'backend':'ssh','command':'pwd','host':host,'user':'dev','remote_cwd':'/work'},{'workspace':str(tmp_path)},tmp_path)
+
+
+def test_a_setup_step_carries_its_own_time_budget(tmp_path):
+    args={'command':'npm install','cwd':str(tmp_path),'timeout_seconds':900}
+    with patch('agent_backends.shutil.which',return_value=sys.executable), \
+         patch('agent_runtime.powershell',return_value=sys.executable):
+        bindings,warning=prepare(args,{'workspace':str(tmp_path)},tmp_path)
+    process=Mock(return_value={'ok':True})
+    execute(args,{'workspace':str(tmp_path)},bindings,process)
+    assert process.call_args.kwargs['timeout']==900
+
+
+@pytest.mark.parametrize('budget',[4,1801,0,-1,'900',True,None])
+def test_an_out_of_range_budget_is_refused_before_review(tmp_path,budget):
+    with patch('agent_backends.shutil.which',return_value=sys.executable), \
+         patch('agent_runtime.powershell',return_value=sys.executable),pytest.raises(ValueError):
+        prepare({'command':'npm install','cwd':str(tmp_path),'timeout_seconds':budget},
+                {'workspace':str(tmp_path)},tmp_path)
+
+
+def test_a_command_without_a_budget_keeps_the_short_default(tmp_path):
+    args={'command':'pwd','cwd':str(tmp_path)}
+    with patch('agent_backends.shutil.which',return_value=sys.executable), \
+         patch('agent_runtime.powershell',return_value=sys.executable):
+        bindings,warning=prepare(args,{'workspace':str(tmp_path)},tmp_path)
+    process=Mock(return_value={'ok':True})
+    execute(args,{'workspace':str(tmp_path)},bindings,process)
+    assert 'timeout' not in process.call_args.kwargs
+

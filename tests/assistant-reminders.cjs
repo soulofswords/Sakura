@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 let tick,listener,requests=0,active=true,dismissed=false;
 const paragraph={},panel={hidden:true,setAttribute(){},querySelector:()=>paragraph,addEventListener:(name,fn)=>listener=fn,remove(){}};
-const ctx={document:{createElement:()=>panel,body:{appendChild(){}}},window:{addEventListener(){}},Date,setInterval:fn=>{tick=fn;return 1;},clearInterval(){},fetch:async(url,options)=>{
+const ctx={document:{createElement:tag=>tag==='section'?panel:{hidden:true,style:{},append(){},remove(){}},body:{appendChild(){},append(){}}},window:{addEventListener(){}},Date,setInterval:fn=>{tick=fn;return 1;},clearInterval(){},fetch:async(url,options)=>{
  requests++;if(options){const body=JSON.parse(options.body);assert.equal(body.id,'id123');dismissed=true;return{ok:true};}
  return{ok:true,json:async()=>({items:dismissed?[]:[{id:'id123',status:'ringing',kind:'timer',label:'5 second timer'}]})};
 }};

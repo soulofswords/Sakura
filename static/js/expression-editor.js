@@ -6,6 +6,16 @@ export function hotkeyFor(event) {
     return [event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.shiftKey?'Shift':'',event.metaKey?'Meta':'',event.code].filter(Boolean).join('+');
 }
 
+export function matchExpressionName(label, names, labels={}) {
+    const normalized=value=>String(value||'').normalize('NFKD').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+    const wanted=normalized(label);if(!wanted)return null;
+    const choices=(names||[]).map(name=>({name,values:[name,labels[name]].map(normalized).filter(Boolean)}));
+    const exact=choices.find(choice=>choice.values.includes(wanted));
+    if(exact)return exact.name;
+    const partial=choices.filter(choice=>choice.values.some(value=>value.includes(wanted)||wanted.includes(value)));
+    return partial.length===1?partial[0].name:null;
+}
+
 export function installExpressionEditor(getViewer, getModelKey) {
     const automatic=installAutoExpressions(getViewer,getModelKey);
     const panel=document.getElementById('expression-modal'),list=document.getElementById('expression-list');
@@ -39,19 +49,21 @@ export function installExpressionEditor(getViewer, getModelKey) {
         if(changed)save(data);
         return data;
     };
-    const apply=(name,weight)=>{
-        const v=getViewer();if(!v||!v.allMorphNames.includes(name))return;
+    const apply=(name,weight,force=false)=>{
+        const v=getViewer();if(!v||!v.allMorphNames?.includes(name))return false;
         if(isVisibility(v,name)){
             setPartVisible(v,name,weight<.5);
             status.textContent=name+(weight>=.5?' hidden.':' shown.')+' Saved for this model.';
-            return;
+            return true;
         }
-        if(v.areAiExpressionsAutomatic?.()){status.textContent='Reactions are on: expressions are automatic. Turn Reactions off to select expressions manually.';return;}
+        if(!force&&v.areAiExpressionsAutomatic?.()){status.textContent='Reply emotions are automatic. Set Reply emotions to Off in Voice & speech to select expressions manually.';return false;}
         v.manualExpressions ||= new Map();v.manualExpressions.set(name,weight);v.manualExpression={name,weight};
         if(v.live2d&&!v.live2d.setExpression(name,weight)){
-            v.manualExpressions.delete(name);v.manualExpression=null;status.textContent='This Live2D expression could not be applied.';return;
+            v.manualExpressions.delete(name);v.manualExpression=null;status.textContent='This Live2D expression could not be applied.';return false;
         }
+        if(!v.live2d)v.setMorph?.(name,weight);
         status.textContent='Active expressions: '+[...v.manualExpressions.keys()].join(', ');
+        return true;
     };
     const deactivate=name=>{
         const v=getViewer();
@@ -111,8 +123,18 @@ export function installExpressionEditor(getViewer, getModelKey) {
             if(name.startsWith('custom:')){const edit=document.createElement('button');edit.textContent='Edit';edit.onclick=()=>customEditor.open(name);const deletion=document.createElement('button');deletion.textContent='Delete custom';deletion.onclick=()=>{deactivate(name);customEditor.remove(name);};naming.append(edit,deletion);}
         }
         status.textContent=getViewer()?.areAiExpressionsAutomatic?.()
-            ? 'Reactions are on: expressions are automatic. Turn Reactions off for manual previews and hotkeys.'
+            ? 'Reply emotions are automatic. Set Reply emotions to Off in Voice & speech for manual previews and hotkeys.'
             : names.length?`${names.length} imported expressions. Manual previews and hotkeys are enabled. Shortcuts work while Sakura has focus.`:'No supported expressions in the loaded model.';
+    };
+    const applyByLabel=request=>{
+        const v=getViewer();
+        if(!v){status.textContent='Load a model before choosing an expression.';return false;}
+        if(request?.clear){v.clearManualExpression?.();v.manualExpressions?.clear();status.textContent='All active expressions cleared.';return true;}
+        const data=bindings(),labels={};
+        for(const name of v.allMorphNames||[])labels[name]=data[name]?.label||v.customExpressions?.[name]?.name||name;
+        const name=matchExpressionName(request?.label,v.allMorphNames||[],labels);
+        if(!name){status.textContent=`No unique expression named “${String(request?.label||'').slice(0,80)}” exists in this model.`;return false;}
+        return apply(name,data[name]?.weight??1,true);
     };
     customEditor=installCustomExpressions(getViewer,getModelKey,render);
     document.getElementById('expression-editor-btn').onclick=()=>{render();panel.classList.remove('hidden');};
@@ -139,5 +161,5 @@ export function installExpressionEditor(getViewer, getModelKey) {
         if(visibilityActive(v,entry[0])||v.manualExpressions?.has(entry[0]))deactivate(entry[0]);else apply(entry[0],entry[1].weight);
     },true);
     window.addEventListener('sakura-reactions-changed',()=>{if(!panel.classList.contains('hidden'))render();});
-    return {refresh:render};
+    return {refresh:render,applyByLabel};
 }

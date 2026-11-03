@@ -9,8 +9,41 @@ class ToolTests(unittest.TestCase):
   for text in ['pc status','show cpu usage',"what's my ram usage"]:self.assertEqual(classify(text)[0],'system.status')
   self.assertEqual(classify('set volume to 32%'),('audio.volume',{'action':'set','value':32}))
   self.assertEqual(classify('mute volume'),('audio.volume',{'action':'mute'}))
+  for text in ['increase volume','raise the volume a bit','turn the volume up','turn it up','louder']:
+   self.assertEqual(classify(text),('audio.volume',{'action':'up'}),text)
+  for text in ['decrease volume','lower the volume','reduce volume please','turn the volume down','turn it down','a bit quieter']:
+   self.assertEqual(classify(text),('audio.volume',{'action':'down'}),text)
   self.assertIsNone(classify('why does volume change?'))
   with self.assertRaises(ValueError):classify('set volume to 101')
+ def test_spoken_value_phrasing_and_device_followup(self):
+  from assistant_tools import device_followup,device_mention
+  for text in ['set the volume to 50','make the volume 50 percent','turn the volume to 50 percent',
+               'change volume to 50','make the volume 50']:
+   self.assertEqual(classify(text),('audio.volume',{'action':'set','value':50}),text)
+  for text in ['set brightness to 40','make the brightness 40 percent','turn the brightness to 40']:
+   self.assertEqual(classify(text),('display.brightness',{'action':'set','value':40}),text)
+  # A directional verb still means an absolute level when the speaker names one;
+  # "increase the volume to 50" must never fall through to the conversational model.
+  for text,value in [('Increase the volume to 50 percent.',50),('raise the volume to 70',70),
+                     ('decrease the volume to 20 percent',20),('lower the volume to 30',30),
+                     ('turn the volume down to 25',25),('bring the volume up to 50',50),
+                     ('bump the volume up to 50',50),('boost the sound to 40 percent',40)]:
+   self.assertEqual(classify(text),('audio.volume',{'action':'set','value':value}),text)
+  for text,value in [('increase the brightness to 40 percent',40),('turn the brightness down to 20',20)]:
+   self.assertEqual(classify(text),('display.brightness',{'action':'set','value':value}),text)
+  for text,action in [('increase the volume','up'),('turn up the volume','up'),('turn the volume down','down')]:
+   self.assertEqual(classify(text),('audio.volume',{'action':action}),text)
+  with self.assertRaises(ValueError):classify('increase the volume to 150 percent')
+  self.assertEqual(device_mention('can u increase the volume a bit'),'volume')
+  self.assertEqual(device_mention('make the screen brighter'),'brightness')
+  self.assertIsNone(device_mention('what is on my screen'))
+  self.assertEqual(device_followup('make it 50 percent','volume'),'set volume to 50')
+  self.assertEqual(device_followup('make it 50 directly','volume'),'set volume to 50')
+  self.assertEqual(device_followup('set it to 50','brightness'),'set brightness to 50')
+  self.assertEqual(device_followup('increase it to 50 percent','volume'),'set volume to 50')
+  self.assertEqual(device_followup('please turn it down to 20','volume'),'set volume to 20')
+  self.assertIsNone(device_followup('make it 50 percent',None))
+  with self.assertRaises(ValueError):device_followup('make it 101 percent','volume')
  def test_permission_and_failures_do_not_claim_success(self):
   with patch('assistant_tools.execute') as execute:
    self.assertIn('Enable',run_command('set volume to 30%',False));execute.assert_not_called()
@@ -52,6 +85,26 @@ class ToolTests(unittest.TestCase):
  def test_no_match_on_ordinary_conversation(self):
   self.assertIsNone(handle_command('I finished work then went home',True))
   self.assertIn('five',run_command('show capabilities'))
+ def test_clipboard_capture_keeps_the_text_and_drops_the_command_words(self):
+  for text,expected in [('copy hello world to clipboard','hello world'),
+                        ('copy hello world to the clipboard','hello world'),
+                        ('put the answer the clipboard','the answer'),
+                        ('copy Hello World to clipboard','Hello World')]:
+   self.assertEqual(classify(text),('clipboard.write',{'text':expected}),text)
+  self.assertEqual(classify('read clipboard'),('clipboard.read',{}))
+ def test_plain_clipboard_use_needs_no_computer_access(self):
+  import assistant_tools
+  for action in ('clipboard.read','clipboard.write','clipboard.transform'):
+   self.assertIn(action,assistant_tools._NO_PERMISSION)
+  self.assertNotIn('clipboard.ai_transform',assistant_tools._NO_PERMISSION)
+ def test_media_keys_route_globally_not_through_the_focused_window(self):
+  for text,key in [('press playpause','playpause'),('hit next track','nexttrack'),
+                   ('press the media key play_pause','playpause'),('press volume down','volumedown')]:
+   self.assertEqual(classify(text),('media.press',{'key':key}),text)
+  self.assertEqual(classify('press ctrl s'),('desktop.press',{'combo':'ctrl s'}))
+  with patch('desktop_control.execute_action',return_value={'ok':True,'reply':'Pressed playpause.','data':{}}) as execute:
+   self.assertEqual(run_command('press playpause',True),'Pressed playpause.')
+  execute.assert_called_once_with('media.press',{'key':'playpause'})
  def test_background_sequence_reports_each_step_without_blocking(self):
   from assistant_commands import background_sequence
   from assistant_tools import run_state
@@ -85,6 +138,50 @@ class ToolEndpoints(unittest.IsolatedAsyncioTestCase):
    self.assertEqual(await app.assistant_device_action({'phone':True,'action':'system.status'}),{'ok':True})
    self.assertEqual((await app.assistant_device_action({'phone':True,'action':'audio.volume','operation':'set','value':float('nan')})).status_code,400)
    self.assertEqual((await app.assistant_device_action({'phone':True,'action':'shell'})).status_code,400)
+ async def test_follow_up_percentage_targets_the_device_just_discussed(self):
+  import app as server
+  from command_approval import consume
+  from assistant_tools import DeviceContext
+  previous=getattr(server.app.state,'device_context',None)
+  server.app.state.device_context=DeviceContext()
+  server.app.state.device_context.resolve('volume','desktop')
+  try:
+   with patch.object(server,'get_settings',return_value={'computer_control_enabled':True,'response_restriction_level':'off'}),patch('assistant_tools.execute') as execute:
+    result=await server.chat({'text':'make it 50 percent','defer_audio':True})
+   self.assertIn('Review this PC action',result['reply'])
+   self.assertIn('set volume to 50',result['reply'])
+   execute.assert_not_called()
+   self.assertIsNone(consume(result['command_approval'],False))
+  finally:
+   if previous is None:del server.app.state.device_context
+   else:server.app.state.device_context=previous
+ async def test_reviewing_a_kill_for_a_dead_process_answers_honestly(self):
+  # propose() re-checks the process identity before storing an approval; a PID that is
+  # gone must return the refusal, not a 500, and must leave nothing waiting to execute.
+  import app as server
+  from command_approval import _pending
+  before=set(_pending)  # an earlier test may still hold an approval; this one must add none
+  from process_tools import inspect_target
+  def dead(pid):
+   raise ValueError('That process no longer exists. Refresh the process list.')
+  try:
+   with patch('process_tools.inspect_target',side_effect=dead),patch.object(server,'get_settings',return_value={'computer_control_enabled':True,'response_restriction_level':'off'}),patch('assistant_tools.execute') as execute:
+    result=await server.chat({'text':'kill process 999999','defer_audio':True})
+   self.assertEqual(result['reply'],'That process no longer exists. Refresh the process list.')
+   self.assertEqual(result['response_kind'],'clarification')
+   self.assertNotIn('command_approval',result)
+   self.assertEqual(set(_pending),before)
+   execute.assert_not_called()
+   # The Medium route proposes separately, so it has to refuse the same way.
+   with patch('process_tools.inspect_target',side_effect=dead),patch.object(server,'get_settings',return_value={'computer_control_enabled':True,'response_restriction_level':'medium'}),patch('assistant_tools.execute') as execute:
+    medium=await server.chat({'text':'kill process 999999','defer_audio':True})
+   self.assertEqual(medium['reply'],'That process no longer exists. Refresh the process list.')
+   self.assertEqual(medium['response_kind'],'clarification')
+   self.assertEqual(set(_pending),before)
+   execute.assert_not_called()
+  finally:
+   with patch('process_tools.inspect_target',side_effect=dead):
+    _pending.clear()
  async def test_clipboard_has_separate_opt_in_and_bounded_text(self):
   import app
   with patch.object(app,'get_settings',return_value={'computer_control_enabled':True}),patch('native_clipboard.read_text') as read:

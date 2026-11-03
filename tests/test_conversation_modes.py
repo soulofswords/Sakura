@@ -140,3 +140,109 @@ def test_agent_new_task_is_blocked_in_friend_with_ui_guidance(tmp_path):
     response=client.post('/api/agent/tasks',headers={'X-Sakura-Agent':token},json={'goal':'Build an app','workspace':str(tmp_path)})
     assert response.status_code==409
     assert 'Voice & speech' in response.json()['detail']
+    assert 'press Plan' in response.json()['detail']
+
+
+def test_agent_surface_style_never_routes_through_the_companion_panel():
+    from conversation_modes import instruction
+    for mode in ('friend','teacher'):
+        agent=instruction(mode,agent=True)
+        assert 'Selected conversation mode: '+mode.title() in agent
+        assert 'goal box' in agent
+        for route in ('speaker icon','pencil icon','Texture remapping','return to Companion'):
+            assert route not in agent
+    assert 'empathy, curiosity, delight' in instruction('friend',agent=True)
+    assert 'successful tool results' in instruction('teacher',agent=True)
+    assert 'whether an action has actually succeeded' in instruction('friend',agent=True)
+    companion=instruction('friend')
+    assert 'left speaker icon' in companion and 'Texture remapping' in companion
+
+
+def test_agent_surface_work_request_names_this_panel_and_still_refuses_to_claim_work():
+    import asyncio,app
+    model=Mock()
+    with patch.object(app,'get_settings',return_value={'conversation_mode':'friend','response_restriction_level':'off'}),patch.object(app,'llm',model),patch.object(app,'_chat_core') as generate:
+        result=asyncio.run(app.chat({'text':'Make a trading app','defer_audio':True,'surface':'agent'}))
+        assert result['mode_required']=='teacher'
+        assert 'press Plan' in result['reply'] and 'Your request has not been run yet' in result['reply']
+        assert 'click Companion mode first' not in result['reply']
+        generate.assert_not_called()
+
+
+def test_agent_surface_reaches_the_mode_instruction_built_for_a_reply(tmp_path):
+    model=LLM(tmp_path/'memory.json');model.provider='gemini';model.conversation_mode='friend'
+    with patch.object(model,'_request_gemini',return_value='Hello.') as call:
+        model.agent_surface=True
+        model._request_raw([{'role':'user','content':'What happened with my task?'}])
+    text=' '.join(m['content'] for m in call.call_args.args[0] if m['role']=='system')
+    assert 'already in Agent mode' in text and 'speaker icon' not in text
+    with patch.object(model,'_request_gemini',return_value='Hello.') as call:
+        model.agent_surface=False
+        model._request_raw([{'role':'user','content':'Do you like my new hair colour?'}])
+    text=' '.join(m['content'] for m in call.call_args.args[0] if m['role']=='system')
+    assert 'Texture remapping' in text
+
+
+def test_delivery_is_a_separate_axis_from_identity():
+    """Spiciness changes wording only. It must never reach the factual, permission or outcome
+    wording, and it must not rename who Sakura is."""
+    from conversation_modes import SPICE, instruction
+    for level in ('mild', 'flirty', 'bold'):
+        text = instruction('friend', spice=level)
+        assert 'Selected delivery: ' + level.title() in text
+        assert 'Selected conversation mode: Friend' in text
+        assert 'whether an action has' in text and 'never changes' in text
+    # A small local model loses the question inside a long style checklist, so each delivery
+    # clause is bounded rather than allowed to grow every time a level is touched.
+    assert max(len(clause) for clause in SPICE.values()) < 420
+
+
+def test_delivery_falls_back_to_mild_and_bold_still_refuses_invention():
+    from conversation_modes import instruction
+    for unset in (None, '', 'spicy', 7):
+        assert 'Selected delivery: Mild' in instruction('friend', spice=unset)
+    assert 'never treat a bold tone as permission to invent' in instruction('friend', spice='bold')
+    assert 'Selected delivery: Bold' in instruction('teacher', spice='bold', agent=True)
+
+
+def test_the_saved_delivery_level_reaches_the_prompt_of_a_real_reply(tmp_path):
+    model=LLM(tmp_path/'memory.json');model.provider='gemini'
+    assert model.delivery_spice=='mild'
+    for level,marker in (('bold','Selected delivery: Bold'),('mild','Selected delivery: Mild')):
+        model.delivery_spice=level
+        with patch.object(model,'_request_gemini',return_value='Hello.') as call:
+            model._request_raw([{'role':'user','content':'Were you flirting with me?'}])
+        text=' '.join(m['content'] for m in call.call_args.args[0] if m['role']=='system')
+        assert marker in text
+
+
+def test_settings_route_validates_and_applies_the_delivery_level(tmp_path):
+    import tempfile, app
+    from local_client import TestClient
+    with tempfile.TemporaryDirectory() as folder,patch.object(app,'SETTINGS_FILE',Path(folder)/'settings.json'):
+        model=Mock();model.delivery_spice='mild'
+        with patch.object(app,'llm',model),patch.object(app,'tts',None):
+            client=TestClient(app.app)
+            assert client.post('/api/settings',json={'delivery_spice':'saucy'}).status_code==400
+            response=client.post('/api/settings',json={'delivery_spice':'flirty'})
+            assert response.status_code==200,response.text
+            assert response.json()['settings']['delivery_spice']=='flirty'
+            assert model.delivery_spice=='flirty'
+
+
+@pytest.mark.parametrize('ask',['what was I working on?','Where did I leave off','show my recent tasks',
+                                'what have I been doing','which task was I on','resume my last task',
+                                'what did I ask you to do','pick up where I left off',
+                                'what were we doing yesterday','what am I supposed to finish'])
+def test_a_look_backwards_question_wants_the_task_archive(ask):
+    from conversation_modes import work_recall_request
+    assert work_recall_request(ask),ask
+
+
+@pytest.mark.parametrize('chat',['what are you doing','hello','how are you','what is my name',
+                                 'make me a task list app','where is the settings button','thanks',
+                                 'what should I do next','is my car fast'])
+def test_ordinary_chat_does_not_drag_the_task_archive_in(chat):
+    # The archive is real data about past runs, so a greeting must not put it in front of the model.
+    from conversation_modes import work_recall_request
+    assert not work_recall_request(chat),chat

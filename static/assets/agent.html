@@ -8,11 +8,16 @@
 /* Keep an outstanding approval prominent while the task details scroll. */
 #review.action{position:sticky;top:8px;z-index:8;box-shadow:0 8px 28px #0009;border-color:var(--ag-action-line)}
 </style>
-<link rel="stylesheet" href="/static/css/agent-studio.css?v=conversation1029">
+<link rel="stylesheet" href="/static/css/agent-studio.css?v=centred-menu1103">
 <script src="/static/js/agent-services.js?v=tool-integrations1029"></script>
-<script src="/static/js/agent-workspace.js?v=colibri-qwen36-2"></script>
-<script src="/static/js/agent-studio.js?v=conversation1029"></script>
+<script src="/static/js/agent-workspace.js?v=wallclock3"></script>
+<script src="/static/js/agent-studio.js?v=policy-race1103"></script>
 <script src="/static/js/agent-memory.js?v=1"></script>
+<script src="/static/js/agent-memory-workbench.js?v=loop-status2"></script>
+<script src="/static/js/memory-archaeology.js?v=calendar-context1103"></script>
+<script src="/static/js/agent-extension-store.js?v=1"></script>
+<script src="/static/js/agent-browser-panel.js?v=local-view2"></script>
+<script src="/static/js/agent-growth.js?v=1"></script>
 <script src="/static/js/agent-extensions.js?v=1"></script>
 <script>
 /* Follow the main app's appearance choice; the workspace is a same-origin frame. */
@@ -81,24 +86,33 @@
 <section class="card" id="agent-compose"><h2>Start a task</h2><label>Goal<textarea id="goal" placeholder="Read my CV, compare it with the job description, and draft a LinkedIn post. Ask before accessing files or publishing."></textarea></label>
 <label>Workspace folder on this PC<input id="workspace" placeholder="C:\Users\you\Documents\JobSearch"></label>
 <label>Planning AI<select id="planner-provider"><option value="ollama">Local AI</option><option value="gemini">Google Gemini API</option></select></label>
-<label>Reusable skill<select id="selected-skill"><option value="">No skill</option></select></label>
+<label>Reusable skills · choose none and Sakura picks the best matches, Ctrl-click for several<select id="selected-skill" multiple size="3"></select></label>
 <p id="planner-provider-status" class="muted">Choose which configured AI plans each step.</p>
 <p class="notice">Files stay in this folder. Sakura can read source documents and create new DOCX or Markdown drafts after you approve each step. Approve &amp; run opens a Windows confirmation showing the exact stored action; execution starts only after you choose Yes there. It will not overwrite the original. Approved shell commands and MCP processes run with your user permissions; the workspace is not a sandbox. Results read by a cloud model are sent to that selected provider.</p>
-<label><input id="auto-plan" type="checkbox" checked style="width:auto"> Auto-continue using the selected approval mode. Ask for approval permits workspace reads; Approve for me also permits public web lookups; Full access permits tools and changes within existing tool boundaries. Turn this off to review every step.</label>
-<div class="row"><button id="create">Create task</button><button id="plan">Suggest next step</button><button id="pause">Pause</button><button id="resume">Resume +25 steps</button><button id="cancel">Cancel task</button></div></section>
+<input id="auto-plan" type="checkbox" hidden>
+<p class="muted">Run mode sits beside the task buttons: Approval stops for every step, Auto runs the task to the end. The access menu beside it is for finer control, such as web lookups only.</p>
+<div class="row"><button id="send-message">Send</button><button id="create">Create task</button><button id="plan">Suggest next step</button><button id="pause">Pause</button><button id="resume">Resume +25 steps</button><button id="cancel">Cancel task</button></div>
+<div id="agent-usage-bar" hidden></div></section>
+<section class="card" id="agent-conversation"><h2>Conversation</h2><div id="agent-thread" aria-live="polite"></div></section>
 <section id="review" class="card" hidden></section>
 <section class="card" id="agent-task-progress"><h2>Activity & results</h2><div id="progress">Select or create a task to begin.</div></section>
 <section class="card" id="agent-metrics"><h2>Agent telemetry</h2><p>Counted from the steps recorded on this PC for the latest tasks, plus a bounded local event trace. Nothing is uploaded.</p><p id="metrics-line" class="muted">Collecting…</p><p id="inference-line" class="muted"></p><button id="doctor-run" type="button">Check installation health</button><pre id="doctor-report"></pre><details><summary>Inference budgets and prices</summary><p>Limits are checked between planner calls; one in-flight request can exceed them. Prices are estimates you configure, not a provider invoice. GPU energy includes other GPU workloads; CPU and cloud energy are unmeasured.</p><label>Maximum reported tokens per task (0 disables)<input id="usage-max-tokens" type="number" min="0" max="100000000" value="0"></label><label>Maximum estimated USD per task (0 disables)<input id="usage-max-cost" type="number" min="0" max="10000" step="0.01" value="0"></label><label>Prices: provider/model → input/output USD per million tokens<textarea id="usage-prices" placeholder='{"gemini/your-model":{"input":0,"output":0}}'>{}</textarea></label><button id="usage-load" type="button">Load usage settings</button><button id="usage-save" type="button">Save usage settings</button><p id="usage-status" role="status"></p></details><details><summary>Per tool and recent events</summary><div id="metrics-tools"></div><pre id="metrics-events"></pre></details></section>
 <section class="card" id="agent-tool-proposal"><details><summary>Advanced · propose an exact tool action</summary><p>Choose a tool and exact JSON arguments. This still requires separate approval. Use this if the selected model cannot produce a valid plan.</p>
 <label>Tool<select id="tool"></select></label><pre id="tool-schema"></pre>
 <label>Arguments<textarea id="tool-args">{}</textarea></label><button id="propose">Create approval request</button></details><details><summary>Command allow-list · this app session</summary><p>Only commands you explicitly approve with the allow-list checkbox can repeat. Matching includes the exact command, folder, workspace identity and runner. Restarting Sakura revokes all entries.</p><div id="command-permissions"></div></details></section>
+<aside class="card" id="agent-inspector">
+<h2>Inspector</h2>
+<h3>Environment</h3><div id="inspector-environment"></div>
+<h3>Background processes</h3><div id="inspector-processes"></div>
+</aside>
 </main></div>
 <script>
 const token='__AGENT_TOKEN__';
 const $=id=>document.getElementById(id);
-let state={tools:[],connections:[],runs:[]},selected=null,current=null,busy=false,calendarPollTimer=null;
+let state={tools:[],connections:[],runs:[]},selected=null,current=null,busy=false,calendarPollTimer=null,plannerOwner=null;
 $('calendar-open').onclick=()=>{$('google-calendar').scrollIntoView({behavior:'smooth',block:'start'});$('google-calendar').querySelector('h2').focus?.();};
-const selectedPlanner=()=>({provider:$('planner-provider').value,skill:$('selected-skill').value});
+const selectedSkills=()=>[...$('selected-skill').selectedOptions].map(option=>option.value).slice(0,8);
+const selectedPlanner=()=>({provider:$('planner-provider').value,skill:selectedSkills()});
 try{$('planner-provider').value=localStorage.getItem('sakura-agent-planner')||'ollama';}catch{}
 function announce(text){if(typeof text==='string'&&text.trim()&&window.parent!==window)window.parent.postMessage({type:'sakura-agent-speech',text:text.trim().slice(0,420)},location.origin);}
 async function api(path,body,method){
@@ -106,10 +120,207 @@ async function api(path,body,method){
  const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Agent request failed ('+response.status+').');return data;
 }
 function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
+const SERVER_URL=/https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?(?:\/[^\s<>"'`)\]]{0,200})?/g;
+// A task that ends in a running local app is worth acting on, so its address is clickable and
+// visibly separate from the sentence around it. Only loopback addresses are turned into links:
+// an address from a model reply or a cloned README is not trusted enough to hand to the browser.
+function writeWithServerLinks(target,text){
+ const source=String(text??'');target.replaceChildren();
+ let last=0,match;SERVER_URL.lastIndex=0;
+ while((match=SERVER_URL.exec(source))){
+  let url=match[0],tail='';
+  while(/[.,;:!?]$/.test(url)){tail=url.slice(-1)+tail;url=url.slice(0,-1);}
+  if(match.index>last)target.append(document.createTextNode(source.slice(last,match.index)));
+  const link=document.createElement('a');link.className='agent-server-link';link.href=url;link.textContent=url;
+  link.target='_blank';link.rel='noopener noreferrer';target.append(link);
+  if(tail)target.append(document.createTextNode(tail));
+  last=match.index+match[0].length;
+ }
+ if(last<source.length)target.append(document.createTextNode(source.slice(last)));
+}
+function serverAddress(run){
+ const opened=run?.steps?.findLast(step=>step.status==='completed'&&step.result?.opened&&step.result?.url);
+ return opened?String(opened.result.url):'';
+}
 function diffBlock(text){const pre=node('pre');for(const line of text.split('\n')){const cls=line.startsWith('+++')||line.startsWith('---')?'diff-file':line.startsWith('+')?'diff-add':line.startsWith('-')?'diff-del':line.startsWith('@@')?'diff-hunk':'';pre.append(node('span',line+'\n',cls||undefined));}return pre;}
 function button(text,fn,cls){const el=node('button',text,cls);el.onclick=()=>perform(fn);return el;}
 async function perform(fn){if(busy)return;busy=true;const reenable=[...document.querySelectorAll('button')].filter(item=>!item.disabled);reenable.forEach(item=>{item.disabled=true;});$('status').textContent='Working…';try{await fn();$('status').textContent='Ready. Review the current step before approving.';}catch(error){$('status').textContent=error.message;announce('I hit a problem. '+error.message);}finally{busy=false;reenable.forEach(item=>{item.disabled=false;});}}
-function runAnnouncement(run){const pending=run?.steps?.findLast(step=>step.status==='pending');if(pending)return 'I have a step ready. '+(pending.reason||'Please review it before I run anything.');if(run?.status==='completed'&&run.summary)return 'That is finished. '+run.summary;if(run?.summary)return run.summary;return 'I could not prepare a step yet. Please check the task and available tools.';}
+function runAnnouncement(run){const pending=run?.steps?.findLast(step=>step.status==='pending');if(pending)return 'I have a step ready. '+(pending.reason||'Please review it before I run anything.');const summary=run?.status==='completed'&&run.summary?('That is finished. '+run.summary):(run?.summary||'');if(!summary)return 'I could not prepare a step yet. Please check the task and available tools.';const address=serverAddress(run);return address?summary+' The page is at '+address+'.':summary;}
+function chatBubble(role,text){const row=node('div',undefined,'agent-bubble '+role);const span=node('span');writeWithServerLinks(span,text);row.append(span);$('agent-thread').append(row);row.scrollIntoView({block:'nearest'});return row;}
+function renderThread(run){
+ const thread=$('agent-thread'),owner=run?run.id:'';
+ // Re-rendering the same task happens on every poll; rebuilding would erase the reply
+ // bubbles and the Approve row that this chat session just added.
+ if(thread.dataset.owner===owner&&run)return;
+ thread.dataset.owner=owner;thread.replaceChildren();
+ const turns=run?.messages||[];
+ if(!turns.length)thread.append(node('p',run?'No messages on this task yet. Ask me about it below, or write what you want done.':'Talk to Sakura here just like the companion chat. Pick a task to talk about that task.','muted agent-thread-empty'));
+ for(const turn of turns)chatBubble(turn.role==='user'?'user':'sakura',turn.text);
+}
+let taskMenu=null;
+function closeTaskMenu(){
+ if(!taskMenu)return;
+ taskMenu.remove();taskMenu=null;
+ window.removeEventListener('pointerdown',trackTaskMenu,true);
+ window.removeEventListener('keydown',leaveTaskMenu,true);
+ window.removeEventListener('resize',closeTaskMenu);
+ window.removeEventListener('scroll',closeTaskMenu,true);
+}
+function trackTaskMenu(event){if(taskMenu&&!taskMenu.contains(event.target))closeTaskMenu();}
+function leaveTaskMenu(event){if(event.key==='Escape'){event.preventDefault();closeTaskMenu();}}
+function taskMenuRow(label,hint,fn,danger){
+ const item=node('button',undefined,'agent-task-menu-item'+(danger?' danger':''));
+ item.type='button';item.setAttribute('role','menuitem');
+ item.append(node('span',label),node('small',hint));
+ item.onclick=()=>{closeTaskMenu();perform(fn);};
+ return item;
+}
+function openTaskMenu(anchor,run){
+ closeTaskMenu();
+ const menu=node('div',undefined,'agent-task-menu');
+ menu.dataset.run=run.id;menu.setAttribute('role','menu');
+ menu.append(
+  taskMenuRow(run.pinned?'Unpin from top':'Pin to top',run.pinned?'Back into newest-first order':'Keep this one above the rest',async()=>{await api('tasks/'+run.id+'/pin',{pinned:!run.pinned});await refresh();}),
+  taskMenuRow('Rename','A short name for this task only',()=>startRename(run,anchor)),
+  taskMenuRow('Start a similar task','Puts its goal and folder back in the box',()=>{$('goal').value=run.goal;if(run.workspace)$('workspace').value=run.workspace;$('goal').focus();announce('I put that goal and folder back in the box. Edit them and start the task when ready.');}),
+  taskMenuRow('Delete task','Removes it and its archived record',async()=>{
+   const name=(run.title||run.goal).slice(0,60);
+   if(!window.confirm('Delete "'+name+'" and its archived record from this PC? This cannot be undone.'))return;
+   await api('tasks/'+run.id,undefined,'DELETE');
+   if(selected===run.id){selected=null;current=null;plannerOwner=null;renderReview(null);renderThread(null);$('progress').textContent='Select or create a task to begin.';}
+   await refresh();
+  },true));
+ // The list lives in a scrolling sidebar, so the menu has to sit outside it rather than be clipped by it.
+ document.body.append(menu);taskMenu=menu;
+ const box=anchor.getBoundingClientRect();
+ menu.style.top=Math.round(Math.max(8,Math.min(box.bottom+6,window.innerHeight-menu.offsetHeight-8)))+'px';
+ menu.style.left=Math.round(Math.max(8,Math.min(box.left,window.innerWidth-menu.offsetWidth-8)))+'px';
+ window.addEventListener('pointerdown',trackTaskMenu,true);
+ window.addEventListener('keydown',leaveTaskMenu,true);
+ window.addEventListener('resize',closeTaskMenu);
+ window.addEventListener('scroll',closeTaskMenu,true);
+}
+function startRename(run,anchor){
+ const row=anchor.closest('.task-row');if(!row)return;
+ const input=node('input',undefined,'task-rename');
+ input.type='text';input.maxLength=160;input.value=run.title||run.goal.slice(0,70);
+ input.setAttribute('aria-label','New name for this task');
+ row.replaceChildren(input);input.focus();input.select();
+ let settled=false;
+ const finish=async value=>{
+  if(settled)return;settled=true;
+  if(!value.trim()){await refresh();return;}
+  await api('tasks/'+run.id+'/rename',{title:value});await refresh();
+ };
+ input.onkeydown=event=>{
+  if(event.key==='Enter'){event.preventDefault();void finish(input.value);}
+  else if(event.key==='Escape'){event.preventDefault();void finish('');}
+ };
+ input.onblur=()=>void finish(input.value);
+}
+function taskRow(run,isChild){
+ const row=node('div',undefined,'task-row'+(run.pinned?' pinned':'')+(isChild?' child':''));
+ const label=button((isChild?'↳ ':'')+(run.title||run.goal).slice(0,70)+' · '+run.status,async()=>{selected=run.id;renderReview(null);renderRun(await api('tasks/'+run.id));},'task-open');
+ const dots=node('button',undefined,'task-menu-button');
+ dots.type='button';dots.title='Task actions';dots.setAttribute('aria-label','Actions for this task');
+ dots.onclick=event=>{
+  event.stopImmediatePropagation();
+  if(taskMenu&&taskMenu.dataset.run===run.id)closeTaskMenu();else openTaskMenu(dots,run);
+ };
+ row.append(label,dots);
+ return row;
+}
+function renderTaskRows(){
+ const list=$('tasks');
+ // A poll must not throw away a name being typed or a menu being read, so it steps aside for both.
+ if(list.querySelector('.task-rename:focus'))return;
+ closeTaskMenu();
+ const ordered=[...state.runs].reverse();
+ // Delegated children belong under the task that created them; a child whose parent is gone
+ // is an ordinary task again, so it never disappears from the list.
+ const ids=new Set(state.runs.map(run=>run.id));
+ const families=new Map();
+ const roots=[];
+ for(const run of ordered){
+  if(run.parent_id&&ids.has(run.parent_id)){
+   if(!families.has(run.parent_id))families.set(run.parent_id,[]);
+   families.get(run.parent_id).push(run);
+  }else roots.push(run);
+ }
+ roots.sort((a,b)=>Number(!a.pinned)-Number(!b.pinned));
+ list.replaceChildren();
+ for(const run of roots){
+  list.append(taskRow(run));
+  for(const child of families.get(run.id)||[])list.append(taskRow(child,true));
+ }
+}
+async function decideChatAction(identifier,approve){
+ const data=await fetch('/api/commands/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:identifier,approved:approve,surface:'agent'})}).then(response=>response.json());
+ if(data.error)throw Error(data.error);
+ chatBubble('sakura',typeof data.reply==='string'&&data.reply.trim()?data.reply:(approve?'I ran that action.':'I left that alone.'));
+ await refresh();
+}
+async function sendChat(){
+ const text=$('goal').value.trim();if(!text)return;
+ $('goal').value='';
+ const thread=$('agent-thread');thread.dataset.owner=selected||'';
+ thread.querySelector('.agent-thread-empty')?.remove();
+ chatBubble('user',text);
+ const bubble=chatBubble('sakura','Thinking…');
+ const data=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({text,defer_audio:true,surface:'agent',...(selected?{agent_task:selected}:{})})}).then(response=>response.json());
+ const reply=data.error?'I could not answer that: '+data.error:(typeof data.reply==='string'&&data.reply.trim()?data.reply:'I have nothing to add to that.');
+ writeWithServerLinks(bubble.querySelector('span'),reply);
+ announce(data.speech_reply||reply);
+ if(data.command_approval){
+  const row=node('div',undefined,'row');
+  for(const title of ['Approve & run','Reject'])row.append(node('button',title,title==='Reject'?'reject':'approve'));
+  [...row.children].forEach((item,index)=>{item.onclick=()=>perform(()=>decideChatAction(data.command_approval,[true,false][index]));});
+  bubble.append(row);
+  return;
+ }
+ // Persisting through the Agent API keeps the exchange in the task record, which is what
+ // the planner and the reply both read; a plain chat with no open task has nowhere to live.
+ if(selected)await api('tasks/'+selected+'/message',{text,reply}).catch(()=>{});
+ // The panel tells the user "say resume when you want me to continue", so the words have to
+ // reach the runtime. A friendly reply on its own leaves a blocked task exactly where it was.
+ if(selected&&!data.command_approval&&wantsToContinue(text))await continueSelectedTask();
+}
+const CONTINUE_CUE=/(?:^|[^a-z])(resume|continue|keep going|carry on|go on|proceed|start again|pick it up)(?:[^a-z]|$)/i;
+const CONTINUE_DENIED=/(don'?t|do not|not |never|stop|pause|wait|cancel|hold on|before)/i;
+function wantsToContinue(text){return text.length<=160&&CONTINUE_CUE.test(text)&&!CONTINUE_DENIED.test(text);}
+async function continueSelectedTask(){
+ const live=await api('tasks/'+selected).catch(()=>null);
+ if(!live||!['blocked','paused','failed','cancelled','ready'].includes(live.status))return;
+ try{
+  const planned=await api('tasks/'+selected+'/resume',{...selectedPlanner(),additional_steps:25});
+  renderRun(planned);await refresh();chatBubble('sakura','That resumed the task for real. '+runAnnouncement(planned));
+ }catch(error){chatBubble('sakura','I tried to resume it and got: '+error.message);}
+}
+function plannerOptionFor(chosen){
+ const provider=String(chosen?.provider||''),model=String(chosen?.model||''),native=String(chosen?.native_model||'');
+ if(native)return 'sakura-native';
+ if(provider==='gemini')return 'gemini';
+ if(provider==='ollama'&&model){const exact='ollama:'+model;
+  return [...$('planner-provider').options].some(option=>option.value===exact&&!option.disabled)?exact:'ollama';}
+ if(provider==='ollama')return 'ollama';
+ // A cloud planner records its provider id, and the picker lists exactly the configured ones.
+ if(provider&&provider!=='current')return provider;
+ return '';
+}
+function applyRunPlanner(run){
+ const id=run?.id||'';
+ // A poll re-renders the open task; re-applying its recorded planner there would silently
+ // undo the model the user just picked in the dropdown for the next step.
+ if(id===plannerOwner&&id)return;
+ plannerOwner=id;
+ const choice=plannerOptionFor(run?.planner_selection);
+ if(!choice||![...$('planner-provider').options].some(option=>option.value===choice&&!option.disabled))return;
+ $('planner-provider').value=choice;
+ try{localStorage.setItem('sakura-agent-planner',choice);}catch{}
+ const item=(state.providers||[]).find(provider=>provider.id===choice);
+ $('planner-provider-status').textContent=item?'This task is planned with '+item.label+'.':'No AI provider is available.';
+}
 function renderReview(action){
  // The 15s poll re-renders the same pending action; rebuilding it would un-tick the
  // remembered-command checkbox the reviewer just ticked and re-scroll the dock.
@@ -118,6 +329,7 @@ function renderReview(action){
  $('review').dataset.signature=signature;
  const box=$('review');box.replaceChildren();box.hidden=!action;box.classList.toggle('action',action?.status==='pending');if(!action)return;
  box.append(node('h2','Review action'),node('span',action.status,'badge'),node('h3',action.tool),node('p',action.reason||'You requested this action.'),node('pre',JSON.stringify(action.arguments,null,2)));
+ if(action.tool==='agents.delegate')box.append(node('p','Approving this starts '+(action.arguments?.goals||[]).length+' child tasks side by side in '+(current?.workspace||'this task\'s folder')+'. Each child gets its own task record and its own approvals; only workspace file reads run in a child without a click.','notice'));
  if(action.preview){const rest={...action.preview};const diff=typeof rest.diff==='string'?rest.diff:undefined;delete rest.diff;if(diff){box.append(node('h3','Exact change to apply'),diffBlock(diff));}if(Object.keys(rest).length)box.append(node('pre',JSON.stringify(rest,null,2)));}
  if(action.permission_error)box.append(node('p','The action ran, but it was not remembered: '+action.permission_error,'notice'));
  box.append(node('p','This approval applies once to this exact action. Changes require a new review. Its result can be sent to your selected AI provider to plan the next step.','notice'));
@@ -146,17 +358,103 @@ function renderReview(action){
  }
  if(action.result)box.append(node('h3','Actual result'),node('pre',JSON.stringify(action.result,null,2)));
 }
+// A step only ever carries timing the runtime actually recorded: created_at, finished_at and
+// the measured seconds around execution. Nothing here estimates a duration.
+const SETTLED_STEPS=new Set(['completed','failed','rejected','cancelled','expired']);
+const stepSeconds=step=>Number.isFinite(step?.seconds)?step.seconds:null;
+function formatSeconds(value){
+ if(value==null)return '';
+ if(value<1)return Math.round(value*1000)+' ms';
+ return value.toFixed(value<10?1:0)+'s';
+}
+function stepDetails(step){
+ const detail=node('details');
+ const elapsed=stepSeconds(step);
+ detail.append(node('summary',step.tool+' · '+(step.auto?'auto-approved · ':'')+step.status+(elapsed!=null?' · '+formatSeconds(elapsed):'')));
+ detail.append(node('pre',JSON.stringify(step.arguments,null,2)));
+ if(step.result)detail.append(node('pre',JSON.stringify(step.result,null,2)));
+ if(step.verification)detail.append(node('p','Reviewer check: '+step.verification,'muted'));
+ return detail;
+}
+function renderSteps(progress,steps){
+ const settled=[];
+ const flush=()=>{
+  if(!settled.length)return;
+  const group=node('details',undefined,'agent-processed');
+  const counts={};let total=0;
+  for(const step of settled){counts[step.status]=(counts[step.status]||0)+1;total+=stepSeconds(step)||0;}
+  const label=Object.entries(counts).map(([status,count])=>count+' '+status).join(' · ');
+  group.append(node('summary','Processed '+settled.length+' steps · '+label+(total?' · '+formatSeconds(total)+'':'')));
+  for(const step of settled)group.append(stepDetails(step));
+  progress.append(group);settled.length=0;
+ };
+ for(const step of steps){
+  if(SETTLED_STEPS.has(step.status))settled.push(step);
+  else{flush();progress.append(stepDetails(step));}
+ }
+ flush();
+}
+function processRow(step,label){
+ const row=node('div',undefined,'process-row');row.dataset.status=step.status;
+ const elapsed=stepSeconds(step);
+ row.append(node('i',undefined,'dot'),node('span',step.tool),node('small',label||step.status+(elapsed!=null?' · '+formatSeconds(elapsed):'')));
+ return row;
+}
+function inspectorRow(box,key,value){
+ const row=node('div',undefined,'inspector-row');
+ row.append(node('span',key,'inspector-key'),node('span',value,'inspector-value'));
+ box.append(row);
+}
+function renderInspector(run){
+ const environment=$('inspector-environment'),processes=$('inspector-processes');
+ if(!environment||!processes)return;
+ environment.replaceChildren();processes.replaceChildren();
+ if(!run){environment.append(node('p','No task is open. Select one to see its folder, model, usage and running steps here.','muted'));return;}
+ const provider=(state.providers||[]).find(item=>item.id===$('planner-provider').value);
+ const usage=run.usage||{};
+ inspectorRow(environment,'Status',run.status);
+ inspectorRow(environment,'Workspace',run.workspace||'not set');
+ inspectorRow(environment,'Planning AI',provider?(provider.ready?provider.label:provider.label+' · not configured'):'not selected');
+ inspectorRow(environment,'Approval',{'ask':'Ask for approval','balanced':'Approve for me','full':'Full access'}[document.body.dataset.approvalMode]||'Ask for approval');
+ inspectorRow(environment,'Auto-continue',run.auto_continue===false?'Off':'On');
+ inspectorRow(environment,'Steps',(run.steps||[]).length+' / '+(run.max_steps||100));
+ inspectorRow(environment,'Model calls',String(usage.calls||0));
+ inspectorRow(environment,'Tokens',(usage.input_tokens||0)+' in · '+(usage.output_tokens||0)+' out');
+ inspectorRow(environment,'Estimated cost',usage.cost_usd_estimate==null?'not priced':('~$'+Number(usage.cost_usd_estimate).toFixed(6)));
+ inspectorRow(environment,'Measured time',usage.seconds?formatSeconds(usage.seconds):'none yet');
+ if(run.parent_id)inspectorRow(environment,'Delegated','child of '+run.parent_id.slice(0,8));
+ const live=(run.steps||[]).filter(step=>step.status==='running'||step.status==='pending');
+ const finished=(run.steps||[]).filter(step=>step.status!=='running'&&step.status!=='pending').slice(-6).reverse();
+ if(!live.length&&!finished.length)processes.append(node('p','No steps recorded on this task yet.','muted'));
+ for(const step of live)processes.append(processRow(step,step.status==='running'?'running':'waiting for approval'));
+ for(const step of finished)processes.append(processRow(step));
+}
+function renderUsageBar(run){
+ const bar=$('agent-usage-bar');if(!bar)return;
+ bar.replaceChildren();
+ const steps=run?.steps||[],limit=run?.max_steps||100,usage=run?.usage||{};
+ if(!run){bar.hidden=true;return;}
+ const meter=document.createElement('progress');meter.max=limit;meter.value=Math.min(steps.length,limit);
+ const parts=[steps.length+' / '+limit+' steps'];
+ if(usage.calls)parts.push(usage.calls+' model calls · '+(usage.input_tokens||0)+'/'+(usage.output_tokens||0)+' tokens');
+ if(usage.cost_usd_estimate!=null)parts.push('~$'+Number(usage.cost_usd_estimate).toFixed(6));
+ if(usage.seconds)parts.push(formatSeconds(usage.seconds)+' measured');
+ bar.append(meter,node('span',parts.join(' · ')));
+ bar.hidden=false;
+}
 function renderRun(run){
- current=run;const savedResult=$('knowledge-step').value;$('knowledge-step').replaceChildren(new Option('Choose a completed result',''));for(const step of run?.steps||[])if(step.status==='completed')$('knowledge-step').append(new Option(step.tool+' · '+step.id.slice(0,8),step.id));if([...$('knowledge-step').options].some(o=>o.value===savedResult))$('knowledge-step').value=savedResult;const progress=$('progress');progress.replaceChildren();if(!run){renderReview(null);return;}
+ browserUI?.render(run);
+ window.sakuraReviewSavedContext?.(run);
+ current=run;const savedResult=$('knowledge-step').value;$('knowledge-step').replaceChildren(new Option('Choose a completed result',''));for(const step of run?.steps||[])if(step.status==='completed')$('knowledge-step').append(new Option(step.tool+' · '+step.id.slice(0,8),step.id));if([...$('knowledge-step').options].some(o=>o.value===savedResult))$('knowledge-step').value=savedResult;const progress=$('progress');progress.replaceChildren();if(!run){renderReview(null);renderInspector(null);renderUsageBar(null);return;}
  progress.append(node('h3',run.goal),node('p','Workspace: '+run.workspace),node('span',run.status,'badge'));
- if(run.summary)progress.append(node('p',run.summary));
+ renderThread(run);applyRunPlanner(run);
+ if(run.applied_skills?.length)progress.append(node('p','Skills applied: '+run.applied_skills.join(', ')));
+ if(run.summary){const line=node('p');writeWithServerLinks(line,run.summary);progress.append(line);}
  if(run.parent_id)progress.append(node('p','Child task · parent '+run.parent_id));
  for(const child of state.runs.filter(item=>item.parent_id===run.id))progress.append(button('Child: '+child.goal+' · '+child.status,async()=>{selected=child.id;renderReview(null);renderRun(await api('tasks/'+child.id));}));
- for(const step of run.steps){
-  const detail=node('details');detail.append(node('summary',step.tool+' · '+(step.auto?'auto-approved · '+step.status:step.status)),node('pre',JSON.stringify(step.arguments,null,2)));
-  if(step.result)detail.append(node('pre',JSON.stringify(step.result,null,2)));progress.append(detail);
- }
- const pending=run.steps.findLast(s=>s.status==='pending');renderReview(pending||null);
+ renderSteps(progress,run.steps);
+ renderReview(run.steps.findLast(step=>step.status==='pending')||null);
+ renderInspector(run);renderUsageBar(run);
 }
 function renderTools(){
  const previous=$('tool').value;$('tool').replaceChildren();
@@ -170,8 +468,19 @@ async function refreshTelegram(syncForm=false){
  $('telegram-state').textContent=(t.token_set?'Token saved. ':'No token saved. ')+(t.running?'Gateway is polling Telegram.':'Gateway is stopped.')+(t.chat_ids.length?' Allowed chat IDs: '+t.chat_ids.join(', '):' No chat ID is allowed yet, so the bot only tells people their ID.')+(t.last_error?' Last error: '+t.last_error:'');
  if(syncForm||!telegramFormLoaded){$('telegram-enabled').checked=t.enabled;$('telegram-voice').checked=t.voice_enabled===true;$('telegram-chat-ids').value=t.chat_ids.join(', ');$('telegram-token').value='';telegramFormLoaded=true;}
 }
+let workspaceOffered=false;
+function rememberWorkspace(){
+ // Offered once, when the panel opens: if the folder is cleared on purpose, the next poll must not
+ // type it back in. There is no setting of its own, so the folder Sakura most recently worked in is
+ // the one to offer back.
+ if(workspaceOffered)return;workspaceOffered=true;
+ const field=$('workspace');if(field.value.trim())return;
+ const recent=(state.runs||[]).filter(run=>run.workspace).sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))[0];
+ if(recent)field.value=recent.workspace;
+}
 async function refresh(){
- state=await api('state');workspaceUI?.render(state.automations||[],state.library_sync);$('connections').replaceChildren();await refreshTelegram();
+ state=await api('state');rememberWorkspace();workspaceUI?.render(state.automations||[],state.library_sync);$('connections').replaceChildren();
+ try{await refreshTelegram();}catch(error){$('telegram-state').textContent='Telegram status unavailable: '+error.message;}
  const providers=state.providers||[];const choice=$('planner-provider').value;
  $('planner-provider').replaceChildren();
  for(const item of providers){const option=node('option',item.label+(item.ready?'':' · not configured'));option.value=item.id;option.disabled=!item.ready;$('planner-provider').append(option);}
@@ -188,10 +497,9 @@ async function refresh(){
  $('command-permissions').replaceChildren();
  for(const item of state.command_permissions||[]){const entry=node('div',undefined,'connection');entry.append(node('pre',item.command+'\n'+item.cwd),button('Revoke command permission',async()=>{await api('permissions/'+item.id,undefined,'DELETE');await refresh();}));$('command-permissions').append(entry);}
  if(!state.command_permissions?.length)$('command-permissions').append(node('p','No commands are allow-listed.'));
- const skillChoice=$('selected-skill').value;$('selected-skill').replaceChildren(new Option('No skill',''));$('skills-list').replaceChildren();
- for(const skill of state.skills||[]){$('selected-skill').append(new Option(skill.title||skill.name,skill.name));const entry=node('details');entry.append(node('summary',skill.title||skill.name),...(skill.requirements?[node('p','Requires: '+skill.requirements)]:[]),node('pre',skill.instructions),button('Delete skill',async()=>{await api('skills/'+encodeURIComponent(skill.name),undefined,'DELETE');await refresh();}));$('skills-list').append(entry);}
- if((state.skills||[]).some(item=>item.name===skillChoice))$('selected-skill').value=skillChoice;
- $('tasks').replaceChildren();for(const run of [...state.runs].reverse())$('tasks').append(button(run.goal.slice(0,70)+' · '+run.status,async()=>{selected=run.id;renderReview(null);renderRun(await api('tasks/'+run.id));}));
+ const skillChoice=selectedSkills();$('selected-skill').replaceChildren();$('skills-list').replaceChildren();
+ for(const skill of state.skills||[]){const option=new Option(skill.title||skill.name,skill.name);option.selected=skillChoice.includes(skill.name);$('selected-skill').append(option);const entry=node('details');entry.append(node('summary',skill.title||skill.name),...(skill.requirements?[node('p','Requires: '+skill.requirements)]:[]),node('pre',skill.instructions),button('Delete skill',async()=>{await api('skills/'+encodeURIComponent(skill.name),undefined,'DELETE');await refresh();}));$('skills-list').append(entry);}
+ renderTaskRows();
  renderTools();if(selected){const run=state.runs.find(r=>r.id===selected);if(run)renderRun(run);}
  void refreshMetrics();
 }
@@ -209,7 +517,7 @@ async function refreshMetrics(){
 }
 $('transport').onchange=()=>{$('http-fields').hidden=$('transport').value!=='http';$('stdio-fields').hidden=$('transport').value!=='stdio';};
 $('learn-completed-skill').onclick=()=>perform(async()=>{if(!selected)throw Error('Select a successfully completed task from Task history first.');await api('skills/learn',{run_id:selected,name:$('learn-skill-name').value.trim()});$('learn-skill-name').value='';await refresh();});
-$('goal').addEventListener('input',()=>{const match=$('goal').value.match(/^\/(brag|learn)\b/);if(match&&[...$('selected-skill').options].some(option=>option.value===match[1]))$('selected-skill').value=match[1];});
+$('goal').addEventListener('input',()=>{const match=$('goal').value.match(/^\/(brag|learn)\b/);if(!match)return;const option=[...$('selected-skill').options].find(item=>item.value===match[1]);if(option)option.selected=true;});
 $('skill-save').onclick=()=>perform(async()=>{await api('skills',{name:$('skill-name').value.trim(),instructions:$('skill-instructions').value});$('skill-name').value='';$('skill-instructions').value='';await refresh();});
 $('skill-import').onclick=()=>perform(async()=>{const file=$('skill-import-file').files[0];if(!file||file.size>96000)throw Error('Choose a SKILL.md under 96 KB.');await api('skills/import',{markdown:await file.text(),source:file.name});$('skill-import-file').value='';await refresh();});
 $('doctor-run').onclick=()=>perform(async()=>{$('doctor-report').textContent=JSON.stringify(await api('doctor'),null,2);});
@@ -227,12 +535,15 @@ $('propose').onclick=()=>perform(async()=>{if(!selected)throw Error('Create or s
 $('cancel').onclick=()=>perform(async()=>{if(!selected)return;renderReview(null);renderRun(await api('tasks/'+selected+'/cancel',{}));await refresh();});
  $('pause').onclick=()=>perform(async()=>{if(!selected)return;renderRun(await api('tasks/'+selected+'/pause',{}));announce('Paused. Say resume when you want me to continue this task.');await refresh();});
  $('resume').onclick=()=>perform(async()=>{if(!selected)return;renderReview(null);const planned=await api('tasks/'+selected+'/resume',{...selectedPlanner(),additional_steps:25});renderRun(planned);announce(runAnnouncement(planned));await refresh();});
-$('clear-tasks').onclick=()=>perform(async()=>{if(!window.confirm('Clear all saved Agent tasks and the searchable archive from this PC? This cannot be undone.'))return;await api('tasks',undefined,'DELETE');selected=null;current=null;renderReview(null);$('progress').textContent='Select or create a task to begin.';$('history-results').replaceChildren();$('history-record').replaceChildren();await refresh();});
+$('clear-tasks').onclick=()=>perform(async()=>{if(!window.confirm('Clear all saved Agent tasks and the searchable archive from this PC? This cannot be undone.'))return;await api('tasks',undefined,'DELETE');selected=null;current=null;plannerOwner=null;renderReview(null);renderThread(null);$('progress').textContent='Select or create a task to begin.';$('history-results').replaceChildren();$('history-record').replaceChildren();await refresh();});
 async function searchHistory(query){
  const data=await api('history/search?q='+encodeURIComponent(query));const box=$('history-results');box.replaceChildren();$('history-record').replaceChildren();
  box.append(node('p',data.results.length+' matching sessions'));
  for(const item of data.results){const entry=node('div',undefined,'connection');entry.append(button(item.goal+' · '+item.status,async()=>{const record=await api('history/'+encodeURIComponent(item.id));$('history-record').replaceChildren(node('h3','Archived session · read only'),node('pre',JSON.stringify(record,null,2)));}),button('Forget',async()=>{if(!window.confirm('Delete this archived session from the searchable history? This cannot be undone.'))return;await api('history/'+encodeURIComponent(item.id),undefined,'DELETE');entry.remove();}),node('p',item.snippet));box.append(entry);}
 }
+$('send-message').onclick=()=>perform(sendChat);
+// Enter sends like the companion chat; Shift+Enter keeps the newline and Ctrl/Cmd+Enter starts a task.
+$('goal').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.isComposing){event.preventDefault();$('send-message').click();}});
 $('history-search').onclick=()=>perform(()=>searchHistory($('history-query').value));
 $('history-query').onkeydown=event=>{if(event.key==='Enter'){$('history-search').click();event.preventDefault();}};
 $('refresh').onclick=()=>perform(refresh);$('tool').onchange=renderSchema;
@@ -280,10 +591,15 @@ async function loadAgenda(){
  for(const event of data.events){const row=node('div',undefined,'connection');row.append(node('strong',event.summary||'(Untitled event)'),node('p',displayEventTime(event.start)+(event.end?' – '+displayEventTime(event.end):'')));if(event.location)row.append(node('p',event.location));box.append(row);}
 }
 const workspaceUI=window.installAgentWorkspace?.({api,perform,refresh,renderRun,selectedRun:()=>current,announce});
+const browserUI=window.installAgentBrowserPanel?.({api,perform,refresh,selectedRun:()=>current,token});
 const serviceUI=window.installAgentServices({api,perform,refresh,review:renderReview,renderRun,selectRun:id=>{selected=id;}});
 const memoryUI=window.installAgentMemory?.({api,perform,refresh});
+window.installMemoryWorkbench?.({api,perform});
+window.installMemoryArchaeology?.(document.getElementById('agent-memory-workbench'));
+window.installExtensionStore?.({api,perform,refresh});
 window.searchAgentHistory=searchHistory;
 const extensions=window.installAgentExtensions?.({api,perform,refresh,renderRun,selectRun:id=>{selected=id;if(!id){current=null;renderReview(null);}},currentRun:()=>current,planner:selectedPlanner,token,node,button});
-window.installAgentStudio?.({api,perform,newTask:()=>{selected=null;current=null;renderReview(null);$('goal').value='';$('progress').textContent='What would you like to work on?';}});
+window.installAgentGrowth?.({api,perform,token});
+window.installAgentStudio?.({api,perform,newTask:()=>{selected=null;current=null;plannerOwner=null;renderReview(null);renderThread(null);$('goal').value='';$('progress').textContent='What would you like to work on?';}});
 perform(refresh);
-</script></body></html>
+</script><script type="module" src="/static/js/first-run-guide.js?v=auto-navigation3"></script></body></html>

@@ -21,6 +21,44 @@ class NormalResponseTests(unittest.TestCase):
                 generate.assert_called_once()
                 self.assertEqual(model.trusted_memory,[])
 
+    def test_invented_completed_action_is_replaced_even_with_restriction_off(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model=LLM(Path(folder)/'memory.json');model.response_restriction_level='off'
+            with patch('response_evidence.retrieve',return_value=None),patch.object(model,'_request',return_value='Volume has been updated to 50%.') as generate:
+                reply=model.chat('confirmed')
+        self.assertNotIn('has been updated',reply)
+        self.assertIn('no PC action was run',reply)
+        self.assertTrue(generate.called)
+
+    def test_simple_past_success_claim_is_blocked_with_restriction_off(self):
+        for draft in ['I set the volume to 50%.','Done, volume set to 50%.','I changed your brightness to 40%.']:
+            with self.subTest(draft=draft):
+                model=LLM(persist_memory=False);model.response_restriction_level='off'
+                with patch('response_evidence.retrieve',return_value=None),patch.object(model,'_request',return_value=draft):
+                    reply=model.chat('confirmed')
+                self.assertIn('no PC action was run',reply)
+                self.assertNotEqual(reply,draft)
+
+    def test_denied_pc_capability_is_replaced_with_restriction_off(self):
+        # The transcript the user reported: no command matched, so the model invented a
+        # "go to your sound controls" excuse for a setting Sakura really controls.
+        model=LLM(persist_memory=False);model.response_restriction_level='off'
+        draft=("I can't increase your volume directly - that's handled by the system settings. "
+               'Try going to your sound controls and adjusting it there.')
+        with patch('response_evidence.retrieve',return_value=None),patch.object(model,'_request',return_value=draft):
+            reply=model.chat('Increase the volume to 50 percent.')
+        self.assertNotEqual(reply,draft)
+        self.assertIn('I can change your system volume from here',reply)
+        self.assertNotIn('sound controls',reply)
+
+    def test_invented_current_level_is_replaced_with_restriction_off(self):
+        model=LLM(persist_memory=False);model.response_restriction_level='off'
+        draft='Got it! Volume is going from 18% to 22%, so we are moving up a bit - no problem.'
+        with patch('response_evidence.retrieve',return_value=None),patch.object(model,'_request',return_value=draft):
+            reply=model.chat('22')
+        self.assertNotIn('18%',reply)
+        self.assertIn('I have not read your current setting',reply)
+
     def test_viewer_question_is_not_rejected_by_social_allowlist(self):
         with tempfile.TemporaryDirectory() as folder:
             model=LLM(Path(folder)/'memory.json')

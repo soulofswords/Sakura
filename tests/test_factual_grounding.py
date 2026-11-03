@@ -49,6 +49,56 @@ class FactualGroundingTests(unittest.TestCase):
                 self.assertIsNone(facts.gpu_memory_lookup(question))
             get.assert_not_called()
 
+    def test_unperformed_pc_change_is_never_claimed(self):
+        self.assertTrue(facts.unsupported_action_claim('Volume has been updated to 50%.'))
+        self.assertTrue(facts.unsupported_action_claim('I have set the volume to 50%.'))
+        self.assertTrue(facts.unsupported_action_claim('Brightness is now at 40 percent.'))
+        self.assertFalse(facts.unsupported_action_claim('System volume is 22 percent and muted.'))
+        self.assertFalse(facts.unsupported_action_claim('Volume will be set to 50% now.'))
+        self.assertFalse(facts.unsupported_action_claim('Volume has been updated.',
+                                                        'write a pretend story'))
+        self.assertTrue(facts.unsupported_tool_claim('Volume has been updated to 50%.','make it 50'))
+
+    def test_denying_a_setting_sakura_controls_is_corrected(self):
+        denied=facts.unwarranted_capability_denial("I can't increase your volume directly - that's handled by "
+                                                   'the system settings.','Increase the volume to 50 percent.')
+        self.assertIn('I can change your system volume from here',denied)
+        self.assertIn('set brightness',facts.unwarranted_capability_denial(
+            'Sorry, I cannot change your brightness; use Windows display settings.','lower the brightness to 20'))
+        self.assertIn('system volume',facts.unwarranted_capability_denial(
+            "I can't adjust your volume directly - that's outside what I'm able to do here.",
+            'kindly bump the volume to 50'))
+        # Honest refusals and unrelated answers must survive untouched.
+        for reply,question in [('System volume is 18 percent.','what is my volume'),
+                               ('I cannot do that because your monitor refused the DDC/CI write.','set brightness to 200 percent'),
+                               ('I cannot read that file; it does not exist.','open the volume file'),
+                               ("I can't help with that.",'tell me about movies'),
+                               ('I am not able to find that song in the queue.','play the volume song')]:
+            self.assertIsNone(facts.unwarranted_capability_denial(reply,question),(reply,question))
+
+    def test_generated_current_setting_level_is_not_believed(self):
+        # The live transcript: nothing was read, yet the reply stated "from 18% to 22%".
+        self.assertTrue(facts.invented_setting_state('Volume is going from 18% to 22%.','22'))
+        self.assertTrue(facts.invented_setting_state('Your brightness is now at 30 percent.','make it dimmer'))
+        for reply,question in [('Your speaker volume is limited to 100 percent.','why is my volume capped'),
+                               ('If the volume is at 50 percent it will be loud.','is 50 loud'),
+                               ('System volume is 18 percent.','the volume is 18 percent please confirm'),
+                               ("I can't tell without reading it.",'what is my volume')]:
+            self.assertFalse(facts.invented_setting_state(reply,question),(reply,question))
+
+    def test_completion_wording_variants_and_non_claims(self):
+        for text in ['I set the volume to 50%.','Done, volume set to 50%.',
+                     'I changed your brightness to 40%.',"I've turned it down.",
+                     'Volume successfully adjusted to 50%.','Volume is now at 50%.',
+                     'Brightness is now at 40%.']:
+            self.assertTrue(facts.unsupported_action_claim(text),text)
+        for text in ['Set the volume to 50%.','Volume will be set to 50% now.',
+                     'I have not changed your brightness.',"I didn't set the volume.",
+                     'If I set the volume to 50%, you will hear it.',
+                     'Was the volume set to 50%?', 'System volume is 22 percent and muted.',
+                     'Keep the volume set to 50%.', 'Leave your brightness set to 40%.']:
+            self.assertFalse(facts.unsupported_action_claim(text),text)
+
     def test_unsupported_search_claim_never_reaches_generation(self):
         from response_evidence import UNKNOWN
         with tempfile.TemporaryDirectory() as folder:

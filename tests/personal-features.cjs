@@ -1,0 +1,24 @@
+const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({headless:true});try{
+ const page=await browser.newPage({viewport:{width:390,height:844}});const calls=[];let guest=true;
+ await page.route('http://personal.test/**',route=>{const path=new URL(route.request().url()).pathname;
+  if(path==='/')return route.fulfill({contentType:'text/html',body:'<main><div id="tab-general"></div></main><script type="module" src="/controls.js"></script>'});
+  if(path==='/controls.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync('static/js/personal-feature-controls.js','utf8')});
+  calls.push({path,method:route.request().method(),data:route.request().postDataJSON()});
+  if(path==='/api/features/guest')return route.fulfill({status:403,json:{detail:'Owner approval was rejected.'}});
+  return route.fulfill({json:path==='/api/features/status'?{guest}:path==='/api/chat'?{reply:'Guest reply',guest:true}:path==='/api/features/sdk-token'&&route.request().method()==='POST'?{token:'synthetic-token'}:{ok:true}});
+ });
+ await page.goto('http://personal.test/');await page.locator('#guest-session-banner').waitFor({state:'visible'});
+ await page.getByLabel('Guest message').fill('Hello');await page.locator('#guest-session-banner form button').click();
+ await page.getByText('Guest reply',{exact:true}).waitFor();assert.equal(calls.find(x=>x.path==='/api/chat').data.text,'Hello');
+ await page.getByRole('button',{name:'Restore owner session'}).click();await page.getByText('Owner approval was rejected.').waitFor();assert.equal(await page.locator('#guest-session-banner').isVisible(),true);
+ guest=false;await page.reload();await page.locator('#guest-session-banner').waitFor({state:'hidden'});
+ await page.getByRole('button',{name:'Create local SDK token',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[aria-label="Local SDK token"]').value==='synthetic-token');
+ assert.equal(await page.getByLabel('Local SDK token').getAttribute('type'),'password');await page.getByRole('button',{name:'Revoke SDK token',exact:true}).click();await page.getByText('SDK access revoked.').waitFor();assert.equal(await page.getByLabel('Local SDK token').inputValue(),'');
+ await page.route('http://personal.test/native-jobs.js',r=>r.fulfill({contentType:'text/javascript',body:'export const nativeJob=async()=>window.pcPacket;'}));
+ await page.route('http://personal.test/phone-context.js',r=>r.fulfill({contentType:'text/javascript',body:fs.readFileSync('android/assets/phone-context.js','utf8')}));
+ await page.evaluate(()=>{window.packet={version:1,saves:[{type:'document',url_or_path:'phone-note',topic:'Existing note',goal:'Keep me'}]};window.pcPacket={version:1,saves:[{type:'link',url_or_path:'https://example.com/',topic:'PC note',goal:'Review'}]};window.Sakura={memoryContext:()=>JSON.stringify(packet),saveMemoryContext:value=>{packet=JSON.parse(value);return '{}';}};});
+ await page.addScriptTag({url:'http://personal.test/phone-context.js',type:'module'});await page.locator('[data-pull]').click();await page.waitForFunction(()=>window.packet.saves.length===2);assert.equal(await page.evaluate(()=>packet.saves[0].topic),'Existing note');
+ await page.locator('[data-pull]').click();await page.waitForFunction(()=>document.querySelector('[data-status]').textContent.startsWith('Added 0'));assert.equal(await page.evaluate(()=>packet.saves.length),2);
+ console.log('PASS: guest chat works after restart, owner restore remains gated, SDK revoke clears token, phone pulls preserve notes and deduplicate');
+}finally{await browser.close();}})().catch(error=>{console.error(error);process.exitCode=1;});
