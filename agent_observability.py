@@ -12,7 +12,7 @@ from pathlib import Path
 MAX_LINE_BYTES = 1200
 MAX_BYTES = 2_000_000
 KEEP_AFTER_ROTATE = 1_000_000
-KINDS = ('task', 'propose', 'decision', 'plan', 'reviewer', 'control', 'automation', 'usage')
+KINDS = ('task', 'propose', 'decision', 'plan', 'reviewer', 'control', 'automation', 'usage', 'repair')
 
 
 def _short(value, limit=120):

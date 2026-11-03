@@ -28,6 +28,34 @@ class AgentAPITests(unittest.TestCase):
             self.assertEqual(response.status_code,403)
         self.assertEqual(self.client.get('/agent',headers={'Origin':'https://untrusted.example'}).status_code,403)
 
+    def test_browser_preview_requires_local_authorization_and_is_not_cached(self):
+        endpoint='/api/agent/browser/task/preview'
+        with patch.object(self.runtime.browser,'preview',return_value=b'png') as capture:
+            for headers in ({},{'X-Sakura-Agent':'bad'},{**self.headers,'Origin':'https://outside.example'}):
+                self.assertEqual(self.client.get(endpoint,headers=headers).status_code,403)
+            capture.assert_not_called()
+            response=self.client.get(endpoint,headers=self.headers)
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.content,b'png')
+            self.assertEqual(response.headers['content-type'],'image/png')
+            self.assertEqual(response.headers['cache-control'],'no-store')
+            capture.assert_called_once_with('task')
+
+    def test_memory_workshop_and_catalog_require_native_and_local_approval(self):
+        for endpoint in ('audit','memory-workbench','memory-workbench/graph','extension-store'):
+            self.assertEqual(self.client.get('/api/agent/'+endpoint).status_code,403)
+        for endpoint,payload in [('memory-workbench/configure',{'enabled':True}),('extension-store/add',{'id':'playwright'})]:
+            self.assertEqual(self.client.post('/api/agent/'+endpoint,json=payload).status_code,403)
+            self.native_approval.return_value=False
+            response=self.client.post('/api/agent/'+endpoint,headers=self.headers,json=payload)
+            self.assertEqual(response.status_code,403)
+        self.assertEqual(self.runtime.connections.all(),{})
+        self.native_approval.return_value=True
+        with patch('agent_connections.secret_set'),patch('agent_connections.secret_get',return_value={}):
+            response=self.client.post('/api/agent/extension-store/add',headers=self.headers,json={'id':'playwright'})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()['args'][1],'@playwright/mcp@0.0.84')
+
     def test_new_native_and_schedule_routes_require_local_panel_authorization(self):
         for endpoint,payload in [('local-ai/runtime',{}),('local-ai/import',{'path':'secret.gguf'}),('local-ai/inspect',{'path':'C:/private'}),('local-ai/import-detected',{'path':'secret.gguf'}),
                                  ('local-ai/chat',{'messages':[]}),('automations',{'approved':True}),('library-sync/run',{'approved':True}),('memory',{'enabled':True}),('skills/learn',{'run_id':'a','name':'test'})]:
@@ -66,6 +94,22 @@ class AgentAPITests(unittest.TestCase):
         from agent_local_ai import local_ai
         self.assertEqual(response.status_code,200)
         self.assertIs(plan.call_args.args[1],local_ai)
+    def test_plan_and_resume_carry_several_skills_and_an_empty_choice(self):
+        with patch('agent_api.runtime.plan',return_value={'ok':True}) as plan:
+            for payload,expected in (({'skill':['clone-and-build','readme-summary']},['clone-and-build','readme-summary']),
+                                     ({'skill':'cv-polish'},['cv-polish']),
+                                     ({'skill':[' cv-polish ','cv-polish','']},['cv-polish']),
+                                     ({},[])):
+                body={'provider':'sakura-native',**payload}
+                self.assertEqual(self.client.post('/api/agent/tasks/x/plan',headers=self.headers,json=body).status_code,200)
+                self.assertEqual(plan.call_args.args[2],expected)
+            for bad in ({'skill':{'name':'cv-polish'}},{'skill':[1]},{'skill':[{'name':'x'}]},{'skill':'x'*200}):
+                self.assertEqual(self.client.post('/api/agent/tasks/x/plan',headers=self.headers,
+                    json={'provider':'sakura-native',**bad}).status_code,400)
+        with patch('agent_api.runtime.resume',return_value={'ok':True}) as resume:
+            self.assertEqual(self.client.post('/api/agent/tasks/x/resume',headers=self.headers,
+                json={'provider':'sakura-native','skill':['pdf-export'],'additional_steps':5}).status_code,200)
+            self.assertEqual(resume.call_args.args[2],['pdf-export'])
     def test_pause_and_resume_routes_drive_the_runtime(self):
         run=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Long task','workspace':self.folder.name}).json()
         self.assertEqual(self.client.post('/api/agent/tasks/'+run['id']+'/pause',headers=self.headers).status_code,200)
@@ -75,6 +119,38 @@ class AgentAPITests(unittest.TestCase):
         self.assertEqual(response.status_code,200);resume.assert_called_once()
         self.assertEqual(resume.call_args.args[3],25)
         self.assertEqual(self.client.post('/api/agent/tasks/'+run['id']+'/resume',headers=self.headers,json={'provider':'sakura-native','additional_steps':5000}).status_code,400)
+    def test_agent_message_route_stores_only_the_two_turns_of_one_exchange(self):
+        run=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Talk about my task','workspace':self.folder.name}).json()
+        endpoint='/api/agent/tasks/'+run['id']+'/message'
+        self.assertEqual(self.client.post(endpoint,json={'text':'hi','reply':'hello'}).status_code,403)
+        for body in ({'text':'  ','reply':'hello'},{'text':'hi','reply':'   '},{'text':'hi'},{'reply':'hello'}):
+            self.assertEqual(self.client.post(endpoint,headers=self.headers,json=body).status_code,400)
+        self.assertEqual(self.client.post(endpoint,headers=self.headers,json={'text':'Did it work?','reply':'The second step failed.'}).status_code,200)
+        stored=self.client.get('/api/agent/tasks/'+run['id'],headers=self.headers).json()['messages']
+        self.assertEqual([turn['role'] for turn in stored],['user','sakura'])
+        self.assertEqual([turn['text'] for turn in stored],['Did it work?','The second step failed.'])
+        self.assertEqual(self.client.post('/api/agent/tasks/nosuchtask/message',headers=self.headers,json={'text':'a','reply':'b'}).status_code,404)
+
+    def test_a_task_without_a_workspace_folder_is_refused_not_defaulted(self):
+        for missing in ({'goal':'Set up the parser'},{},{'goal':'Set up the parser','workspace':''},
+                        {'goal':'Set up the parser','workspace':'   '},{'goal':'Set up the parser','workspace':None}):
+            self.assertEqual(self.client.post('/api/agent/tasks',headers=self.headers,json=missing).status_code,400)
+        self.assertEqual(self.client.get('/api/agent/state',headers=self.headers).json()['runs'],[])
+
+    def test_task_rename_pin_and_delete_routes_touch_only_their_own_task(self):
+        first=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Set up the parser','workspace':self.folder.name}).json()['id']
+        second=self.client.post('/api/agent/tasks',headers=self.headers,json={'goal':'Write the release notes','workspace':self.folder.name}).json()['id']
+        self.assertEqual(self.client.post('/api/agent/tasks/'+first+'/rename',headers=self.headers,json={'title':'  '}).status_code,400)
+        self.assertEqual(self.client.post('/api/agent/tasks/nosuchtask/rename',headers=self.headers,json={'title':'x'}).status_code,404)
+        self.assertEqual(self.client.post('/api/agent/tasks/'+first+'/rename',headers=self.headers,json={'title':'  Parser setup  '}).json()['title'],'Parser setup')
+        self.assertEqual(self.client.post('/api/agent/tasks/'+first+'/pin',headers=self.headers,json={'pinned':True}).json()['pinned'],True)
+        self.assertFalse(self.client.get('/api/agent/tasks/'+second,headers=self.headers).json().get('pinned'))
+        self.assertEqual(self.client.delete('/api/agent/tasks/'+first,headers=self.headers).status_code,200)
+        self.assertEqual(self.client.get('/api/agent/tasks/'+first,headers=self.headers).status_code,400)
+        self.assertEqual(self.client.delete('/api/agent/tasks/'+first,headers=self.headers).status_code,404)
+        self.assertEqual(self.client.delete('/api/agent/tasks/'+first).status_code,403)
+        self.assertEqual([run['id'] for run in self.client.get('/api/agent/state',headers=self.headers).json()['runs']],[second])
+
     def test_history_forget_route_requires_panel_token(self):
         with patch('agent_api.runtime.history.forget',return_value={'ok':True,'id':'x'}) as forget:
             self.assertEqual(self.client.delete('/api/agent/history/x').status_code,403)

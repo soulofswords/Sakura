@@ -1,0 +1,10 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const context={};vm.createContext(context);vm.runInContext(fs.readFileSync('static/js/proactive-state.js','utf8').replaceAll('export function','function')+';this.create=createInitiative;',context);
+let time=0,enabled=true;const state=context.create({now:()=>time,enabled:()=>enabled});
+assert.equal(state.consider({reply:'Interesting screen'}),false);time=8000;assert.equal(state.consider({reply:'Interesting screen'}),false);time=16000;assert.equal(state.consider({reply:'Interesting screen'}),true);
+time=20000;assert.equal(state.consider({reply:'Won',event:'victory'}),false);
+assert.equal(state.consider({reply:'Direct response',manual:true}),true);
+time=120000;assert.equal(state.consider({reply:'Won',event:'victory',busy:true}),false);
+assert.equal(state.consider({reply:'[QUIET]'}),false);assert.equal(state.consider({reply:'Won',event:'victory'}),true);
+enabled=false;assert.equal(state.consider({reply:'Ordinary reaction'}),true);
+console.log('PASS: opt-in accumulated comments, cooldown, manual/input priority and quiet observations');

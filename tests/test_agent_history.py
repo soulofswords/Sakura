@@ -120,3 +120,56 @@ def test_planner_context_gets_source_links_without_archived_bodies(tmp_path):
         search.assert_called_once_with('Summarize the quarterly report',run['workspace'])
         assert [item['id'] for item in context['related_sessions']]==['old-1']
         assert 'full archived body' not in json.dumps(context['related_sessions'])
+
+
+def test_recent_reads_newest_first_and_creates_no_archive_of_its_own(tmp_path):
+    import time
+    path=tmp_path/'agent-task-history.sqlite3'
+    assert AgentHistory(path).recent()==[]
+    assert not path.exists()
+    history=AgentHistory(path)
+    now=time.time()
+    history.save([{'id':'r1','goal':'first goal','workspace':str(tmp_path),'status':'completed','created_at':now-90000}])
+    history.save([{'id':'r2','goal':'second goal','workspace':str(tmp_path),'status':'failed','created_at':now}])
+    rows=history.recent()
+    assert [row['goal'] for row in rows]==['second goal','first goal']
+    assert rows[1]['status']=='completed'
+    assert [row['id'] for row in history.recent(1)]==['r2']
+
+
+def test_the_companion_answers_a_work_question_from_the_archive(tmp_path):
+    import time
+    from llm import LLM
+    path=tmp_path/'agent-task-history.sqlite3'
+    AgentHistory(path).save([{'id':'r1','goal':'Wire the brightness control into the settings panel',
+                              'workspace':'F:\\AI\\assistant\\Sakura','status':'completed',
+                              'created_at':time.time()}])
+    model=LLM(tmp_path/'memory.json',persist_memory=False)
+    model.configure_task_history(path)
+    def asked(message):
+        with patch.object(model,'_request',return_value='Okay.') as call:
+            model.chat(message)
+        # Small talk is answered without a model call at all, which is itself proof no archive row
+        # reached a reply nobody asked for.
+        return call.call_args_list[0].args[0] if call.call_args_list else []
+    work=[row for row in asked('what was I working on?')
+          if 'Task records archived on this PC' in str(row.get('content',''))]
+    assert len(work)==1
+    assert 'brightness control' in work[0]['content']
+    assert 'completed' in work[0]['content']
+    # The record is what was archived, not a claim about now: the row has to say so.
+    assert 'does not mean the result still exists' in work[0]['content']
+    assert 'Never offer to resume' in work[0]['content']
+    assert not [row for row in asked('hello')
+                if 'Task records archived on this PC' in str(row.get('content',''))]
+
+
+def test_a_pc_with_no_archived_task_gets_no_history_row(tmp_path):
+    from llm import LLM
+    model=LLM(tmp_path/'memory.json',persist_memory=False)
+    model.configure_task_history(tmp_path/'nothing.sqlite3')
+    with patch.object(model,'_request',return_value='Okay.') as call:
+        model.chat('what was I working on?')
+    rows=call.call_args_list[0].args[0]
+    assert not [row for row in rows if 'Task records archived on this PC' in str(row.get('content',''))]
+    assert not (tmp_path/'nothing.sqlite3').exists()

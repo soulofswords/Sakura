@@ -43,12 +43,13 @@ async def check():
   async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app),base_url=origin,headers={'Origin':origin}) as client:
    for path in ['/','/api/models','/api/voices','/api/settings','/api/identity','/api/version']:
     response=await client.get(path);assert response.status_code==200,(path,response.text)
-   assert (await client.get('/api/version')).json()['version']=='1.0.2'
+   assert (await client.get('/api/version')).json()['version']=='2.0'
    assert (await client.get('/static/js/pmx-stage.js')).status_code==200
    assert (await client.get('/api/scenery/assets?kind=stage')).status_code==200
    settings=(await client.get('/api/settings')).json();assert settings['product_edition']==edition
    voices=(await client.get('/api/voices')).json()['presets']
-   assert sum(p.get('backend')=='kokoro' for p in voices)==22
+   assert sum(p.get('backend')=='kokoro' for p in voices)==10
+   assert sum(p.get('backend')=='kokoro' and p.get('language')=='English' for p in voices)==6
    from config import TTS_BACKEND
    assert TTS_BACKEND=='kokoro'
    from kokoro_speech import ASSETS, ASSETS_DIR, _hash
@@ -61,11 +62,16 @@ async def check():
     assert (await client.post('/api/tracking/mode',json={'enabled':False})).status_code==409
     assert app.llm is None
    else:
+    assert (await client.get('/api/companion/speakers')).status_code==200
+    assert (await client.get('/static/js/speaker-enrolment.js')).status_code==200
+    assert (await client.post('/api/companion/speakers/install',json={})).status_code==400
+    assert (await client.post('/api/companion/speakers/rename',json={'name':'missing','new_name':''})).status_code==400
     from agent_runtime import runtime
     from agent_starter_skills import PACK
     assert set(PACK).issubset({skill['name'] for skill in runtime.skills.list()}),'Starter skills missing from clean installation'
     response=await client.post('/api/tracking/mode',json={'enabled':True});assert response.status_code==200,response.text
     assert app.app.state.tracking_only
+    assert (await client.get('/api/companion/speakers')).status_code==409
     response=await client.post('/api/tracking/mode',json={'enabled':False});assert response.status_code==200,response.text
     assert not app.app.state.tracking_only
  print('PASS:',DISPLAY_NAME,'installed payload integrity, imports, launcher and isolated backend; empty model libraries')

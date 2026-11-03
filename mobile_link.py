@@ -17,6 +17,7 @@ from collections import deque
 import httpx
 from local_api_security import internal_headers
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse,FileResponse
 import uvicorn
 import mobile_tls
@@ -48,6 +49,9 @@ class MobileLink:
         self.edition=EDITION;self.frame=None;self.camera=None;self.state={'edition':EDITION};self.lock=threading.RLock();self.server=None;self.attempts={};self.last_contact=0;self.contact_kind='';self.contact_host='';self.own_addresses=set();self._tls=None
         self.pc_port=8766;self.port=(8772 if slot==1 else 8810+slot) if EDITION=='vtuber' else (8771 if slot==1 else 8820+slot);self.code_expires=0;self.thread=None
         self.model_transfer=None;self.model_package=None;self.transfer_request=None;self.tracking_control=None;self.tracking_sequence=0
+        # The phone can only ever ask for one model at a time, so a batch ticked on the PC
+        # waits here and each later request is served without reopening the native picker.
+        self.model_queue=[];self.queue_expires=0.0
         self.api=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
         self.api.add_api_route('/pair',self.pair,methods=['POST'])
         self.api.add_api_route('/identity-proof',self.identity_proof,methods=['POST'])
@@ -58,6 +62,8 @@ class MobileLink:
         self.api.add_api_route('/frame',self.tracking_frame,methods=['POST'])
         self.api.add_api_route('/camera',self.camera_frame,methods=['POST'])
         self.api.add_api_route('/chat',self.chat,methods=['POST'])
+        self.api.add_api_route('/memory/context',self.memory_context,methods=['GET','POST'])
+        self.api.add_api_route('/memory/conversations',self.memory_conversations,methods=['GET','POST'])
         self.api.add_api_route('/gemini',self.gemini,methods=['POST'])
         self.api.middleware('http')(self.guard)
 
@@ -261,7 +267,7 @@ class MobileLink:
         return self.info()
 
     def stop(self):
-        self.enabled=False;self.tokens.clear();self.code='';self.frame=None;self.camera=None;self.commands.clear();self.transfer_request=None
+        self.enabled=False;self.tokens.clear();self.code='';self.frame=None;self.camera=None;self.commands.clear();self.transfer_request=None;self.model_queue=[]
         self.stop_beacon()
         if self.server:self.server.should_exit=True
 
@@ -319,7 +325,11 @@ class MobileLink:
     async def phone_state(self):
         # The id lets a phone that reached this address confirm it is the same PC it
         # paired with, and refresh its saved address after a DHCP change.
-        return {**self.state,'pc_id':self.pc_id,'name':self.pc_name,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request,
+        from config import BASE_DIR
+        from hotkey_deck import read
+        deck=read(BASE_DIR)
+        return {**self.state,'hotkey_deck':[{'id':s['id'],'label':s['label'],'kind':s['kind']} for s in deck['slots']], 'pc_id':self.pc_id,'name':self.pc_name,'model_transfer':self.model_transfer,'transfer_request':self.transfer_request,
+            'model_queue':len(self.model_queue),
             'tracking_control':self.tracking_control,'fingerprint':self.tls['fingerprint']}
 
     def transfer_result(self,identifier,status,error=''):
@@ -327,7 +337,29 @@ class MobileLink:
         with self.lock:
             if not self.transfer_request or self.transfer_request['id']!=identifier:raise ValueError('This model request has expired.')
             self.transfer_request.update(status=status,error=str(error)[:240])
+            # The PC gave up on this transfer, so the rest of its batch goes with it.
+            if status in ('cancelled','failed'):self.model_queue=[]
         return {'ok':True}
+
+    def queue_selection(self,entries,indexes,folder,kind):
+        with self.lock:
+            self.model_queue=[{'source':entries[index],'folder':entries[index] if kind=='vrm' else folder,'kind':kind}
+                              for index in indexes]
+            self.queue_expires=time.time()+1800
+            return len(self.model_queue)
+
+    def stage_next(self,request_id):
+        """Bundle the next ticked model for a fresh phone request, or return None when the batch is done."""
+        with self.lock:
+            if not self.model_queue or time.time()>self.queue_expires:
+                self.model_queue=[]
+                return None
+            item=self.model_queue.pop(0)
+        self.stage_selection(item['source'],item['folder'],item['kind'],request_id)
+        with self.lock:return self.model_transfer
+
+    def clear_queue(self):
+        with self.lock:self.model_queue=[]
 
     def stage_selection(self,source,folder,kind,request_id):
         if not self.enabled:raise ValueError('Phone connection is off.')
@@ -360,6 +392,14 @@ class MobileLink:
 
     async def command(self,request:Request):
         body=await request.json();kind=body.get('type')
+        if kind=='deck':
+            from config import BASE_DIR
+            from hotkey_deck import execute
+            try:result=await run_in_threadpool(execute,BASE_DIR,body.get('id'))
+            except ValueError as error:return JSONResponse({'error':str(error)},400)
+            if result.get('pose'):
+                with self.lock:self.commands.append({'type':'deck-pose','name':result['pose']})
+            return result
         if kind=='model-result':
             with self.lock:
                 current=self.transfer_request
@@ -383,7 +423,16 @@ class MobileLink:
                     return JSONResponse({'error':'A model transfer is already pending on the PC.'},409)
                 identifier=secrets.token_hex(16)
                 self.transfer_request={'id':identifier,'status':'waiting','created':time.time()}
-                self.commands.append({'type':'request-model','request_id':identifier})
+                queued=bool(self.model_queue and time.time()<=self.queue_expires)
+            if queued:
+                # A batch is already approved on the PC, so answer the tap straight away and keep
+                # the picker closed; only a failed bundle falls back to waking the PC dialog.
+                try:
+                    await run_in_threadpool(self.stage_next,identifier)
+                    return {'request_id':identifier,'queued':len(self.model_queue)}
+                except Exception:
+                    pass
+            with self.lock:self.commands.append({'type':'request-model','request_id':identifier})
             return {'request_id':identifier}
         if kind not in ('expression','clear-expressions','tracking-start','tracking-stop','companion-tracking-start','companion-tracking-stop','camera-start','camera-stop','calibrate'):
             return JSONResponse({'error':'Unsupported control'},400)
@@ -488,6 +537,37 @@ class MobileLink:
             reply=response.json().get('reply','')
             with self.lock:self.commands.append({'type':'phone-reply','text':reply})
             return {'reply':reply}
+
+    async def memory_context(self,request:Request):
+        from personal_features import features,export_context,import_context
+        from memory_archaeology import service
+        if self.edition=='vtuber' or self.state.get('edition')=='vtuber' or features().guest() or not features().settings().get('phone_memory'):
+            return JSONResponse({'error':'Enable paired-phone saved-context sharing on the PC first.'},409)
+        try:
+            result=await run_in_threadpool(export_context,service()) if request.method=='GET' else await run_in_threadpool(import_context,service(),await request.json())
+            return result
+        except ValueError as error:return JSONResponse({'error':str(error)},400)
+
+    async def memory_conversations(self,request:Request):
+        from personal_features import features
+        if self.edition=='vtuber' or self.state.get('edition')=='vtuber' or features().guest() or not features().settings().get('phone_history'):
+            return JSONResponse({'error':'Enable PC conversation export to paired phones in Companion first.'},409)
+        payload=None
+        if request.method=='POST':
+            data=bytearray()
+            async for chunk in request.stream():
+                data.extend(chunk)
+                if len(data)>1000:return JSONResponse({'error':'Invalid conversation request.'},413)
+            try:payload=json.loads(data)
+            except ValueError:return JSONResponse({'error':'Use a conversation preview ID.'},400)
+            if not isinstance(payload,dict) or set(payload)!={'snapshot_id'} or not isinstance(payload['snapshot_id'],str) or not re.fullmatch('[0-9a-f]{64}',payload['snapshot_id']):
+                return JSONResponse({'error':'Use a conversation preview ID.'},400)
+        try:
+            async with httpx.AsyncClient(timeout=30,trust_env=False) as client:
+                response=await client.request(request.method,f'http://127.0.0.1:{self.pc_port}/api/features/conversation-export',json=payload,headers=internal_headers())
+            if not response.is_success:return JSONResponse({'error':'The PC refused conversation export. Check Companion mode, sharing permission and the preview.'},response.status_code)
+            return response.json()
+        except (httpx.HTTPError,ValueError):return JSONResponse({'error':'PC conversation export is unavailable. Keep Companion open and try again.'},503)
 
     async def gemini(self,request:Request):
         if self.edition=='vtuber' or self.state.get('edition')=='vtuber':return JSONResponse({'error':'Use Sakura Companion on the PC.'},409)

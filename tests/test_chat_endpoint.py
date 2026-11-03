@@ -64,8 +64,45 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_command_reply_skips_llm_and_screen_validation(self):
         model = Mock()
-        with patch.object(server, 'llm', model), patch.object(server, 'get_settings', return_value={'computer_control_enabled': True}), patch('assistant_commands.run_command', return_value='Opening Google Chrome.') as command:
-            result = await server.chat({'text': 'open chrome', 'screen_image': 'unused', 'defer_audio': True})
-        self.assertEqual(result['reply'], 'Opening Google Chrome.')
-        command.assert_called_once_with('open chrome', True, 'Sakura')
+        with patch.object(server, 'llm', model), patch.object(server, 'get_settings', return_value={'computer_control_enabled': True}), patch('assistant_commands.run_command', return_value='PC status is 13 percent.') as command:
+            result = await server.chat({'text': 'pc status', 'screen_image': 'unused', 'defer_audio': True})
+        self.assertEqual(result['reply'], 'PC status is 13 percent.')
+        command.assert_called_once_with('pc status', True, 'Sakura', 'desktop')
         model.chat.assert_not_called()
+
+    async def test_agent_mode_message_asks_the_same_chat_brain_about_its_task(self):
+        model = Mock()
+        model.chat.return_value = 'The clone step timed out.'
+        settings = {'response_restriction_level': 'off'}
+        with patch.object(server, 'llm', model), patch.object(server, 'get_settings', return_value=settings), patch('assistant_commands.run_command', return_value=None), patch('current_information.lookup_with_context', return_value=(None, None)), patch('factual_grounding.gpu_memory_lookup', return_value=None), patch('agent_runtime.runtime.conversation_context', return_value='Goal: clone the repo · status failed') as brief:
+            result = await server.chat({'text': 'What happened with my task?', 'defer_audio': True, 'agent_task': 'run-1'})
+        self.assertEqual(brief.call_args.args[0], 'run-1')
+        self.assertEqual(model.chat.call_args.args[:3], ('What happened with my task?', None, None))
+        self.assertEqual(model.chat.call_args.kwargs['agent_task'], 'Goal: clone the repo · status failed')
+        self.assertEqual(result['reply'], 'The clone step timed out.')
+
+    async def test_agent_task_brief_is_not_sent_to_the_screen_reaction(self):
+        # llm.screen_reaction has no agent_task parameter; passing the brief there would raise.
+        import base64, io
+        from PIL import Image
+        picture = io.BytesIO()
+        Image.new('RGB', (64, 64), 'blue').save(picture, format='JPEG')
+        frame = base64.b64encode(picture.getvalue()).decode()
+        model = Mock()
+        model.screen_reaction.return_value = {'reply': 'A blue window is open.'}
+        settings = {'response_restriction_level': 'off'}
+        with patch.object(server, 'llm', model), patch.object(server, 'get_settings', return_value=settings), patch('assistant_commands.run_command', return_value=None), patch('agent_runtime.runtime.conversation_context', return_value='Goal: clone the repo'):
+            await server.chat({'text': 'What is on my screen?', 'defer_audio': True, 'screen_reaction': True, 'agent_task': 'run-1', 'screen_image': frame})
+        self.assertEqual(model.screen_reaction.call_args.args[0], frame)
+        self.assertNotIn('agent_task', model.screen_reaction.call_args.kwargs)
+
+    async def test_ordinary_companion_chat_has_no_task_brief(self):
+        model = Mock()
+        model.chat.return_value = 'Sure.'
+        settings = {'response_restriction_level': 'off'}
+        with patch.object(server, 'llm', model), patch.object(server, 'get_settings', return_value=settings), patch('assistant_commands.run_command', return_value=None), patch('current_information.lookup_with_context', return_value=(None, None)), patch('factual_grounding.gpu_memory_lookup', return_value=None), patch('agent_runtime.runtime.conversation_context') as brief:
+            await server.chat({'text': 'Do you like rain?', 'defer_audio': True})
+        brief.assert_not_called()
+        self.assertEqual(model.chat.call_args.args, ('Do you like rain?', None, None))
+        self.assertEqual(model.chat.call_args.kwargs['app_context']['mode'], 'Companion')
+        self.assertNotIn('agent_task', model.chat.call_args.kwargs)

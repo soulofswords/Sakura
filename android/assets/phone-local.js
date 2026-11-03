@@ -4,6 +4,7 @@ import {modelStage} from './phone-stage.js';
 import {nativeJob} from './native-jobs.js';
 import {apiSetup,chooseSavedModel,transferSetup} from './local-setup.js';
 import {installProviderTools} from './provider-tools.js';
+import {conversations} from './conversation-memory.js';
 const $=id=>document.getElementById(id),status=text=>$('local-status').textContent=text;
 let history=[],models=[],busy=false,generation=0,callActive=false,modelReady=false,setupBusy=false;
 let currentPlaces=[],placeSource='',nearbySearch=null;
@@ -20,15 +21,17 @@ window.sakuraLocalPause=()=>{stage.stopMic();generation++;avatar()?.pause(true);
 window.sakuraPhoneNotice=text=>status(text);
 window.sakuraDictation=text=>{if(!callActive){$('local-message').value=String(text).slice(0,10000);status('Check your message, then tap Send.');}};
 window.sakuraCallState=active=>{callActive=active;generation++;avatar()?.stop();gate();status(active?'Call in progress · Sakura muted':'Call ended · Sakura is ready');};
-try{history=JSON.parse(localStorage.getItem('sakura-local-history')||'[]').filter(m=>['user','assistant'].includes(m.role)&&typeof m.content==='string').slice(-20);}catch(_){}
+try{history=conversations.supported()?conversations.read():JSON.parse(localStorage.getItem('sakura-local-history')||'[]').filter(m=>['user','assistant'].includes(m.role)&&typeof m.content==='string').slice(-20);}catch(_){}
+window.sakuraCanSwitchConversation=()=>!busy&&!callActive;
+window.addEventListener('sakura-conversation-selected',()=>{generation++;avatar()?.stop();history=conversations.read();Sakura.syncWakeHistory?.(JSON.stringify(history));currentPlaces=[];nearbySearch=null;renderHistory();status(conversations.current().origin==='pc-import'?'Using a phone copy of PC history. The PC conversation is unchanged.':'Using the separate mobile conversation.');});
 function readConfig(){const data=JSON.parse(Sakura.localConfig());if(data.error)throw Error(data.error);return data;}
 function renderHistory(pending=''){const box=$('local-conversation');box.replaceChildren();for(const message of history){const p=document.createElement('p');p.textContent=(message.role==='user'?'You: ':'Sakura: ')+message.content;box.append(p);}if(pending){const p=document.createElement('p');p.textContent='You: '+pending+'\nSakura is thinking…';p.dataset.pending='true';box.append(p);}else if(currentPlaces.length){
     const source=document.createElement('small');source.textContent=placeSource;box.append(source);
     for(const place of currentPlaces){const card=document.createElement('div'),name=document.createElement('p'),button=document.createElement('button');
         name.textContent=place.name+' · about '+place.distance_m+' m'+(place.address?' · '+place.address:'');button.textContent='Open in Maps';button.onclick=()=>Sakura.openPlace(place.latitude,place.longitude);card.append(name,button);box.append(card);}
 }if(!pending&&nearbySearch){const button=document.createElement('button');button.textContent='Search in Maps · ratings & more results';button.onclick=()=>Sakura.searchPlaces?Sakura.searchPlaces(nearbySearch.latitude,nearbySearch.longitude,nearbySearch.query||'restaurants'):Sakura.openNearby(nearbySearch.latitude,nearbySearch.longitude);box.append(button);}box.scrollTop=box.scrollHeight;}
-function store(){history=history.slice(-20);localStorage.setItem('sakura-local-history',JSON.stringify(history));localStorage.setItem('sakura-local-history-time',String(Date.now()));Sakura.syncWakeHistory?.(JSON.stringify(history));renderHistory();}
-function refreshWakeHistory(){if(busy||!Sakura.wakeHistory)return;try{const data=JSON.parse(Sakura.wakeHistory());if(data.updated_at>Number(localStorage.getItem('sakura-local-history-time')||0)&&Array.isArray(data.messages)){history=data.messages.filter(m=>['user','assistant'].includes(m.role)&&typeof m.content==='string').slice(-20);localStorage.setItem('sakura-local-history',JSON.stringify(history));localStorage.setItem('sakura-local-history-time',String(data.updated_at));renderHistory();}}catch(_){}}
+function store(clear=false){history=history.slice(-20);if(conversations.supported())conversations.store(history,{clear});else localStorage.setItem('sakura-local-history',JSON.stringify(history));localStorage.setItem('sakura-local-history-time',String(Date.now()));Sakura.syncWakeHistory?.(JSON.stringify(history));renderHistory();}
+function refreshWakeHistory(){if(busy||!Sakura.wakeHistory)return;try{const data=JSON.parse(Sakura.wakeHistory());if(data.updated_at>Number(localStorage.getItem('sakura-local-history-time')||0)&&Array.isArray(data.messages)){history=data.messages.filter(m=>['user','assistant'].includes(m.role)&&typeof m.content==='string').slice(-20);if(conversations.supported())conversations.store(history);else localStorage.setItem('sakura-local-history',JSON.stringify(history));localStorage.setItem('sakura-local-history-time',String(data.updated_at));renderHistory();}}catch(_){}}
 window.sakuraRefreshWakeHistory=refreshWakeHistory;
 window.sakuraWakeCommand=text=>{if($('local-mode').classList.contains('hidden')||!modelReady||busy||callActive)return false;$('local-message').value=String(text).slice(0,10000);$('local-send').click();return true;};
 function avatar(){return rendererFor($('local-avatar'));}
@@ -63,7 +66,7 @@ $('local-send').onclick=async()=>{
     busy=true;Sakura.setAssistantState?.(modelReady,true);stage.gate(true);currentPlaces=[];placeSource='';nearbySearch=null;$('local-send').disabled=true;$('local-send').setAttribute('aria-busy','true');$('local-send').textContent='Sending…';const current=++generation;avatar()?.stop();renderHistory(text);
     const next=[...history,{role:'user',content:text}].slice(-19);status('Sakura is thinking…');
     try{
-        const data=await nativeJob('localChat',JSON.stringify(next));if(current!==generation)return;
+        const supplied=next.map(row=>({...row}));const saved=window.sakuraPhoneSavedContext?.(text);if(saved)supplied[supplied.length-1].saved_context=saved;if(conversations.supported())supplied[supplied.length-1].dialogue_origin=conversations.current().origin;const data=await nativeJob('localChat',JSON.stringify(supplied));if(current!==generation)return;
         const answer=String(data.reply||'').trim();if(!answer)throw Error('No reply was returned. Try another model or check the provider quota.');
         currentPlaces=(data.places||[]).filter(p=>typeof p.name==='string'&&Number.isFinite(p.latitude)&&Number.isFinite(p.longitude)).slice(0,5);placeSource=data.source||'';
         nearbySearch=data.maps_search&&Number.isFinite(data.maps_search.latitude)&&Number.isFinite(data.maps_search.longitude)?data.maps_search:null;
@@ -78,7 +81,7 @@ $('local-send').onclick=async()=>{
 };
 $('local-stop').onclick=()=>{generation++;avatar()?.stop();status('Stopped');};
 $('local-dictate').onclick=()=>{if(!callActive&&!busy)Sakura.dictate();};
-$('local-clear').onclick=()=>{generation++;avatar()?.stop();history=[];currentPlaces=[];placeSource='';nearbySearch=null;store();status('Conversation cleared');};
+$('local-clear').onclick=()=>{generation++;avatar()?.stop();history=[];currentPlaces=[];placeSource='';nearbySearch=null;store(true);status('Conversation cleared');};
 window.sakuraLocalVisible=async visible=>{
     if(!visible){modelReady=false;stage.exit();gate();generation++;avatar()?.stop();$('local-avatar').src='about:blank';return;}
     // Recreate the iframe after leaving Local mode so hidden render loops do not use the GPU.

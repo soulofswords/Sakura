@@ -43,11 +43,12 @@
         @keyframes sakura-startup-progress { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
         @media(prefers-reduced-motion:reduce) { #startup-render-status img,#startup-render-status .startup-track::after { animation: none; } }
     </style>
-    <link rel="stylesheet" href="/static/css/style.css?v=hidden-controls158">
+    <link rel="stylesheet" href="/static/css/style.css?v=serverlink1101">
 
     <link rel="stylesheet" href="/static/css/vtuber-studio.css?v=part-edit11">
-    <link rel="stylesheet" href="/static/css/companion-studio.css?v=conversation-switch16">
-    <link rel="stylesheet" href="/static/css/appearance.css?v=8">
+    <link rel="stylesheet" href="/static/css/companion-studio.css?v=emotion1103">
+    <link rel="stylesheet" href="/static/css/studio-polish.css?v=1">
+    <link rel="stylesheet" href="/static/css/appearance.css?v=light-text9">
 
     <!-- Import Map for Three.js -->
     <script type="importmap">
@@ -335,19 +336,23 @@
                 <button id="tracking-hands-enabled" class="tracking-toggle-btn active" type="button" aria-pressed="true">Hand tracking: On</button>
                 <p class="modal-hint">Face/head tracking and body lean/up-down stay active with normal tracking. This separate option controls only hand-driven arms and fingers.</p>
                 <div class="save-actions"><button id="tracking-start" type="button">Start tracking</button><button id="tracking-calibrate" type="button">Calibrate neutral face</button><button id="tracking-stop" type="button">Stop tracking</button><button id="tracking-restore-ai" type="button">Return to assistant</button></div>
-                <label for="reader-chat-link">YouTube livestream / chat link</label>
+                <label for="reader-service">Live chat service</label><select id="reader-service"><option value="youtube">YouTube</option><option value="twitch">Twitch</option><option value="both">YouTube + Twitch</option></select>
+                <label for="reader-chat-link">YouTube or Twitch livestream / chat link</label>
                 <input id="reader-chat-link" type="url" placeholder="https://www.youtube.com/watch?v=…">
+                <label id="reader-twitch-link-group" hidden>Twitch channel link<input id="reader-twitch-link" type="url" placeholder="https://www.twitch.tv/channel" autocomplete="off"></label>
+                <details id="reader-twitch-setup"><summary>Twitch authorization</summary><p>Twitch needs your account username and a user OAuth token with chat:read permission (not your password). Sakura validates the account and permission, then saves the token encrypted on this PC. Leave both fields blank to reuse it. YouTube only needs its livestream link. Twitch sign-in inside Sakura is not implemented.</p><label>Username<input id="reader-twitch-username" autocomplete="off" maxlength="25"></label><label>OAuth token<input id="reader-twitch-token" type="password" autocomplete="new-password" maxlength="206"></label></details>
+                <label><input id="reader-sentiment" type="checkbox"> Express live-chat sentiment while reading</label>
                 <label for="reader-voice">Chat Reader voice</label><select id="reader-voice"></select>
                 <label for="reader-volume">Chat Reader volume <output id="reader-volume-value">100%</output></label>
                 <input id="reader-volume" type="range" min="0" max="200" value="100">
                 <div class="save-actions"><button id="chat-reader-start" type="button">Chat Reader on</button><button id="chat-reader-stop" type="button">Chat Reader off</button></div>
-                <p class="modal-hint">Chat Reader reads messages aloud with a built-in voice. It turns off face and hand tracking. No AI replies. Internet is required for YouTube and speech.</p>
+                <p class="modal-hint">Chat Reader reads YouTube or Twitch messages aloud using local speech. It turns off face and hand tracking. No AI replies. Internet is required to receive live chat.</p>
                 <p id="tracking-status" role="status">Off</p>
                 <p class="modal-hint">Camera frames stay on this device. Keep your face and hands inside the camera view. Expressions and finger movement depend on the selected model's rig; Live2D tracking uses parameters exported with the model.</p>
             </div>
         </div>
     </div>
-    <button id="restore-companion-controls" type="button" title="Show companion controls (Ctrl+Shift+H)" aria-label="Show companion controls">⚙</button>
+
 
     <!-- 🎨 Environment Color Wheel & Aura Popover -->
     <div id="theme-popover" class="hidden">
@@ -904,14 +909,17 @@
                     <span id="agent-panel-status" class="modal-hint" role="status"></span>
                 </div>
                 <div class="setting-group">
-                    <label for="youtube-chat-link">VTuber mode · YouTube livestream/chat link:</label>
+                    <label for="youtube-chat-link">AI VTuber cohost · livestream/chat link:</label>
+                    <label for="cohost-service">Live chat service</label><select id="cohost-service"><option value="youtube">YouTube</option><option value="twitch">Twitch</option><option value="both">YouTube + Twitch</option></select>
                     <input id="youtube-chat-link" type="text" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+                    <label id="cohost-twitch-link-group" hidden>Twitch channel link<input id="cohost-twitch-link" type="url" placeholder="https://www.twitch.tv/channel" autocomplete="off"></label>
+                    <details id="cohost-twitch-setup" hidden><summary>Twitch authorization</summary><p>Use your Twitch username and a user OAuth token with chat:read permission. Leave blank to reuse the encrypted credentials saved on this PC.</p><label>Username<input id="cohost-twitch-username" autocomplete="off" maxlength="25"></label><label>OAuth token<input id="cohost-twitch-token" type="password" autocomplete="new-password" maxlength="206"></label></details>
                     <label class="toggle-label"><input id="vtuber-chat-enabled" type="checkbox" checked>Answer selected viewers aloud</label>
                     <label class="toggle-label"><input id="vtuber-screen-enabled" type="checkbox" checked>React to gameplay and screen events</label>
                     <p class="modal-hint">Starting AI VTuber automatically enables Screen viewing and reactions. In a browser, choose the screen to share. You can turn Screen off at any time.</p>
                     <div class="save-actions"><button id="vtuber-start-btn" type="button">Start AI VTuber mode</button><button id="vtuber-stop-btn" type="button">Stop AI VTuber</button></div>
-                    <span id="vtuber-status" role="status" class="modal-hint">Off · voice replies only, no messages posted to YouTube</span>
-                    <span class="modal-hint">Uses public live chat. Answers are paced; old messages and repeated spam are skipped. Screen access follows the Screen toggle.</span>
+                    <span id="vtuber-status" role="status" class="modal-hint">Off · voice replies only, no messages posted to chat</span>
+                    <span class="modal-hint">Uses YouTube or authorized Twitch chat. Answers are paced; old messages and repeated spam are skipped. Screen access follows the Screen toggle.</span>
                 </div>
                 <div class="setting-group">
                     <label for="assistant-name-input">🌸 Assistant Name:</label>
@@ -920,10 +928,27 @@
 
                 <div class="setting-group">
                     <label for="evidence-threshold">Saved-source evidence score (0–1)</label><input id="evidence-threshold" type="number" min="0" max="1" step="0.05" value="0.9"><p class="modal-hint">Normal conversation is unrestricted. This score applies to source-backed answers; it is not a probability of truth.</p>
+                    <label class="toggle-label"><input id="long-term-memory-toggle" type="checkbox">Remember what you tell me between sessions</label>
+                    <p id="long-term-memory-status" class="modal-hint">Off: facts are forgotten when this app closes. On: the facts the app already trusts are kept in one database on this PC and looked up by meaning when relevant. Use Clear memory (🧹) to delete them.</p>
+                    <label class="toggle-label"><input id="relationship-adaptation-toggle" type="checkbox" checked>Adapt tone and pacing to how the conversation has been going</label>
+                    <p id="relationship-status" class="modal-hint">This counts messages, days and a few tone words on this PC. No message text is stored, the numbers fade back to neutral, and none of it is a feeling.</p>
                         <label for="news-area">News area:</label><input id="news-area" maxlength="100" placeholder="Mumbai, Maharashtra — blank for India"><p class="modal-hint">Saved city or state for news. Ask for India news or another place to override.</p>
                     <label for="user-address">Address me as:</label>
                     <select id="user-address"><option value="sir">Sir</option><option value="maam">Ma’am</option><option value="none">No title</option></select>
                     <p class="modal-hint">Used in Companion greetings and replies. Independent of the avatar’s gender.</p>
+                </div>
+
+                <div class="setting-group">
+                    <label for="persona-picker">Character role:</label>
+                    <select id="persona-picker"><option value="sakura">Sakura (shipped)</option></select>
+                    <p id="persona-status" class="modal-hint">Choose who the assistant speaks as. The shipped role is the personality file that came with this app.</p>
+                    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button id="persona-card-import" type="button">Import character card</button>
+                        <button id="persona-card-export" type="button">Export selected card</button>
+                        <button id="persona-card-remove" type="button">Remove selected card</button>
+                    </div>
+                    <input id="persona-card-file" type="file" accept=".png,.json" hidden>
+                    <p class="modal-hint">SillyTavern cards (.png with a chara chunk, or .json). The card supplies the role’s name, description, scenario and example lines only: any system prompt or post-history instruction inside it is dropped, the card’s biography stays declared fiction, and this app’s identity and grounding rules keep overriding it. This is separate from the voice you hear - “switch to Bella” still changes the spoken voice.</p>
                 </div>
 
                 <div class="setting-group">
@@ -1001,11 +1026,12 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=reference-generic144"></script>
+    <script type="module" src="/static/js/app.js?v=voice-enrolment1103"></script>
     <script type="module" src="/static/js/vtuber-studio.js?v=mmd1029"></script>
     <script type="module" src="/static/js/appearance.js?v=access-level1029"></script>
-    <script type="module" src="/static/js/companion-studio.js?v=background-mmd1029"></script>
-    <script type="module" src="/static/js/model-library.js?v=remember-folder1029"></script>
+    <script type="module" src="/static/js/companion-studio.js?v=voice-enrolment1103"></script>
+    <script type="module" src="/static/js/first-run-guide.js?v=auto-navigation3"></script>
+    <script type="module" src="/static/js/model-library.js?v=voice-library1103"></script>
     <script type="module" src="/static/js/local-character-library.js?v=remember-folder3"></script>
 </body>
 </html>

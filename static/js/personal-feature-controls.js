@@ -1,0 +1,23 @@
+/* Owner-reviewed guest switch remains reachable even while owner APIs are paused. */
+export function installPersonalControls(){
+ if(window.SAKURA_EDITION==='vtuber'||document.getElementById('guest-session-banner'))return;
+ const banner=document.createElement('aside');banner.id='guest-session-banner';banner.hidden=true;
+ banner.style.cssText='position:fixed;top:48px;left:85px;right:16px;max-width:430px;z-index:1500;padding:10px;border-radius:10px;background:#28384a;color:white';
+ const label=document.createElement('span');label.textContent='Guest chat · owner memory and tools paused. ';
+ const end=document.createElement('button');end.textContent='Restore owner session';banner.append(label,end);document.body.append(banner);
+ const form=document.createElement('form'),text=document.createElement('input'),send=document.createElement('button'),reply=document.createElement('p');
+ text.placeholder='Message Sakura as a guest';text.maxLength=4000;text.required=true;text.setAttribute('aria-label','Guest message');text.style.maxWidth='100%';
+ send.textContent='Send';reply.setAttribute('role','status');reply.style.cssText='max-height:180px;overflow:auto;white-space:pre-wrap';form.append(text,send);banner.append(form,reply);
+ form.onsubmit=async event=>{event.preventDefault();if(!text.value.trim())return;send.disabled=true;reply.textContent='Preparing a guest reply…';try{const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text.value.trim(),defer_audio:true})});const data=await response.json();if(!response.ok)throw Error(data.error||data.detail||'Guest chat failed.');reply.textContent=data.reply||'No reply returned.';text.value='';}catch(error){reply.textContent=error.message;}finally{send.disabled=false;}};
+ async function setGuest(enabled){const response=await fetch('/api/features/guest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});const data=await response.json();if(!response.ok)throw Error(data.error||data.detail||'Could not change guest mode.');if(data.guest){document.getElementById('interrupt-btn')?.click();document.getElementById('messages')?.replaceChildren();document.getElementById('speech-bubble')?.classList.add('hidden');}banner.hidden=!data.guest;document.body.classList.toggle('guest-session',!!data.guest);}
+ end.onclick=async()=>{try{await setGuest(false);location.reload();}catch(error){label.textContent=error.message;}};
+ const host=document.getElementById('tab-general');if(host){const group=document.createElement('fieldset');group.className='setting-group';const title=document.createElement('legend');title.textContent='Guest chat & developer access';const start=document.createElement('button');start.textContent='Start temporary guest chat';start.onclick=async()=>{try{await setGuest(true);window.sakuraSetAgentMode?.(false);}catch(error){label.textContent=error.message;banner.hidden=false;}};
+ const sdk=document.createElement('button');sdk.textContent='Create local SDK token';const output=document.createElement('input');output.type='password';output.readOnly=true;output.setAttribute('aria-label','Local SDK token');output.autocomplete='off';
+ const reveal=document.createElement('button');reveal.textContent='Show / hide SDK token';reveal.onclick=()=>output.type=output.type==='password'?'text':'password';
+ const status=document.createElement('p');status.setAttribute('role','status');const revoke=document.createElement('button');revoke.textContent='Revoke SDK token';
+ sdk.onclick=async()=>{try{const response=await fetch('/api/features/sdk-token',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw Error(data.detail||data.error||'Token creation failed.');output.value=data.token;status.textContent='Token created. Previous token revoked. Keep it private.';}catch(error){output.value='';status.textContent=error.message;}};
+ revoke.onclick=async()=>{try{const response=await fetch('/api/features/sdk-token',{method:'DELETE'});const data=await response.json();if(!response.ok)throw Error(data.detail||data.error||'Revoke failed.');output.value='';status.textContent='SDK access revoked.';}catch(error){status.textContent=error.message;}};group.append(title,start,sdk,output,reveal,revoke,status);host.append(group);}
+ fetch('/api/features/status').then(r=>r.ok?r.json():{}).then(data=>{banner.hidden=!data.guest;document.body.classList.toggle('guest-session',!!data.guest);}).catch(()=>{});
+}
+
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installPersonalControls,{once:true});else installPersonalControls();

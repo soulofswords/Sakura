@@ -52,7 +52,7 @@ def editor_files(root):
             yield path, 'Sakura/tools/pmx-editor/'+path.relative_to(root).as_posix()
 
 
-DEFAULTS = {'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'kokoro_af_heart',
+DEFAULTS = {'wake_word_enabled': True, 'llm_provider': 'gemini', 'selected_model': '', 'selected_voice': 'kokoro_af_heart',
             'ollama_model': 'qwen3-vl:2b-instruct', 'ollama_context': 2048,
             'ollama_models_folder': 'llm-models', 'computer_control_enabled': False,
             'screen_enabled': False, 'screen_reactions_enabled': False,
@@ -80,6 +80,8 @@ def app_files():
         yield BASE/'docs'/(Path(name).stem+'.md'),'Sakura/kokoro-assets/'+name
     for file in BASE.glob('*.py'):
         yield file, 'Sakura/' + file.name
+    # Public HTTP client only; proprietary implementation remains in the core.
+    yield BASE/'sakura_sdk.py','Sakura/sdk/sakura_sdk.py'
     for name in ('requirements.txt','requirements-macos.txt','run-macos.command',
                  'setup-macos.command','setup-rvc-macos.command','requirements-rvc.txt',
                  'requirements-agent.txt'):

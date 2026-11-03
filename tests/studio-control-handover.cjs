@@ -11,7 +11,7 @@ const SHELLS=['vtuber-studio.js','companion-studio.js'];
  await page.evaluate(()=>{document.body.className='native-renderer';window.SAKURA_EDITION='companion';});
  // Each shell is an ES module with its own top-level ICONS, so install them in
  // separate scopes the way the browser would.
- for(const file of SHELLS)await page.addScriptTag({content:`(function(){${fs.readFileSync('static/js/'+file,'utf8').replace(/export function/g,'function')}})()`});
+ for(const file of SHELLS)await page.addScriptTag({content:`(function(){${fs.readFileSync('static/js/'+file,'utf8').replace(/^import \{installSpeakerEnrolment\}[^\n]*$/m,fs.readFileSync('static/js/speaker-enrolment.js','utf8').replace('export function','function')).replace(/export function/g,'function')}})()`});
  const ids=['model-dropdown','vrm-dropdown','live2d-dropdown','upload-pmx-toolbar','upload-vrm-toolbar','upload-live2d-toolbar','full-model-btn','obs-background-enabled','mmd-btn'];
  const home=async()=>page.evaluate(names=>Object.fromEntries(names.map(id=>{
   const el=document.getElementById(id);

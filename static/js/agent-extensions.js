@@ -53,7 +53,7 @@ window.installAgentExtensions=({api,perform,refresh,renderRun,selectRun,currentR
   if(name==='plan'){renderRun(await api('tasks/'+requireRun().id+'/plan',planner()));await refresh();return true;}
   if(name==='search'){$('history-query').value=argument;document.querySelector('#agent-studio-nav button[aria-label="Task history"]')?.dispatchEvent(new Event('click'));await window.searchAgentHistory(argument);return true;}
   if(name==='model'){const option=[...$('planner-provider').options].find(option=>option.value===argument&&!option.disabled);if(!option)throw Error('Choose an available provider ID from Planning AI.');$('planner-provider').value=argument;$('planner-provider').dispatchEvent(new Event('change'));return true;}
-  if(name==='skill'){const [skill,...rest]=argument.split(/\s+/);if(![...$('selected-skill').options].some(option=>option.value===skill))throw Error('Choose an installed skill.');$('selected-skill').value=skill;$('goal').value=rest.join(' ');return false;}
+  if(name==='skill'){const [skill,...rest]=argument.split(/\s+/);const option=[...$('selected-skill').options].find(item=>item.value===skill);if(!option)throw Error('Choose an installed skill.');option.selected=true;$('goal').value=rest.join(' ');return false;}
   if(name==='delegate'){await delegateGoals(argument.split('|').map(value=>value.trim()).filter(Boolean));return true;}
   throw Error('Unknown slash command. Use /help.');
  }};

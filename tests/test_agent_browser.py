@@ -7,6 +7,22 @@ import pytest
 from agent_browser import AgentBrowser,public_target
 
 
+def test_preview_only_reads_existing_viewport():
+    from unittest.mock import Mock
+    browser = AgentBrowser()
+    page = Mock()
+    page.screenshot.return_value = b'png-viewport'
+    browser.sessions['task'] = {'page': page, 'context': Mock()}
+    try:
+        assert browser.preview('task') == b'png-viewport'
+        page.screenshot.assert_called_once_with(type='png', full_page=False, timeout=10000)
+        page.goto.assert_not_called()
+        with pytest.raises(ValueError, match='Open a browser page'):
+            browser.preview('missing')
+    finally:
+        browser.close()
+
+
 @pytest.mark.parametrize('url',['file:///C:/private','http://127.0.0.1','http://192.168.1.1','http://169.254.169.254','http://user:pass@example.test','https://example.test:8766'])
 def test_browser_refuses_private_and_credentialed_urls(url):
     with pytest.raises(ValueError):public_target(url)

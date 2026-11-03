@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import AvatarRetarget from './avatar-retarget.js?v=irina-greeting113';
+import AvatarRetarget from './avatar-retarget.js?v=virtu-hands1';
 let cached;
 export default class ImportedGreeting {
     constructor(viewer){this.viewer=viewer;this.data=null;}

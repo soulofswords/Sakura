@@ -286,6 +286,15 @@ def retrieve(text, settings, memory=(), allow_actions=True):
     from assistant_commands import run_command
     from factual_grounding import gpu_memory_lookup
     from current_information import lookup_with_context
+    if allow_actions:
+        # Only the review flow may run a PC action. An action that needs approval must
+        # never be executed here as a side effect of gathering evidence, so the evidence
+        # stage drops it and leaves the decision to the caller's review prompt.
+        try:
+            from command_approval import required
+            allow_actions = not required(text, settings)
+        except ImportError:
+            pass
     reply = run_command(text, settings.get('computer_control_enabled', False), settings.get('assistant_name', 'Sakura')) if allow_actions else None
     if isinstance(reply, str) and reply:
         return tool_evidence(reply, 'PC command/status/file/time tool')

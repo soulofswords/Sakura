@@ -38,6 +38,14 @@ def polish_spoken_text(text):
     text=strip_speech_decoration(clean_performance_markup(clean_news_for_speech(text)))
     text=re.sub(r'(?<=\d)\s*\*\s*(?=\d)',' times ',text)
     text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Keep human-readable source names, never dictate URL paths/query strings.
+    from urllib.parse import urlsplit
+    def source_name(match):
+        try:
+            host=urlsplit(match.group(0).rstrip('.,;!?)')).hostname or ''
+            return host.removeprefix('www.')
+        except ValueError:return ''
+    text=re.sub(r'https?://[^\s<>]+',source_name,text)
     text = re.sub(r'^\s*(?:#{1,6}\s+|[-*•]\s+)', '', text, flags=re.MULTILINE)
     text = text.replace('*', '').replace('__', '').replace('`', '').replace('~', '')
     text = re.sub(r'!{2,}', '!', text)

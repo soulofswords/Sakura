@@ -26,6 +26,7 @@ export function installChatAttachments({notice}) {
                 const response=await fetch('/api/chat/attachments',{method:'POST',body:form});
                 const result=await response.json();if(!response.ok)throw Error(result.error||'The file could not be read.');
                 items.push(result);render();
+                if(result.archaeology_save)window.dispatchEvent(new CustomEvent('sakura-save-context',{detail:result.archaeology_save}));
             }
         }catch(error){notice(error.message);}
         finally{busy=false;render();}

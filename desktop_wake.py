@@ -154,14 +154,14 @@ class DesktopWake:
                     import winsound
                     winsound.Beep(900,100)
                 except RuntimeError:pass
-                speech=lib.vosk_recognizer_new(model,16000);text=''
+                speech=lib.vosk_recognizer_new(model,16000);text='';command_audio=bytearray()
                 try:
                     deadline=time.monotonic()+14
                     with sd.RawInputStream(samplerate=16000,blocksize=3200,channels=1,dtype='int16') as stream:
                         self.recording.set()
                         try:
                             while not self.cancel.is_set() and not self.busy and time.monotonic()<deadline:
-                                data,_=stream.read(3200);b=bytes(data)
+                                data,_=stream.read(3200);b=bytes(data);command_audio.extend(b)
                                 if lib.vosk_recognizer_accept_waveform(speech,b,len(b)):
                                     text=json.loads(lib.vosk_recognizer_result(speech).decode()).get('text','')
                                     if text and text!=self.phrase:break
@@ -171,6 +171,13 @@ class DesktopWake:
                 if text.startswith(self.phrase+' '):text=text[len(self.phrase)+1:]
                 if re.fullmatch(r'(?:(?:huh|uh|um|hm|hmm|ah|oh|eh|er|erm|ha|mm) ?)+',text):text=''
                 if text and text!=self.phrase and not self.cancel.is_set() and not self.busy:
+                    import io,wave
+                    from speaker_profiles import accepts_microphone
+                    clip=io.BytesIO()
+                    with wave.open(clip,'wb') as wav:
+                        wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000);wav.writeframes(command_audio)
+                    if not accepts_microphone(clip.getvalue()):
+                        self._status('Voice not recognised · waiting for the wake phrase');continue
                     self.busy=True;self._status('Answering · wake microphone paused')
                     try:self.on_command(text)
                     except Exception:self.busy=False;raise

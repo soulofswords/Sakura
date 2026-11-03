@@ -8,12 +8,12 @@ from tts import TextToSpeech
 
 
 class VoiceCatalogTests(unittest.TestCase):
-    def test_ten_english_voices_per_gender_and_two_language_choices(self):
+    def test_three_english_voices_per_gender_and_two_language_choices(self):
         for gender in ('Male', 'Female'):
             voices = [p for p in VOICE_PRESETS if p.get('gender') == gender and p['language'] == 'English']
-            self.assertEqual(len(voices), 10)
+            self.assertEqual(len(voices), 3)
             self.assertTrue(all(p['backend']=='kokoro' for p in voices))
-            self.assertEqual(len({p['voice'] for p in voices}), 10)
+            self.assertEqual(len({p['voice'] for p in voices}), 3)
         self.assertEqual(voice_language('swara_hindi'), 'Hindi')
         self.assertEqual(voice_language('neerja_hinglish'), 'Hinglish')
         self.assertEqual(voice_language('rvc_some_imported_voice'), 'English')
@@ -45,7 +45,7 @@ class VoiceCatalogTests(unittest.TestCase):
         voice.set_voice_preset('rvc_test')
         self.assertTrue(voice.current_voice=='af_heart')
         voice.set_voice_preset('nanami_japanese')
-        self.assertEqual(voice.current_voice, 'bf_alice')
+        self.assertEqual(voice.current_voice, 'af_heart')
 
     def test_wrong_language_gets_one_correction_only(self):
         with tempfile.TemporaryDirectory() as folder:

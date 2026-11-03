@@ -9,7 +9,6 @@ import sys
 os.environ.pop('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD',None)
 import torch
 from rvc_safe_load import install as install_restricted_checkpoints
-install_restricted_checkpoints(torch,Path(__file__).resolve().parent)
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 from rvc_python.infer import RVCInference
@@ -20,6 +19,7 @@ from gpu_info import detect_gpu, pick_torch_device
 BASE = Path(__file__).resolve().parent
 LOCK = threading.Lock()
 asset_dir = Path(rvc_infer.__file__).parent / 'base_model'
+install_restricted_checkpoints(torch, BASE, asset_dirs=(asset_dir,))
 asset_dir.mkdir(exist_ok=True)
 for name in ('hubert_base.pt', 'rmvpe.pt'):
     source_asset = BASE / 'rvc-assets' / name
@@ -67,6 +67,19 @@ def _build_converter():
     vendor = detect_gpu().get('vendor', 'cpu')
     factory = _directml_device if vendor in ('amd', 'intel') else None
     device, is_directml = pick_torch_device(torch.cuda.is_available(), factory)
+    from gpu_routing import selected
+    choice=selected(BASE)
+    if choice=='cpu':device,is_directml='cpu:0',False
+    elif choice.startswith('cuda:'):
+        index=int(choice.split(':')[1])
+        if not torch.cuda.is_available() or index>=torch.cuda.device_count():raise RuntimeError('The selected RVC CUDA device is unavailable. Choose Automatic or another device.')
+        device,is_directml=choice,False
+    elif choice.startswith('directml:'):
+        import torch_directml
+        index=int(choice.split(':')[1])
+        if index>=torch_directml.device_count():raise RuntimeError('The selected RVC DirectML device is unavailable.')
+        device=torch_directml.device(index);is_directml=True
+        (torch.ones(2,device=device)+1).cpu()
     # rvc-python's Config only understands cuda/mps/cpu; a DirectML device
     # string would be clobbered to CPU inside device_config. Construct on
     # CPU and re-point the shared config before any model loads.
@@ -94,6 +107,11 @@ def _build_converter():
 
 
 converter, device, is_directml = _build_converter()
+from rvc_audio import require_audio
+_vc_single=converter.vc.vc_single
+def _checked_vc_single(*args,**kwargs):
+    return require_audio(_vc_single(*args,**kwargs))
+converter.vc.vc_single=_checked_vc_single
 app = FastAPI()
 loaded_path = None
 
@@ -139,7 +157,8 @@ def voice(audio: UploadFile = File(...), model: str = Form(...),
         source.write_bytes(audio.file.read())
         converter.set_params(f0method='rmvpe', f0up_key=max(-12, min(12, f0_up_key)),
                              index_rate=max(0, min(1, index_rate)), protect=0.33)
-        converter.infer_file(str(source), str(target))
+        try:converter.infer_file(str(source), str(target))
+        except RuntimeError as error:raise HTTPException(503,str(error)) from error
         return Response(target.read_bytes(), media_type='audio/wav')
 
 def main():

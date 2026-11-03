@@ -41,6 +41,7 @@ try{
   if(u.pathname.startsWith('/api/agent/tasks/'))return route.fulfill({json:run});
   return route.fulfill({json:{ok:true}});
  });
+ await page.addInitScript(()=>localStorage.setItem('sakura-setup-guide-v1-agent',JSON.stringify({step:0,done:true})));
  await page.goto('http://127.0.0.1/agent');const nav=page.getByRole('navigation',{name:'Agent studio'});
  const go=async label=>{await nav.getByRole('button',{name:label,exact:true}).click();};
  const open=title=>page.locator('summary').filter({hasText:title}).first().click();
@@ -49,6 +50,17 @@ try{
   await go(name);assert.equal(await page.locator('#'+id).isVisible(),true,name+' view is wired');
  }
  assert.equal(await page.locator('#agent-telegram').isVisible(),false,'Telegram is hidden outside Connections');
+ assert.equal(await page.locator('#agent-execution-mode').getAttribute('data-state'),'approval','The panel opens on Approval, matching the header badge');
+ assert.equal(await page.locator('header .badge').textContent(),'Local approval required');
+ await page.locator('[data-execution-mode="auto"]').click();
+ assert.ok(calls.some(c=>c.path==='/api/agent/approval-policy'&&c.body?.mode==='full'&&c.token==='test-token'),'Auto is one choice that also sets the policy');
+ assert.equal(await page.locator('#auto-plan').isChecked(),true);
+ await page.waitForFunction(()=>document.getElementById('agent-execution-mode').dataset.state==='auto');
+ assert.equal(await page.locator('#agent-execution-mode').getAttribute('data-state'),'auto');
+ assert.equal(await page.locator('header .badge').textContent(),'Auto: steps run without a click');
+ await page.locator('[data-execution-mode="approval"]').click();
+ assert.ok(calls.some(c=>c.path==='/api/agent/approval-policy'&&c.body?.mode==='ask'));
+ assert.equal(await page.locator('#auto-plan').isChecked(),false);
  await page.fill('#goal','Prepare a task');await page.click('#create');
  assert.equal(await page.locator('#agent-task-options').getAttribute('open'),'');
  assert.equal(await page.locator('#workspace').evaluate(el=>el===document.activeElement),true,'Send guides the user to the missing workspace');
@@ -57,6 +69,7 @@ try{
  await page.locator('[data-approval-mode="balanced"]').click();
  assert.ok(calls.some(c=>c.path==='/api/agent/approval-policy'&&c.body?.mode==='balanced'&&c.token==='test-token'));
  await page.waitForFunction(()=>document.getElementById('agent-access-label').textContent==='Approve for me');
+ assert.equal(await page.locator('#agent-execution-mode').getAttribute('data-state'),'custom','A fine-grained policy is shown as neither preset, not silently renamed');
  await page.locator('#agent-task-options>summary').click();
  await page.fill('#goal',run.goal);await page.fill('#workspace','C:\\Documents');
  await page.locator('#agent-task-options>summary').click();await page.click('#create');

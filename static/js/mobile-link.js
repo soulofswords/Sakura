@@ -133,7 +133,7 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
             }
             const response=await fetch('/api/mobile/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)});
             if(!response.ok)return;
-            const data=await response.json();phoneConnected=data.connected===true;if(!data.enabled){enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
+            const data=await response.json();phoneConnected=data.connected===true;if(!data.enabled){if(remote)getTracker()?.publishStyleHints?.(null);enabled=false;toggle.checked=false;remote=false;viewer.setUserTracking(false);if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:{type:'camera-stop'}}));return;}
             for(const command of data.commands||[]){
                 if(command.type==='request-model'){
                     void import('./mobile-model-transfer.js?v=phone-touch73').then(module=>module.openMobileModelTransfer(command.request_id)).catch(error=>{status.textContent=error.message;});
@@ -148,12 +148,19 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
                 }else if(command.type==='companion-tracking-stop'){
                     remote=false;remoteKind='';viewer.setUserTracking(false);viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);
                     window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));
-                }else if(command.type==='tracking-stop'){remote=false;remoteKind='';viewer.setUserTracking(false);}
+                }else if(command.type==='tracking-stop'){if(remote)getTracker()?.publishStyleHints?.(null);remote=false;remoteKind='';viewer.setUserTracking(false);}
                 else if(command.type==='camera-start'||command.type==='camera-stop'){
-                    if(command.type==='camera-start'){remote=false;if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';viewer.setUserTracking(false);}
+                    if(command.type==='camera-start'){if(remote)getTracker()?.publishStyleHints?.(null);remote=false;if(remoteKind==='companion'){viewer.setVtuberTrackingMode(false);viewer.setCompanionTracking(false);window.dispatchEvent(new CustomEvent('sakura-phone-companion-tracking',{detail:{enabled:false}}));}remoteKind='';viewer.setUserTracking(false);}
                     window.dispatchEvent(new CustomEvent('sakura-phone-camera',{detail:command}));
                 }
                 else if(command.type==='calibrate')viewer.calibrateUserTracking();
+                else if(command.type==='deck-pose'){
+                    if(command.name==='stop')viewer.dance?.stop();
+                    else if(['greeting_wave','hands_both','hand_left','hand_right','groove','step','wave','twist','disco','march'].includes(command.name)&&viewer.dance?.supported(true)){
+                        await viewer.dance.prepare?.(command.name);
+                        if(viewer.dance.start(command.name,{manual:true})===false)status.textContent='This pose needs compatible bones in the selected character.';
+                    }else status.textContent='Avatar poses need a compatible 3D character; OBS scene buttons remain available.';
+                }
                 else if(command.type==='clear-expressions')viewer.clearManualExpression();
                 else if(command.type==='expression'&&(viewer.allMorphNames||[]).includes(command.name)){
                     // A phone pick outranks whatever was selected on the PC: it
@@ -182,6 +189,7 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
                 if(!data.frame.headPoseFiltered)data.frame.face=filter.update(data.frame.face,data.frame.timestamp);
                 const handsOn=document.getElementById('tracking-hands-enabled')?.getAttribute('aria-pressed')==='true';
                 viewer.updateUserTracking({...data.frame,hands:handsOn ? data.frame.hands : [],handTrackingEnabled:handsOn&&data.frame.handTrackingEnabled!==false});
+                getTracker()?.publishStyleHints?.(data.frame);
                 lastRemoteFrame=performance.now();remoteSamples++;
                 const elapsed=lastRemoteFrame-remoteStarted;
                 if(elapsed>=1000){
@@ -194,6 +202,7 @@ export function installMobileLink(getViewer,getTracker,onReply,openSettings){
                 }
             }else if(remote&&performance.now()-lastRemoteFrame>600){
                 trackingStatus('Sakura Mobile · waiting for fresh tracking frames');
+                getTracker()?.publishStyleHints?.(null);
                 viewer.updateUserTracking({face:{landmarks:[],blendshapes:[],matrix:null},hands:[],pose:null,handTrackingEnabled:false});
             }
         }catch(error){status.textContent='Phone connection: '+error.message;}

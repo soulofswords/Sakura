@@ -41,6 +41,16 @@ class RestrictedCheckpointTests(unittest.TestCase):
         self.assertIs(self.torch.load(self.assets/'..'/'rvc-assets'/'hubert_base.pt',weights_only=False)['weights_only'],False)
         self.assertIs(self.torch.load(self.base/'extra.pt',weights_only=False)['weights_only'],True)
 
+    def test_explicit_vendor_asset_copy_needs_the_same_pinned_hash(self):
+        other=types.ModuleType('torch');other.load=lambda source,**kwargs:kwargs
+        vendor=self.base/'runtime/base_model';vendor.mkdir(parents=True)
+        asset=vendor/'hubert_base.pt';asset.write_bytes(b'known weights')
+        rvc_safe_load.install(other,self.base,asset_dirs=(vendor,))
+        with asset.open('rb') as stream:self.assertFalse(other.load(stream)['weights_only'])
+        asset.write_bytes(b'modified');self.assertTrue(other.load(asset)['weights_only'])
+        voice=self.base/'voices/hubert_base.pt';voice.parent.mkdir();voice.write_bytes(b'known weights')
+        self.assertTrue(other.load(voice)['weights_only'])
+
     def test_install_is_idempotent_and_every_load_clears_the_pytorch_override(self):
         wrapped=self.torch.load
         rvc_safe_load.install(self.torch,self.base)

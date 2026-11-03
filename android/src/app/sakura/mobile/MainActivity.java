@@ -117,6 +117,11 @@ public class MainActivity extends Activity {
   }catch(Exception error){complete(id,error(error));}});}
   @JavascriptInterface public void setAssistantState(boolean ready,boolean busy){assistantReady=ready;WakeService.busy(busy);}
   @JavascriptInterface public void syncWakeHistory(String history){try{if(history==null||history.length()>100000)return;JSONArray messages=new JSONArray(history);if(messages.length()>20)return;prefs().edit().putString("wake-history",history).putLong("wake-history-time",System.currentTimeMillis()).apply();}catch(Exception ignored){}}
+  @JavascriptInterface public String memoryContext(){try{return unprotect(prefs().getString("saved-context",""));}catch(Exception e){return "";}}
+  @JavascriptInterface public String conversationArchive(){try{return unprotect(prefs().getString("conversation-archive",""));}catch(Exception e){return "";}}
+  @JavascriptInterface public String saveConversationArchive(String value){try{String checked=PhoneHistory.validate(value);prefs().edit().putString("conversation-archive",protect(checked)).apply();return "{\"ok\":true}";}catch(Exception e){return error(e);}}
+  @JavascriptInterface public String saveMemoryContext(String value){try{if(value==null||value.length()>200000)throw new Exception("Saved context exceeds 200 KB.");JSONObject data=new JSONObject(value);if(data.optInt("version")!=1||data.getJSONArray("saves").length()>100)throw new Exception("Invalid saved context packet.");prefs().edit().putString("saved-context",protect(value)).apply();return "{\"ok\":true}";}catch(Exception e){return error(e);}}
+  @JavascriptInterface public void clearMemoryContext(){prefs().edit().remove("saved-context").apply();}
   @JavascriptInterface public String wakeHistory(){try{return new JSONObject().put("messages",new JSONArray(prefs().getString("wake-history","[]"))).put("updated_at",prefs().getLong("wake-history-time",0)).toString();}catch(Exception error){return "{}";}}
   @JavascriptInterface public void setModelFullscreen(boolean enabled){if(localAvailable)runOnUiThread(()->fullscreen(enabled));}
   @JavascriptInterface public void setMicrophone(boolean enabled){if(!localAvailable)return;runOnUiThread(()->{final int request=++microphoneGeneration;if(!enabled){microphone.stop();microphone.state(false,"Microphone off");return;}if(calls!=null&&calls.inCall()){microphone.state(false,"Sakura is muted during your call.");return;}WakeService.pauseManual(true);new Thread(()->{long end=android.os.SystemClock.elapsedRealtime()+2000;while(WakeService.recording()&&android.os.SystemClock.elapsedRealtime()<end)try{Thread.sleep(20);}catch(InterruptedException ignored){}runOnUiThread(()->{if(request==microphoneGeneration&&phoneForeground)microphone.start();else if(request==microphoneGeneration)WakeService.pauseManual(false);});}).start();});}
@@ -342,7 +347,7 @@ public class MainActivity extends Activity {
    new Thread(()->complete(id,request(method,path,body)),"SakuraPcRequest").start();
   }
   private String request(String method,String path,String body){
-    if(!path.matches("/(state|command|frame|camera|chat|gemini|tools)"))return "{\"error\":\"Unsupported request\"}";
+    if(!path.matches("/(state|command|frame|camera|chat|gemini|tools|memory/context|memory/conversations)"))return "{\"error\":\"Unsupported request\"}";
    try{return call(method,path,body);}catch(Exception error){return error(error);}
   }
   private String call(String method,String path,String body)throws Exception{

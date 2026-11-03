@@ -2280,6 +2280,15 @@ class MMDToonMaterial extends ShaderMaterial {
 
 	}
 
+	onBeforeRender() {
+
+		// ShaderMaterial does not receive MeshToonMaterial's uniform refresh.
+		// Keep cutouts in sync after texture inspection, overrides and cloning:
+		// otherwise zero-alpha fragments still write depth over visible cloth.
+		if ( this.uniforms.alphaTest ) this.uniforms.alphaTest.value = this.alphaTest;
+
+	}
+
 	copy( source ) {
 
 		super.copy( source );

@@ -36,7 +36,7 @@ try:
     Image.open(BASE/'android/assets/sakura-mobile-logo.png').convert('RGBA').resize((192,192),Image.Resampling.LANCZOS).save(res/'sakura_flower.png')
     run([tools/'aapt2.exe','compile','--dir',BUILD/'res','-o',BUILD/'resources.zip'])
     unsigned=BUILD/'unsigned.apk'
-    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','38','--version-name','0.3.32','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
+    run([tools/'aapt2.exe','link','-I',platform,'--manifest',source_root/'AndroidManifest.xml','--version-code','41','--version-name','2.0','--auto-add-overlay','-o',unsigned,BUILD/'resources.zip'])
     classes=BUILD/'classes';classes.mkdir(exist_ok=True)
     run([java/'javac.exe','-encoding','UTF-8','-source','8','-target','8','-classpath',os.pathsep.join(map(str,[platform,*wake_jars])),'-d',classes,*sorted((source_root/'src').rglob('*.java'))])
     classes_jar=BUILD/'classes.jar'
@@ -104,7 +104,7 @@ try:
         assert not any(name.endswith(('.pmx','.vrm','.moc3','.gguf','.mdl','.fst')) for name in archive.namelist()), 'No character/LLM/wake model packs in the APK'
         assert 'lib/arm64-v8a/libvosk.so' in archive.namelist() and 'assets/phone-wake.js' in archive.namelist()
         if args.edition=='combined':
-            for name in ('assets/phone-local.js','assets/phone-avatar.js','assets/phone-stage.js','assets/phone-stage.css','assets/native-jobs.js','assets/static/js/model-viewer.js','assets/static/vendor/vrm/three-vrm.module.min.js','assets/static/vendor/live2d/cubism4.min.js'):assert name in archive.namelist(),name
+            for name in ('assets/phone-local.js','assets/phone-avatar.js','assets/phone-stage.js','assets/phone-stage.css','assets/native-jobs.js','assets/static/js/model-viewer.js','assets/static/vendor/vrm/three-vrm.module.min.js','assets/static/vendor/live2d/cubism4.min.js','assets/static/vendor/live2d/unsafe-eval.min.js'):assert name in archive.namelist(),name
             assert '<option value="female">Female</option>' in html_text and '<option value="male">Male</option>' in html_text
         else:
             assert 'id="local-mode"' not in html_text

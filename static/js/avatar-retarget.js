@@ -1,5 +1,40 @@
 import * as THREE from 'three';
 const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : 0));
+// One Euro filter (Casiez et al.): cutoff rises with measured speed, so slow
+// motion is heavily smoothed while fast motion stays responsive.
+class OneEuroFilter {
+    constructor({minCutoff = 1, beta = 0, dCutoff = 1} = {}) {
+        this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+        this.value = null; this.velocity = 0;
+    }
+    static alpha(cutoff, dt) {
+        const tau = 1 / (2 * Math.PI * Math.max(cutoff, 1e-4));
+        return 1 / (1 + tau / dt);
+    }
+    reset(value = null) { this.value = value; this.velocity = 0; }
+    filter(next, dt) {
+        if (!Number.isFinite(next)) return this.value;
+        if (!Number.isFinite(this.value)) { this.value = next; this.velocity = 0; return next; }
+        const step = Math.max(1e-3, Math.min(Number.isFinite(dt) ? dt : 0, .1));
+        const raw = (next - this.value) / step;
+        this.velocity += (raw - this.velocity) * OneEuroFilter.alpha(this.dCutoff, step);
+        const cutoff = this.minCutoff + this.beta * Math.abs(this.velocity);
+        this.value += (next - this.value) * OneEuroFilter.alpha(cutoff, step);
+        return this.value;
+    }
+}
+class MedianFilter {
+    constructor(size = 5) { this.size = size; this.values = []; this.value = NaN; }
+    reset() { this.values = []; this.value = NaN; }
+    filter(next) {
+        if (!Number.isFinite(next)) return this.value;
+        this.values.push(next);
+        if (this.values.length > this.size) this.values.shift();
+        const sorted = [...this.values].sort((a, b) => a - b), middle = sorted.length >> 1;
+        this.value = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+        return this.value;
+    }
+}
 function faceAperture(points, corners, pairs) {
     const distance = (a,b) => {
         const p=points?.[a], q=points?.[b];
@@ -161,12 +196,19 @@ export default class AvatarRetarget {
             ? armBones.leftArm.bone.getWorldPosition(new THREE.Vector3()).distanceTo(armBones.rightArm.bone.getWorldPosition(new THREE.Vector3())) : this.height*.2;
         this.morphs = new Set();
         this.weights = {};
-        this.palms = {};
         this.calibrated = false;
         this.trackedRotations = {};
         this.faceNeutral = {leftEye:.28,rightEye:.28,mouth:.025,jaw:0};
-        this.handPresence = {};
+        this._clearHandState();
+    }
+    _clearHandState() {
+        this.palms = {};
         this.handTargets = {};
+        this.handPresence = {};
+        this.handHeld = {};
+        this.palmFilters = {};
+        this.handScales = {};
+        this.handStability = {};
     }
     rotation(matrix) {
         if (!matrix?.length) return new THREE.Euler();
@@ -193,7 +235,7 @@ export default class AvatarRetarget {
                 this.weights[name]=0;this.viewer.setMorph(name,0);
             }
         }
-        this.palms={};
+        this._clearHandState();
     }
     _stableBodyTarget(channel,value,stamp,valid) {
         this.bodyTargets ||= {};
@@ -229,9 +271,7 @@ export default class AvatarRetarget {
         for (const entry of this.fingers) entry.bone.quaternion.copy(entry.rest);
         for (const name of this.morphs || []) this.viewer.setMorph(name, 0);
         for (const entry of Object.values(this.viewer.animationBones)) entry.bone.rotation.copy(this.viewer.vtuberTrackingMode?(entry.trackingRest||entry.rest):entry.rest);
-        this.handPresence = {};
-        this.palms = {};
-        this.handTargets = {};
+        this._clearHandState();
     }
     _visibleHand(hand) {
         const points=hand?.landmarks;
@@ -244,15 +284,85 @@ export default class AvatarRetarget {
     _confirmedHand(side, candidate, sample, enabled) {
         const stamp=sample?.timestamp ?? sample?.receivedAt;
         const recent=sample && performance.now()-sample.receivedAt<200;
-        if (!enabled || !recent || !this._visibleHand(candidate) || !Number.isFinite(stamp)) {
+        this.handHeld ||= {};
+        if (!enabled || !recent || !Number.isFinite(stamp)) {
             this.handPresence[side]=null;
+            this.handHeld[side]=false;
             return null;
         }
         let state=this.handPresence[side];
-        if (!state || stamp<state.stamp || stamp-state.stamp>200) state={stamp,count:1};
-        else if (stamp!==state.stamp) {state.stamp=stamp;state.count++;}
+        if (!this._visibleHand(candidate)) {
+            // A single dropped detection used to snap the whole arm to rest.
+            // Hold the last confirmed hand briefly, but only while fresh camera
+            // frames keep arriving and never before it was ever confirmed.
+            if (state?.last && state.count>=2 && stamp>=state.lastStamp && stamp-state.lastStamp<=120) {
+                this.handHeld[side]=true;
+                return state.last;
+            }
+            this.handPresence[side]=null;
+            this.handHeld[side]=false;
+            return null;
+        }
+        if (!state || stamp<state.stamp || stamp-state.stamp>200) state={stamp,count:1,last:candidate,lastStamp:stamp};
+        else if (stamp!==state.stamp) {state.stamp=stamp;state.count++;state.last=candidate;state.lastStamp=stamp;}
         this.handPresence[side]=state;
+        this.handHeld[side]=false;
         return state.count>=2 ? candidate : null;
+    }
+    _palmBasis(side, hand, delta) {
+        const world=hand?.world;
+        if (world?.length!==21 || !world.every(p=>p && [p.x,p.y,p.z].every(Number.isFinite))) return null;
+        const point=i=>new THREE.Vector3(-world[i].x,-world[i].y,world[i].z);
+        const rawX=point(5).sub(point(17)), rawY=point(9).sub(point(0));
+        if (rawX.lengthSq()<1e-12 || rawY.lengthSq()<1e-12) return null;
+        rawX.normalize(); rawY.normalize();
+        const make=()=>[0,1,2].map(()=>new OneEuroFilter({minCutoff:1.5,beta:.6,dCutoff:1}));
+        const filters=this.palmFilters[side] ||= {x:make(),y:make()};
+        this.handStability[side] ||= {};
+        const last=this.handStability[side].basis;
+        // A reversed axis is a detector reacquisition, not motion: filtering
+        // across the sign flip would sweep the wrist through the palm.
+        if (last && (rawX.dot(last.x)<0 || rawY.dot(last.y)<0)) {
+            for (const f of [...filters.x,...filters.y]) f.reset();
+            this.palms[side]=null;
+        }
+        const smooth=(vector,axis)=>{
+            const filtered=axis.map((f,i)=>f.filter(vector.getComponent(i),delta));
+            const result=new THREE.Vector3(...filtered);
+            return result.lengthSq()>1e-8 ? result.normalize() : null;
+        };
+        const x=smooth(rawX,filters.x), y=smooth(rawY,filters.y);
+        if (!x || !y) return null;
+        const z=new THREE.Vector3().crossVectors(x,y).normalize();
+        if (z.lengthSq()<1e-8) return null;
+        y.crossVectors(z,x).normalize();
+        this.handStability[side].basis={x:x.clone(),y:y.clone()};
+        return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,z));
+    }
+    _palmNormal(hand) {
+        const p=hand?.landmarks;
+        if (p?.length!==21) return null;
+        const v=(a,b)=>new THREE.Vector3(p[a].x-p[b].x,p[a].y-p[b].y,p[a].z-p[b].z);
+        const normal=new THREE.Vector3().crossVectors(v(5,0),v(17,0));
+        return normal.lengthSq()>1e-12 ? normal.normalize() : null;
+    }
+    _palmStable(side, normal) {
+        const state=this.handStability[side] ||= {};
+        if (!normal) {state.since=0;return true;}
+        const now=performance.now();
+        if (!state.normal) {state.normal=normal.clone();state.since=0;return true;}
+        const angle=state.normal.angleTo(normal);
+        // Compare against the last accepted palm plane with hysteresis: a
+        // flipped or re-estimated hand must not reinterpret finger geometry.
+        if (angle<=Math.PI/3) {
+            if (angle<Math.PI*2/9) state.normal.copy(normal);
+            state.since=0;
+            return true;
+        }
+        state.since ||= now;
+        if (now-state.since<300) return false;
+        state.normal.copy(normal);state.since=0;
+        return true;
     }
     apply(sample, delta) {
         if (this.root !== this.viewer.model) this.bind();
@@ -442,11 +552,22 @@ export default class AvatarRetarget {
             const hand=this._confirmedHand(side,assignedHands.get(side),sample,handsTracking);
             const left=side==='left';
             const indices=left ? [11,13,15] : [12,14,16];
+            const held=this.handHeld?.[side]===true;
+            // Palm width is the noisiest derived hand quantity. A median plus a
+            // jump gate keeps a single bad detection from throwing the wrist.
+            const width=hand?.landmarks?.[17] ? Math.hypot(hand.landmarks[5].x-hand.landmarks[17].x,hand.landmarks[5].y-hand.landmarks[17].y) : NaN;
+            const scale=this.handScales[side] ||= new MedianFilter(5);
+            let outlier=false;
+            if (hand && !held && Number.isFinite(width)) {
+                const median=scale.filter(width);
+                outlier=Number.isFinite(median) && Math.abs(width-median)>median*.45;
+            }
+            const stable=hand && !outlier ? this._palmStable(side,this._palmNormal(hand)) : true;
             const poseArmValid=!!hand && poseShouldersValid && indices.every(i=>posePoints[i]
                 && (posePoints[i].visibility ?? 1) > .6 && [posePoints[i].x,posePoints[i].y,posePoints[i].z].every(Number.isFinite))
                 && Math.hypot(hand.landmarks[0].x-posePoints[indices[2]].x,hand.landmarks[0].y-posePoints[indices[2]].y)<.2;
             if (hand) {
-                rotate(side+'Wrist',0,0,0);
+                if (!outlier) rotate(side+'Wrist',0,0,0);
             } else {
                 // Let the tracked upper body return smoothly to its authored pose.
                 for (const key of [side+'Shoulder',side+'Arm',side+'Elbow',side+'Wrist']) {
@@ -456,8 +577,14 @@ export default class AvatarRetarget {
                 this.palms[side]=null;
                 this.handTargets[side]=null;
                 if(this.armPoles)this.armPoles[side]=null;
+                scale.reset();
+                this.handStability[side]={};
+                for (const f of [...(this.palmFilters[side]?.x||[]),...(this.palmFilters[side]?.y||[])]) f.reset();
             }
-            if(poseArmValid && indices.every(i=>poseWorld[i] && [poseWorld[i].x,poseWorld[i].y,poseWorld[i].z].every(Number.isFinite)) && bones[side+'Wrist']) {
+            if (outlier) {
+                // Hold the whole hand pose for this frame; the next consistent
+                // detection resumes from the same targets.
+            } else if(poseArmValid && indices.every(i=>poseWorld[i] && [poseWorld[i].x,poseWorld[i].y,poseWorld[i].z].every(Number.isFinite)) && bones[side+'Wrist']) {
                 this.root.updateMatrixWorld(true);
                 const shoulder=bones[side+'Shoulder']?.bone || bones[side+'Arm']?.bone;
                 if(shoulder) {
@@ -479,23 +606,20 @@ export default class AvatarRetarget {
                     (wrist.x-nose.x)*this.height*sign,(nose.y-wrist.y)*this.height,this.height*.12));
                 this.solveArm(side,target,alpha);
             }
-            if(hand?.world?.length===21 && hand.world.every(p=>p && [p.x,p.y,p.z].every(Number.isFinite)) && bones[side+'Wrist']) {
-                const point=i=>new THREE.Vector3(-hand.world[i].x,-hand.world[i].y,hand.world[i].z);
-                const x=point(5).sub(point(17)).normalize();
-                const y=point(9).sub(point(0)).normalize();
-                const z=new THREE.Vector3().crossVectors(x,y).normalize();
-                y.crossVectors(z,x).normalize();
-                const palm=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,z));
-                if(!this.palms[side]) this.palms[side]=palm.clone();
-                const motion=palm.clone().multiply(this.palms[side].clone().invert());
-                const entry=bones[side+'Wrist'];
-                const parent=entry.bone.parent.getWorldQuaternion(new THREE.Quaternion());
-                const localMotion=parent.clone().invert().multiply(motion).multiply(parent);
-                const target=localMotion.multiply(new THREE.Quaternion().setFromEuler(entry.rest));
-                const rest=new THREE.Quaternion().setFromEuler(entry.rest);
-                const angle=rest.angleTo(target);
-                if(angle>1.2)target.slerpQuaternions(rest,target.clone(),1.2/angle);
-                entry.bone.quaternion.slerp(target,alpha);
+            if(!outlier && bones[side+'Wrist']) {
+                const palm=this._palmBasis(side,hand,delta);
+                if(palm) {
+                    if(!this.palms[side]) this.palms[side]=palm.clone();
+                    const motion=palm.clone().multiply(this.palms[side].clone().invert());
+                    const entry=bones[side+'Wrist'];
+                    const parent=entry.bone.parent.getWorldQuaternion(new THREE.Quaternion());
+                    const localMotion=parent.clone().invert().multiply(motion).multiply(parent);
+                    const target=localMotion.multiply(new THREE.Quaternion().setFromEuler(entry.rest));
+                    const rest=new THREE.Quaternion().setFromEuler(entry.rest);
+                    const angle=rest.angleTo(target);
+                    if(angle>1.2)target.slerpQuaternions(rest,target.clone(),1.2/angle);
+                    entry.bone.quaternion.slerp(target,alpha);
+                }
             }
             for (const entry of this.fingers.filter(f=>f.side===side)) {
                 if (!hand) {
@@ -504,6 +628,9 @@ export default class AvatarRetarget {
                     entry.filteredSpread = undefined;
                     continue;
                 }
+                // A flipped palm plane or a scale outlier makes the joint angles
+                // meaningless; keep the last finger pose instead of bending them.
+                if (outlier || !stable) continue;
                 const points=hand?.world || hand?.landmarks;
                 const rawAngle=fingerJointCurl(points,entry.finger,entry.segment);
                 const desired=clamp(rawAngle-.02,0,entry.finger===0?1.1:1.6);

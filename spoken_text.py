@@ -57,6 +57,9 @@ EMOJI=re.compile(
     r'\U000E0020-\U000E007F]')
 
 def strip_speech_decoration(text):
+    # Internal no-comment signals and visual navigation glyphs are not dialogue.
+    text=re.sub(r'\[\s*QUIET\s*\]', '', text, flags=re.I)
+    text=re.sub(r'[\u2190-\u21ff\u27f0-\u27ff]+', ' ', text)
     text=EMOJI.sub('',text)
     text=re.sub(r'^\s*>+\s*','',text,flags=re.MULTILINE)
     text=re.sub(r'(?<=\s)>+(?=\s*[“\"\'])','',text)

@@ -1,14 +1,13 @@
 const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playwright');
 (async()=>{const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});try{
  const page=await browser.newPage({viewport:{width:360,height:650}});
- await page.route('http://127.0.0.1:9988/**',route=>route.fulfill({contentType:'text/html',body:'<body></body>'}));await page.goto('http://127.0.0.1:9988/');await page.setContent('<body class="desktop-companion companion-ui-active"><header id="top-bar">Sakura</header><button id="continuous-mic-btn">Mic</button><button id="bg-toggle-btn"></button><button id="restore-companion-controls">Settings</button><div id="viewer"></div></body>');
+ await page.route('http://127.0.0.1:9988/**',route=>route.fulfill({contentType:'text/html',body:'<body></body>'}));await page.goto('http://127.0.0.1:9988/');await page.setContent('<body class="desktop-companion companion-ui-active"><header id="top-bar">Sakura</header><button id="continuous-mic-btn">Mic</button><button id="bg-toggle-btn"></button><div id="viewer"></div></body>');
  await page.addStyleTag({content:fs.readFileSync('static/css/style.css','utf8')+'\n'+fs.readFileSync('static/css/companion-studio.css','utf8')+'\n'+fs.readFileSync('static/css/appearance.css','utf8')});
  await page.evaluate(()=>{window.on=false;window.nativeCalls=[];window.pywebview={api:{set_character_only:async enabled=>{nativeCalls.push(enabled);return enabled;},set_surface_transparency:()=>{}}};window.trackingOnly=false;window.currentSettings={};window.bgToggleBtn=document.getElementById('bg-toggle-btn');document.getElementById('continuous-mic-btn').onclick=()=>{on=!on;document.getElementById('continuous-mic-btn').setAttribute('aria-pressed',String(on));};});
  await page.addScriptTag({content:fs.readFileSync('static/js/compact-companion-controls.js','utf8').replace('export function','function')+';installCompactCompanionControls(()=>on);'});
  assert.equal(await page.locator('#compact-companion-mic').isVisible(),true);
- const settingsBox=await page.locator('#restore-companion-controls').boundingBox(),micBox=await page.locator('#compact-companion-mic').boundingBox();
- assert.ok(settingsBox.y<100&&settingsBox.x>280,'Settings is at the top-right');
- assert.ok(settingsBox.y+settingsBox.height<micBox.y,'Settings and mic never overlap');
+ assert.equal(await page.locator('#restore-companion-controls').count(),0);
+ assert.equal(await page.locator('#compact-companion-transparency').isVisible(),true,'Requested transparency shortcut sits beside the mic');
  await page.locator('#compact-companion-mic').click();assert.equal(await page.locator('#compact-companion-mic').getAttribute('aria-pressed'),'true');
  await page.locator('#compact-companion-mic').click();assert.equal(await page.evaluate(()=>on),false);
  const source=fs.readFileSync('static/js/app.js','utf8');const transparency=source.match(/function setTransparency\(enabled, persist = true\) \{[\s\S]*?\n\}/)[0];
@@ -19,9 +18,7 @@ const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playw
  await page.evaluate(()=>window.toggleCompanionView());
  assert.equal(await page.evaluate(()=>document.body.classList.contains('transparent-mode')),false);
  assert.equal(await page.locator('#compact-companion-mic').isVisible(),true);
- assert.equal(await page.locator('#compact-companion-transparency').isVisible(),true);
- const transparentBox=await page.locator('#compact-companion-transparency').boundingBox();assert.ok(transparentBox.x+transparentBox.width<micBox.x,'Transparency shortcut does not overlap mic');
- await page.locator('#compact-companion-transparency').click();
+ await page.evaluate(()=>window.toggleCompanionView());
  assert.equal(await page.evaluate(()=>document.body.classList.contains('transparent-mode')),true);
  assert.equal(await page.locator('#compact-companion-mic').isVisible(),false);
  assert.equal(await page.locator('#top-bar').isVisible(),false,'Themed header cannot leak into character-only transparent mode');

@@ -11,7 +11,7 @@ const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('
   // Same wiring app.js installs for the face-tracking options.
   const mode=document.getElementById('companion-camera-mode'),options=document.getElementById('companion-face-tracking-options');
   mode.addEventListener('change',()=>{options.hidden=mode.value!=='tracking';});});
- await page.addScriptTag({content:`(function(){${fs.readFileSync('static/js/companion-studio.js','utf8').replace(/export function/g,'function')}})()`});
+ await page.addScriptTag({content:`(function(){${fs.readFileSync('static/js/companion-studio.js','utf8').replace(/^import \{installSpeakerEnrolment\}[^\n]*$/m,fs.readFileSync('static/js/speaker-enrolment.js','utf8').replace('export function','function')).replace(/export function/g,'function')}})()`});
  await page.waitForFunction(()=>document.body.classList.contains('companion-ui-active'));
  await page.getByRole('button',{name:'Camera & tracking',exact:true}).click();
  await page.waitForSelector('#companion-panel:not([hidden])');

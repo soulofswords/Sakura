@@ -43,6 +43,13 @@ export function installVtuberCollab({viewer,ModelViewer}){
     const connectButton=document.getElementById('collab-connect');
     const disconnectButton=document.getElementById('collab-disconnect');
     const stage=document.getElementById('vtuber-collab-stage');
+    const shared=document.createElement('section');shared.innerHTML='<h3>Shared conversation</h3><label><input data-shared-enabled type="checkbox"> Receive shared messages (not private history)</label><input data-shared-text maxlength="500" placeholder="Message to collaborators" aria-label="Shared collab message"><button data-shared-send type="button">Send to room</button><button data-shared-use type="button">Use these messages with my next Companion question</button><p data-shared-status></p><div data-shared-log></div>';
+    dialog.querySelector('.collab-dialog-card')?.append(shared);
+    const sharedEl=name=>shared.querySelector('[data-shared-'+name+']');let sharedMessages=[];
+    function sharedMessage(speaker,text){if(!sharedEl('enabled').checked)return;const row={speaker:String(speaker).slice(0,60),text:String(text).slice(0,500)};sharedMessages.push(row);sharedMessages=sharedMessages.slice(-12);const line=document.createElement('p');line.textContent=row.speaker+': '+row.text;sharedEl('log').append(line);while(sharedEl('log').children.length>12)sharedEl('log').firstChild.remove();}
+    sharedEl('send').onclick=()=>{const text=sharedEl('text').value.trim();if(!text)return;sharedEl('enabled').checked=true;sharedMessage('Me',text);let sent=0;for(const peer of peers.values())if(peer.control?.readyState==='open'){peer.control.send(JSON.stringify({type:'shared-chat',text}));sent++;}sharedEl('status').textContent=sent?'Sent to '+sent+' connected collaborators.':'No collaborator is connected; message is local only.';sharedEl('text').value='';};
+    sharedEl('use').onclick=()=>{if(window.SAKURA_EDITION==='vtuber'){sharedEl('status').textContent='Standalone VTuber has no chat AI. Use Companion for shared-context questions.';return;}window.sakuraSharedContext=sharedMessages.slice(-6);fetch('/api/features/shared-context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:window.sakuraSharedContext})}).then(async response=>{const data=await response.json();sharedEl('status').textContent=response.ok?'Shared quotes are available to Companion and the reviewed Agent context tool.':(data.detail||'Enable shared context in Agent → Memory workshop first.');}).catch(error=>sharedEl('status').textContent=error.message);};
+    sharedEl('enabled').onchange=()=>{if(!sharedEl('enabled').checked){sharedMessages=[];window.sakuraSharedContext=[];sharedEl('log').replaceChildren();if(window.SAKURA_EDITION!=='vtuber')fetch('/api/features/shared-context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[]})}).catch(()=>{});}};
     const peers=new Map();
     let socket=null,peerId='',poseTimer=null,localSeat=null,originalViewerParent=null,originalViewerNext=null,originalViewerStyle='';
 
@@ -128,7 +135,8 @@ export function installVtuberCollab({viewer,ModelViewer}){
             if(state.received){state.received.parts.push(event.data);state.received.receivedBytes+=event.data.byteLength;}
             return;
         }
-        let message;try{message=JSON.parse(event.data);}catch(_){return;}
+        if(typeof event.data!=='string'||event.data.length>10000)return;let message;try{message=JSON.parse(event.data);}catch(_){return;}
+        if(message.type==='shared-chat'){const now=Date.now();if(now-(state.sharedAt||0)<500)return;state.sharedAt=now;if(typeof message.text==='string'&&message.text.length<=500)sharedMessage(state.peerId,message.text);return;}
         if(message.type==='package-start'){
             if(!Number.isSafeInteger(message.size)||message.size<=0||message.size>MAX_PACKAGE_BYTES){say('The collaborator model exceeds Sakura’s 300 MB limit.');return;}
             state.received={size:message.size,entry:String(message.entry||''),name:String(message.name||'Avatar'),parts:[],receivedBytes:0};

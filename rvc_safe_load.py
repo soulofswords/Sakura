@@ -9,10 +9,11 @@ TRUSTED = {
     'rmvpe.pt':'6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193',
 }
 
-def install(torch, root):
+def install(torch, root, asset_dirs=()):
     original=torch.load
     if getattr(original,'sakura_restricted',False):return
     os.environ.pop('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD',None)
+    allowed_dirs={Path(root).resolve()/'rvc-assets',*(Path(folder).resolve() for folder in asset_dirs)}
     @functools.wraps(original)
     def load(source,*args,**kwargs):
         # PyTorch honours this variable even when weights_only=True is passed,
@@ -22,7 +23,7 @@ def install(torch, root):
         try:
             name=source if isinstance(source,(str,os.PathLike)) else getattr(source,'name',source)
             path=Path(name).resolve()
-            if path.name in TRUSTED and path==Path(root).resolve()/'rvc-assets'/path.name:
+            if path.name in TRUSTED and path.parent in allowed_dirs:
                 with path.open('rb') as stream:
                     trusted=hashlib.file_digest(stream,'sha256').hexdigest()==TRUSTED[path.name]
         except (TypeError,ValueError,OSError):pass

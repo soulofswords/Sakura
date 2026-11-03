@@ -5,9 +5,9 @@ import {waitForModelGpu} from './model-presentation.js?v=switch85';
 import Live2DViewer from './live2d-viewer.js?v=stage-items151';
 import ModelBlockTransition from './model-block-transition.js?v=switch85';
 import {applyChatReaderLean} from './chat-reader-motion.js?v=1';
-import {restoreIdleBreathing,applyIdleBreathing} from './idle-breathing.js?v=2';
+import {restoreIdleBreathing,applyIdleBreathing} from './idle-breathing.js?v=sleep-cycle4';
 import * as THREE from 'three';
-import { MMDLoader } from 'three/addons/loaders/MMDLoader.js?v=toon-rectangle1';
+import { MMDLoader } from 'three/addons/loaders/MMDLoader.js?v=cutout-uniform3';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
@@ -15,7 +15,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/static/vendor/vrm/three-vrm.module.min.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import AvatarRetarget from './avatar-retarget.js?v=irina-greeting113';
+import AvatarRetarget from './avatar-retarget.js?v=virtu-hands1';
 import ArmClearance from './arm-clearance.js?v=clearance1';
 import ModelPhysics from './model-physics.js?v=irina-drape112';
 import ModelRigMonitor from './model-rig-monitor.js?v=irina-greeting113';
@@ -23,9 +23,9 @@ import ModelRepairStore from './model-repair-store.js?v=1';
 import {ModelBones} from './model-bones.js?v=persistent5';
 import {repairNoseSkin} from './pmx-nose-skin.js?v=1';
 import {updateAccessoryIK} from './pmx-accessory-ik.js?v=1';
-import ReactionExpressions from './reaction-expressions.js?v=files106';
+import ReactionExpressions from './reaction-expressions.js?v=emotion107';
 import {loadVisibility,applyVisibility} from './model-visibility.js?v=irida101';
-import ModelDance from './model-dance.js?v=irina-greeting113';
+import ModelDance from './model-dance.js?v=phone-deck114';
 import {classifySpeechGesture,speechGestureWeights} from './speech-gesture.js?v=1';
 import {renderPixelRatio} from './render-budget.js?v=startup68';
 import {applyPmxReferenceLighting} from './pmx-reference-lighting.js?v=reference-match16';
@@ -212,6 +212,14 @@ export default class ModelViewer {
         this.desktopMode = new URLSearchParams(location.search).has('desktop');
         // Model manipulation is identical in Gemini, Local and VTuber views.
         this._configureModelControls();
+        // Wheel zoom is eased here rather than by OrbitControls: enabling
+        // OrbitControls damping to smooth the wheel would re-add the drag lag
+        // this viewer deliberately removed at construction (see enableDamping).
+        // Own the wheel, glide the camera distance toward a target, keep rotation
+        // and panning instant.
+        this.controls.enableZoom = false;
+        this._zoomTargetDistance = null;
+        this._bindSmoothZoom();
         this.renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
         this.renderer.domElement.addEventListener('dblclick', () => {
             if (this.model) this._autoFrame(this.model);
@@ -268,6 +276,9 @@ export default class ModelViewer {
             if (modelPanPointer?.id === event.pointerId && this.controls.enabled) {
                 const dx=event.clientX-modelPanPointer.x,dy=event.clientY-modelPanPointer.y;
                 this._panCameraByScreenDelta(dx,dy);
+                // Panning is virtual root motion, so it reuses the window-drag
+                // impulse instead of inventing a second physics pathway.
+                this.applyHairScreenDrag(dx,dy);
                 modelPanPointer.x=event.clientX;modelPanPointer.y=event.clientY;
             }
         });
@@ -494,6 +505,44 @@ export default class ModelViewer {
             this._renderFrame();
             if (!this.live2d) this._releasePresentedFrame(this._displayLoadTicket);
         });
+    }
+
+    _bindSmoothZoom() {
+        // Eased wheel zoom. OrbitControls' instant dolly is disabled, so we own
+        // the wheel here: each notch retargets the camera distance and _easeZoom
+        // glides toward it, matching the smooth zoom feel of web 3D viewers while
+        // leaving left-rotate/right-rotate/pan untouched.
+        const canvas = this.renderer?.domElement;
+        if (!canvas) return;
+        canvas.addEventListener('wheel', event => {
+            if (!this.controls?.enabled || this.live2d) return;
+            event.preventDefault();
+            // Normalise line/page scroll modes to pixel-like units before easing.
+            const units = event.deltaMode === 1 ? event.deltaY * 16
+                : event.deltaMode === 2 ? event.deltaY * 100 : event.deltaY;
+            const current = this.camera.position.distanceTo(this.controls.target);
+            // While a glide is in flight, extend the existing target so fast
+            // repeated notches accumulate instead of restarting from a lagging
+            // mid-frame distance.
+            const start = this._zoomTargetDistance ?? current;
+            const factor = Math.exp(units * 0.0016);
+            this._zoomTargetDistance = Math.min(300, Math.max(1, start * factor));
+        }, { passive: false });
+    }
+
+    _easeZoom(delta) {
+        if (this._zoomTargetDistance == null || !this.controls || this.live2d) return;
+        const current = this.camera.position.distanceTo(this.controls.target);
+        // Frame-rate independent exponential glide (~90ms time constant), so the
+        // feel is the same on a 60Hz and a 144Hz display.
+        const t = 1 - Math.exp(-delta / 0.09);
+        let next = current + (this._zoomTargetDistance - current) * t;
+        if (Math.abs(this._zoomTargetDistance - next) < 0.01) { next = this._zoomTargetDistance; this._zoomTargetDistance = null; }
+        const direction = this.camera.position.clone().sub(this.controls.target);
+        if (direction.lengthSq() > 1e-6) {
+            direction.setLength(next);
+            this.camera.position.copy(this.controls.target).add(direction);
+        }
     }
 
     setDisplaySize(percent) {
@@ -1818,6 +1867,7 @@ export default class ModelViewer {
     }
 
     setEyeTrackingTarget(x, y) {
+        if(this.companionRoom?.sleeping)return;
         this.eyeTrackingTarget = { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
         this.live2d?.setGazeTarget(this.eyeTrackingTarget.x,this.eyeTrackingTarget.y);
     }
@@ -2070,6 +2120,16 @@ export default class ModelViewer {
      * scaling their per-joint settings, so Off/Subtle/Normal/Lively behave
      * the same for VRM avatars as for PMX rigs.
      */
+    setVrmSpringTuning(values={}) {
+        const clean={};
+        for(const name of ['stiffness','gravity','drag']){
+            const value=values[name]??1;
+            if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>2)throw Error('VRM spring tuning must be between 0% and 200%.');
+            clean[name]=value;
+        }
+        this.vrmSpringTuning=clean;this._syncVrmPhysics();
+    }
+
     _syncVrmPhysics() {
         const jointList = this.vrm?.springBoneManager?.joints;
         if (!jointList || typeof jointList[Symbol.iterator] !== 'function') return;
@@ -2107,6 +2167,12 @@ export default class ModelViewer {
                     if(length>0) settings.gravityDir.set(x/length,y/length,z/length);
                 }
             }
+            if (factor > 0 && !this.physics.disabledBones?.has(joint.bone) && !this.diagnosticFrozenBones?.has(joint.bone)) {
+                const tuning=this.vrmSpringTuning||{};
+                settings.stiffness *= tuning.stiffness ?? 1;
+                settings.gravityPower *= tuning.gravity ?? 1;
+                settings.dragForce = Math.min(1,Math.max(0,settings.dragForce*(tuning.drag ?? 1)));
+            }
         }
         // Zero forces alone preserve an already displaced tail. Reset the
         // runtime's particles and bone rotations when switching physics off.
@@ -2117,6 +2183,7 @@ export default class ModelViewer {
         // Only restrained brow expressions; mouth vowels remain under lip-sync.
         this.emotion = /\b(sorry|sad|hurt|worried|difficult|upset)\b/i.test(text) ? 'concerned'
             : /\b(wow|yay|awesome|congratulations|excited)\b/i.test(text) ? 'happy' : 'friendly';
+        const chosen=this.replyEmotion?.();if(chosen==='off')this.emotion='neutral';else if(chosen&&chosen!=='auto')this.emotion=chosen==='amused'?'happy':chosen;
         this.gestureStyle = classifySpeechGesture(text);
     }
 
@@ -2145,6 +2212,7 @@ export default class ModelViewer {
 
     _animateCharacter(delta, elapsed) {
         if (!this.model) return;
+        if(this.companionRoom?.sleeping)return;
         if(this.dance?.update(delta))return;
         if (this.userTracking) {
             if(this.physics)this.physics.allowIdleSleep = false;
@@ -2319,6 +2387,9 @@ export default class ModelViewer {
 
     _autoFrame(object) {
         if(this.live2d){this.live2d.pan={x:0,y:0};this.live2d.fit();return;}
+        // Automatic framing moves the camera programmatically; drop any in-flight
+        // wheel glide so the easing does not pull it back toward the stale target.
+        this._zoomTargetDistance = null;
         object.updateMatrixWorld(true);
         // Hidden morph variants and helper surfaces are not visible characters
         // and must not drag the camera thousands of units away.
@@ -2386,8 +2457,13 @@ export default class ModelViewer {
     captureTextureDiagnosticFrame(maxSize=960) {
         if(this.live2d)return this.live2d.capture(maxSize);
         if(!this.model||this._displayLoading)return null;
-        const saved=this.camera.clone();
+        const saved=this.camera.clone(),hidden=[];
         try{
+            // Editor references contain the character only. Imported scenery,
+            // props and the Companion room must not bias the fitting histogram.
+            const belongs=object=>{for(let p=this.model;p;p=p.parent)if(p===object)return true;return false;};
+            const isolate=parent=>{for(const child of parent.children){if(child===this.model||child.isLight)continue;if(belongs(child))isolate(child);else if(child.visible){hidden.push(child);child.visible=false;}}};
+            isolate(this.scene);
             this.model.updateMatrixWorld(true);
             const box=this._visibleModelBounds(this.model);
             if(box.isEmpty())return null;
@@ -2406,6 +2482,7 @@ export default class ModelViewer {
             this.camera.lookAt(center);this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld(true);
             return this.captureSpoutFrame(maxSize);
         }finally{
+            for(const object of hidden)object.visible=true;
             this.camera.copy(saved);this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld(true);
         }
     }
@@ -2775,6 +2852,7 @@ export default class ModelViewer {
         this._restoreCursorHeadPose();
         restoreIdleBreathing(this);
         this._animateCharacter(delta, elapsed);
+        this.companionRoom?.update(delta);
         this.boneControls?.apply();
         applyIdleBreathing(this, delta, elapsed);
         this.reactionExpressions?.update(delta);
@@ -2803,6 +2881,7 @@ export default class ModelViewer {
         this.rigMonitor?.enforce();
         this.rigMonitor?.sample();
         this.boneControls?.apply();
+        this._easeZoom(delta);
         this.controls.update();
         this._applyCollaboratorPose();
         if (this.characterGlow > 0 && this.bloomPass) {

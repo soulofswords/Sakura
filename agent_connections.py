@@ -1,5 +1,7 @@
 """Explicitly configured MCP transports; connecting never grants tool approval."""
 import asyncio
+import base64
+import binascii
 import copy
 import json
 import os
@@ -37,6 +39,31 @@ def bounded_schema(schema):
             for item in value:visit(item,depth+1)
     visit(schema)
     return schema
+
+
+def _save_image_block(block, artifact_dir):
+    """Persist one bounded MCP ImageContent block inside the approved task workspace."""
+    if not artifact_dir:
+        raise ValueError('The MCP returned an image but this call has no approved task workspace.')
+    mime=str(getattr(block,'mimeType','') or getattr(block,'mime_type','')).casefold()
+    extensions={'image/png':'.png','image/jpeg':'.jpg','image/jpg':'.jpg','image/webp':'.webp','image/gif':'.gif'}
+    if mime not in extensions:raise ValueError('The MCP returned an unsupported image type: '+(mime or 'unknown')+'.')
+    encoded=getattr(block,'data',None)
+    if not isinstance(encoded,str) or len(encoded)>12_000_000:raise ValueError('The MCP image is empty or larger than 8 MB.')
+    try:data=base64.b64decode(encoded,validate=True)
+    except (ValueError,binascii.Error):raise ValueError('The MCP returned invalid base64 image data.') from None
+    valid=(mime=='image/png' and data.startswith(b'\x89PNG\r\n\x1a\n')) or \
+          (mime in ('image/jpeg','image/jpg') and data.startswith(b'\xff\xd8\xff')) or \
+          (mime=='image/webp' and len(data)>=12 and data[:4]==b'RIFF' and data[8:12]==b'WEBP') or \
+          (mime=='image/gif' and data.startswith((b'GIF87a',b'GIF89a')))
+    if not valid or not data or len(data)>8_000_000:raise ValueError('The MCP image bytes do not match the declared image type or exceed 8 MB.')
+    root=Path(artifact_dir).resolve(strict=True)
+    folder=(root/'.sakura-agent-artifacts').resolve(strict=False)
+    if not folder.is_relative_to(root):raise ValueError('Image artifacts must stay inside the task workspace.')
+    folder.mkdir(exist_ok=True)
+    path=folder/(uuid.uuid4().hex+extensions[mime])
+    with path.open('xb') as output:output.write(data)
+    return {'type':'image','path':str(path.relative_to(root)),'mime_type':mime,'bytes':len(data)}
 
 
 class Connections:
@@ -99,7 +126,7 @@ class Connections:
     def public(self):return list(self.all().values())
 
 
-async def _mcp_request(config,operation,tool=None,arguments=None,schema_hash=None):
+async def _mcp_request(config,operation,tool=None,arguments=None,schema_hash=None,artifact_dir=None):
     from contextlib import AsyncExitStack
     from mcp import ClientSession,StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -140,12 +167,17 @@ async def _mcp_request(config,operation,tool=None,arguments=None,schema_hash=Non
         result=await session.call_tool(tool,arguments)
         # Keep image/audio blobs out of planner history and bound remote output.
         content=[];budget=64000;truncated=False
+        images=0
         for block in result.content[:40]:
             kind=getattr(block,'type','unknown')
             if kind=='text':
                 raw=block.text;portion=raw[:budget];budget-=len(portion)
                 content.append({'type':'text','text':portion});truncated|=len(raw)>len(portion)
-            else:content.append({'type':kind,'note':'Non-text tool output is not supplied to the planner.'})
+            elif kind=='image':
+                images+=1
+                if images>8:truncated=True;continue
+                content.append(_save_image_block(block,artifact_dir))
+            else:content.append({'type':kind,'note':'This non-text tool output is not supplied to the planner.'})
             if budget<=0:truncated=True;break
         structured=getattr(result,'structuredContent',None)
         if structured:

@@ -40,6 +40,14 @@ class AttachmentTests(unittest.TestCase):
         for name,data in [('app.exe',b'code'),('file.txt',b'\0binary'),('bad.png',b'not an image'),('scan.pdf',blank.getvalue()),('huge.txt',b'x'*(10*1024*1024+1))]:
             with self.assertRaises(ValueError,msg=name):extract_attachment(name,data)
 
+    def test_only_the_agent_reader_may_take_names_with_no_known_extension(self):
+        """Repository setups are built from .env.example, Dockerfile and LICENSE, which upload never
+        accepted; the agent asks for them by name inside an approved workspace, so it opts in."""
+        self.assertEqual(extract_attachment('Dockerfile',b'FROM node:20\n',allow_unknown_text=True)['text'],'FROM node:20\n')
+        with self.assertRaises(ValueError):extract_attachment('Dockerfile',b'FROM node:20\n')
+        with self.assertRaises(ValueError,msg='binary still refused with the flag on'):
+            extract_attachment('app.exe',b'\0MZ\0',allow_unknown_text=True)
+
     def test_tokens_expire_and_clear(self):
         store=AttachmentStore()
         with patch('chat_attachments.time.monotonic',return_value=100):item=store.put(extract_attachment('a.txt',b'hello'))

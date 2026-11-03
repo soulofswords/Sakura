@@ -22,7 +22,11 @@ def prepare(args,run,cwd):
     from agent_runtime import powershell,file_hash
     backend=args.get('backend','local')
     fields={'local':set(),'docker':{'image','writable'},'ssh':{'host','user','port','remote_cwd'}}[backend]
-    if set(args)-{'command','cwd','backend'}-fields:raise ValueError('Remove options belonging to a different execution backend.')
+    if set(args)-{'command','cwd','backend','timeout_seconds'}-fields:raise ValueError('Remove options belonging to a different execution backend.')
+    if 'timeout_seconds' in args:
+        budget=args['timeout_seconds']
+        if isinstance(budget,bool) or not isinstance(budget,int) or not 5<=budget<=1800:
+            raise ValueError('timeout_seconds is a whole number of seconds between 5 and 1800.')
     runner=powershell() if backend=='local' else shutil.which(backend)
     if not runner:raise ValueError('Install '+backend+' separately and make it available in PATH before choosing this backend.')
     runner=Path(runner).resolve(strict=True)
@@ -50,14 +54,18 @@ def prepare(args,run,cwd):
 
 def execute(args,run,bindings,run_process,cancel_event=None):
     backend=args.get('backend','local');cwd=Path(args['cwd']);runner=bindings['runner']
-    if backend=='local':return run_process([runner,'-NoProfile','-NonInteractive','-Command',args['command']],cwd,cancel_event=cancel_event)
+    # A setup step is not a shell prompt: an install or a build outlives the 45 second
+    # default, so the reviewed command carries its own bounded budget.
+    limits={'timeout':args['timeout_seconds']} if isinstance(args.get('timeout_seconds'),int) else {}
+    if backend=='local':return run_process([runner,'-NoProfile','-NonInteractive','-Command',args['command']],cwd,
+                                           cancel_event=cancel_event,**limits)
     if backend=='ssh':
         known=bindings['known_hosts'].replace('\\','/')
         argv=[runner,'-F',os.devnull,'-T','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','UpdateHostKeys=no',
               '-o','ConnectTimeout=10','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no',
               '-o','UserKnownHostsFile="'+known+'"','-p',str(args.get('port',22)),args['user']+'@'+args['host'],
               'cd -- '+shlex.quote(args['remote_cwd'])+' && sh -s']
-        return run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event)
+        return run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event,**limits)
     name='sakura-agent-'+uuid.uuid4().hex
     from sandbox_mount_policy import validate_mount
     validate_mount(run['workspace'])
@@ -70,7 +78,7 @@ def execute(args,run,bindings,run_process,cancel_event=None):
                  '--entrypoint','/bin/sh','-i',args['image'],'-s']
     result=None
     try:
-        result=run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event)
+        result=run_process(argv,cwd,input_text=args['command']+'\n',cancel_event=cancel_event,**limits)
         return result
     finally:
         try:

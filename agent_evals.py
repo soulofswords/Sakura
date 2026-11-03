@@ -222,11 +222,15 @@ def scheduled_replay_stops_when_output_already_exists(runtime, root):
 
 
 def image_goal_without_a_generator_is_honest(runtime, root):
-    model = ScriptedModel([{'done': True, 'summary': 'Making a picture now.'}])
-    state = runtime.plan(runtime.new_run('Generate an image of a cat wearing a hat', str(root), True)['id'], model)
-    assert state['status'] == 'blocked', state['status']
-    assert 'no image-generation tool' in state['summary'], state['summary']
-    assert not state['steps']
+    # The ComfyUI tools are part of the catalog on a PC that has an install, so this scenario has to
+    # take that away to test the promise it makes: with nothing that can draw, say so.
+    from unittest.mock import patch
+    with patch('comfy_tools.available', return_value=False):
+        model = ScriptedModel([{'done': True, 'summary': 'Making a picture now.'}])
+        state = runtime.plan(runtime.new_run('Generate an image of a cat wearing a hat', str(root), True)['id'], model)
+        assert state['status'] == 'blocked', state['status']
+        assert 'no image-generation tool' in state['summary'], state['summary']
+        assert not state['steps']
     return 'blocked with: ' + state['summary'][:70]
 
 

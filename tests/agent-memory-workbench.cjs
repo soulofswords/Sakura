@@ -1,0 +1,10 @@
+const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({headless:true});try{
+ const page=await browser.newPage();await page.setContent('<main></main>');
+ for(const file of ['agent-memory-workbench.js','agent-extension-store.js'])await page.addScriptTag({content:fs.readFileSync('static/js/'+file,'utf8')});
+ await page.evaluate(()=>{window.calls=[];window.api=async(path,body)=>{calls.push({path,body});if(path==='extension-store')return {extensions:[{id:'test',name:'<img src=x onerror=alert(1)>',description:'Test',publisher:'Test',source:'https://example.com',transport:'stdio'}]};if(path.startsWith('memory-workbench/graph?'))return {links:[{entity:'Alice',memory_id:3,classification:'User-provided'}]};if(path.endsWith('consolidate'))return {mode:'preview',candidates:[3],policy:'Raw statements retained'};return {enabled:false,journals:[]};};const options={api,perform:fn=>fn(),refresh:async()=>{}};installMemoryWorkbench(options);installExtensionStore(options);document.querySelectorAll('section').forEach(p=>p.hidden=false);});
+ await page.locator('[data-preview]').click();await page.waitForFunction(()=>calls.some(c=>c.path.endsWith('consolidate')));assert.equal(await page.locator('[data-status]').first().textContent(),'preview: 1 eligible records. Raw statements retained');
+ await page.getByText('Source-linked entity index',{exact:true}).click();await page.locator('[data-query]').fill('Alice');await page.locator('button[data-search]').click();assert.match(await page.locator('[data-links]').textContent(),/Alice → memory #3/);
+ await page.locator('[data-load]').click();await page.waitForSelector('[data-cards] article');assert.equal(await page.locator('[data-cards] img').count(),0);await page.locator('[data-cards] button').click();assert.equal(await page.evaluate(()=>calls.at(-1).path),'extension-store/add');
+ console.log('PASS: memory workshop API wiring and extension configuration use safe text');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

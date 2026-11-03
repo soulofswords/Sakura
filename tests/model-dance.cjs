@@ -93,3 +93,12 @@ for(const vrm of [false,true]){
  v.userTracking=true;assert.equal(motion.start('greeting_wave'),false);v.userTracking=false;v.live2d={};assert.equal(motion.start('greeting_wave'),false);
 }
 console.log('PASS: greeting wave remains finite, completes smoothly and excludes Live2D/face tracking');
+{
+ const model=new THREE.Group(),v={model,vrm:false,userTracking:true,vtuberTrackingMode:true,physics:{},animationBones:{}};
+ for(const key of ['torso','chest','neck','head','leftArm','rightArm','leftElbow','rightElbow','leftWrist','rightWrist']){const bone=new THREE.Bone();model.add(bone);v.animationBones[key]={bone,rest:new THREE.Euler()};}
+ const motion=new ctx.Dance(v);assert.equal(motion.start('hands_both'),false);
+ assert.equal(motion.start('hands_both',{manual:true}),true);
+ for(let i=0;i<400;i++)motion.update(1/60);
+ assert.equal(motion.active,null);assert.equal(v.userTracking,true);assert.equal(v.vtuberTrackingMode,true);assert.equal(motion.supported(),false);
+ console.log('PASS: explicitly paired phone pose can temporarily override tracking and then restore normal tracking eligibility');
+}

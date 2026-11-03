@@ -84,5 +84,28 @@ class AstraStrictEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['reply'],UNKNOWN)
         self.assertEqual(result['speech_reply'],UNKNOWN)
 
+    async def test_medium_chat_reviews_a_desktop_action_instead_of_running_it(self):
+        import app as server
+        settings={'response_restriction_level':'medium','computer_control_enabled':True}
+        with patch.object(server,'get_settings',return_value=dict(settings)), \
+                patch('desktop_control.execute_action') as execute, \
+                patch('assistant_commands.run_command') as command:
+            result=await server.chat({'text':'click save'})
+        self.assertTrue(result.get('command_approval'))
+        self.assertIn('Review this PC action before it runs',result['reply'])
+        execute.assert_not_called();command.assert_not_called()
+
+    async def test_medium_chat_reads_an_attachment_instead_of_dropping_it(self):
+        import app as server
+        seen=[]
+        async def core(payload,resolved_reply=None,skip_retrieval=False,preflight=False,offer_search=False):
+            seen.append(preflight)
+            return None if preflight else {'reply':'Three names are listed.','audio':None}
+        with patch.object(server,'get_settings',return_value={'response_restriction_level':'medium'}), \
+                patch.object(server,'_chat_core',core):
+            result=await server.chat({'text':'summarize this file','attachments':['tok_abc']})
+        self.assertEqual(seen,[True,False]);self.assertEqual(result['reply'],'Three names are listed.')
+        self.assertEqual(result['response_policy'],'Medium')
+
 
 if __name__=='__main__':unittest.main()

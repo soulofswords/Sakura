@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
 (async()=>{
  const source=fs.readFileSync('static/js/speech-interrupt.js','utf8');
  const {isSpeechInterrupt,createSpeechInterrupt}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
- for(const text of ['stop','wait','Stop speaking!','please stop','wait a second','hey sakura stop','रुको'])assert.ok(isSpeechInterrupt(text),text);
+ for(const text of ['stop','wait','Stop speaking!','please stop','wait a second','hey sakura stop','रुको','stop stop','wait, wait!','रुको रुको','please stop stop please'])assert.ok(isSpeechInterrupt(text),text);
  for(const text of ['do not stop','can you tell me when to stop','I will wait for you','stop dancing','the bus stop is nearby','wait what is a compiler'])assert.equal(isSpeechInterrupt(text),false,text);
  assert.ok(isSpeechInterrupt('hello computer wait','hello computer'));
  let callback,allowed=true,stops=0,interrupts=0,creates=0,recognized='',resolve;
@@ -19,6 +19,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
  const app=fs.readFileSync('static/js/app.js','utf8');
  assert.match(app,/interruptFollowupUntil=Date\.now\(\)\+15000/);
  assert.match(app,/if\(generation!==chatReplyGeneration\)return/);
- assert.match(app,/void nativeWake\.pause\(false\)/);
+ assert.match(app,/void nativeWake\.pause\(companionSleeping\)/);
  console.log('PASS: spoken stop/wait, wake-free command matching, mic opt-in, phrase reuse, stale STT cancellation and follow-up wiring');
 })().catch(error=>{console.error(error);process.exitCode=1;});

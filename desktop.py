@@ -79,6 +79,27 @@ _desktop_server = None
 
 # ── Desktop Window API ──────────────────────────────────────────
 class DesktopApi:
+    def encrypted_backup(self, operation, password):
+        import webview
+        from encrypted_backup import create, restore
+        win=self.holder.get('window')
+        if not win:return {'cancelled':True}
+        if operation=='create':
+            selected=win.create_file_dialog(webview.FileDialog.SAVE,save_filename='Sakura-Backup.sakurabak',file_types=('Encrypted Sakura backup (*.sakurabak)',))
+            if not selected:return {'cancelled':True}
+            return create(Path(__file__).parent,selected[0] if isinstance(selected,(list,tuple)) else selected,password)
+        if operation=='restore':
+            selected=win.create_file_dialog(webview.FileDialog.OPEN,allow_multiple=False,file_types=('Encrypted Sakura backup (*.sakurabak)',))
+            if not selected:return {'cancelled':True}
+            parent=win.create_file_dialog(webview.FileDialog.FOLDER)
+            if not parent:return {'cancelled':True}
+            return restore(selected[0],parent[0],password)
+        raise ValueError('Choose Create backup or Restore backup.')
+
+    def setup_guide_seen(self, edition, mark=False):
+        from setup_guide_state import seen
+        return seen(Path(__file__).parent, edition, mark is True)
+
     def windows_startup_status(self):
         try:
             from windows_startup import status
@@ -412,27 +433,40 @@ class DesktopApi:
         if not win:return {'error':'The desktop window is not ready.'}
         try:
             win.show();win.restore()
+            # Several VRM files can be ticked at once; PMX and Live2D need one folder because
+            # their textures live beside the entry point, and the models inside it are ticked next.
             selection=win.create_file_dialog(webview.FileDialog.OPEN if kind=='vrm' else webview.FileDialog.FOLDER,
-                allow_multiple=False,file_types=('VRM models (*.vrm)',) if kind=='vrm' else ())
+                allow_multiple=kind=='vrm',file_types=('VRM models (*.vrm)',) if kind=='vrm' else ())
             if not selection:return {'cancelled':True}
-            folder=Path(selection[0]).resolve()
-            entries=[folder] if kind=='vrm' else sorted(p for p in folder.rglob('*') if p.is_file() and (p.suffix.lower()=='.pmx' if kind=='pmx' else p.name.lower().endswith('.model3.json')))
+            if kind=='vrm':
+                entries=[Path(entry).resolve() for entry in selection]
+                if any(path.suffix.lower()!='.vrm' for path in entries):raise ValueError('Choose only .vrm files.')
+                folder=entries[0]
+            else:
+                folder=Path(selection[0]).resolve()
+                entries=sorted(p for p in folder.rglob('*') if p.is_file() and (p.suffix.lower()=='.pmx' if kind=='pmx' else p.name.lower().endswith('.model3.json')))
             if not entries:raise ValueError('No '+kind.upper()+' model was found in that folder.')
             identifier=secrets.token_hex(16);self._mobile_selection=(identifier,folder,kind,entries)
             return {'selection':identifier,'entries':[p.name if kind=='vrm' else p.relative_to(folder).as_posix() for p in entries],
                     'folder':folder.name,'format':kind}
         except Exception as error:return {'error':str(error)}
 
-    def send_mobile_model_package(self,selection,index,request_id):
+    def send_mobile_model_package(self,selection,indexes,request_id):
         from mobile_link import link
         try:
             chosen=getattr(self,'_mobile_selection',None)
             if not chosen or chosen[0]!=selection:raise ValueError('Choose the model folder again.')
             _,folder,kind,entries=chosen
-            if not isinstance(index,int) or not 0<=index<len(entries):raise ValueError('Choose a model from the selected folder.')
-            result=link.stage_selection(entries[index],folder,kind,request_id);self._mobile_selection=None
-            return {'model':result}
-        except Exception as error:return {'error':str(error)}
+            wanted=sorted({int(index) for index in (indexes if isinstance(indexes,(list,tuple)) else [indexes])})
+            if not wanted or any(not 0<=index<len(entries) for index in wanted):raise ValueError('Choose at least one model from the selected folder.')
+            self._mobile_selection=None
+            total=link.queue_selection(entries,wanted,folder,kind)
+            result=link.stage_next(request_id)
+            if result is None:raise ValueError('Phone connection is off.')
+            return {'model':result,'queued':total-1}
+        except Exception as error:
+            link.clear_queue()
+            return {'error':str(error)}
 
     def show_phone_transfer(self):
         win=self.holder.get('window')
@@ -523,8 +557,63 @@ def run_server():
             log_level="warning",
         ))
         _desktop_server.run()
-    except OSError:
+    except OSError as error:
+        # A refused bind is why the window has nothing to talk to; saying so in the
+        # crash log is the only trace this thread would otherwise leave.
+        _note_backend('The backend could not serve on port ' + str(gui_server.port) + ': ' + str(error)[:200])
+
+
+BACKEND_PROBE_SECONDS = 15
+BACKEND_RESTART_LIMIT = 2
+_backend_watch_stop = threading.Event()
+
+
+def backend_answers(timeout=1.5):
+    """True only when this installation's own backend answers on the port we chose."""
+    import json
+    from urllib.request import build_opener, ProxyHandler
+    from product import INSTALLATION_ID
+    try:
+        opener = build_opener(ProxyHandler({}))
+        with opener.open(f'http://{gui_server.HOST}:{gui_server.port}/api/identity', timeout=timeout) as response:
+            identity = json.load(response)
+    except Exception:
+        return False
+    return (identity.get('application') == 'sakura-anime-assistant' and identity.get('edition') == EDITION
+            and identity.get('installation') == INSTALLATION_ID)
+
+
+def _note_backend(message):
+    stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        _crash_log.write(f'[{stamp}] backend-watch: {message}\n');_crash_log.flush()
+    except (OSError, ValueError):
         pass
+    print(f'  Backend watch: {message}', flush=True)
+
+
+def supervise_backend(probe, restart, recover, note, stop, limit=BACKEND_RESTART_LIMIT, interval=BACKEND_PROBE_SECONDS):
+    """Watch the local backend and bring it back a bounded number of times.
+
+    A uvicorn thread that stops answering leaves the floating window with nothing to talk to,
+    which looks exactly like a blank or dead companion. The budget exists because a fault that
+    survives two restarts is not a restart problem, and an endless loop would keep fighting the
+    user's own fixes. Nothing outside this process is restarted.
+    """
+    sleeper = stop.wait if stop is not None else time.sleep
+    restarts = 0
+    while True:
+        if sleeper(interval):return 'stopped'
+        if probe():continue
+        if restarts >= limit:
+            note('The backend stopped answering and ' + str(limit) + ' restarts did not recover it. '
+                 'Close and reopen Sakura; nothing else was restarted.')
+            return 'gave-up'
+        restarts += 1
+        if restart():
+            note('Restarted the backend after it stopped answering (' + str(restarts) + ' of ' + str(limit) + ').')
+            recover()
+            return 'recovered'
 
 
 def exclude_companion_from_capture():
@@ -815,6 +904,13 @@ def main():
 
             @Slot(bool)
             def set_surface_transparency(self, enabled):
+                enabled = bool(enabled)
+                # Multiple UI paths synchronize this state. Reapplying the
+                # same native page background invalidates the layered window
+                # unnecessarily and can flash over the retained WebGL frame.
+                if holder.get('surface_transparent', False) == enabled:
+                    return
+                holder['surface_transparent'] = enabled
                 native.webview.page().setBackgroundColor(
                     QColor(Qt.transparent) if enabled else QColor('#090713'))
                 timer = holder.get('surface_timer')
@@ -1074,6 +1170,34 @@ def main():
         target=register_companion_hotkey, daemon=True
     ).start()
 
+    def reload_companion_page():
+        # evaluate_js waits on the Qt loop, so the reload is delivered from its own thread.
+        threading.Thread(target=window.evaluate_js, args=('window.location.reload()',), daemon=True).start()
+
+    def restart_backend():
+        """Ask the wedged server to release its port, then serve again in a fresh thread."""
+        global _desktop_server
+        previous = _desktop_server
+        if previous is not None:
+            previous.should_exit = True
+            previous.force_exit = True
+        candidate = threading.Thread(target=run_server, daemon=True, name='sakura-backend-restart')
+        candidate.start()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if backend_answers():return True
+            time.sleep(0.2)
+        return False
+
+    if not existing_backend:
+        # Only the backend this launch owns is watched; reusing another window's
+        # server must never be restarted from here.
+        _backend_watch_stop.clear()
+        threading.Thread(target=supervise_backend, name='sakura-backend-watch', daemon=True,
+                         args=(backend_answers, restart_backend, reload_companion_page,
+                               _note_backend, _backend_watch_stop)).start()
+        window.events.closed += _backend_watch_stop.set
+
     # Start pywebview main event loop
     try:
         # Qt installs this icon while constructing the native window, before
@@ -1081,6 +1205,9 @@ def main():
         webview.start(gui='qt', debug=False, icon=str(APP_ICON_PATH),
                       private_mode=False, storage_path=str(PROFILE_DIR))
     finally:
+        # Stop watching before tearing the server down, or the watcher would
+        # restart a backend the closing window had just finished with.
+        _backend_watch_stop.set()
         # Finish the owned backend before Python shuts down its executors.
         # Otherwise a closing window can leave a half-alive HTTP server that
         # accepts requests but cannot synthesize voice or schedule work.

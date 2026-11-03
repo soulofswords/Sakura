@@ -36,6 +36,12 @@ def page(body=b'<html><body><p>Page text</p></body></html>', status=200, **heade
 
 
 class WebToolTests(unittest.TestCase):
+    def test_public_fetch_disables_ambient_proxy_routing(self):
+        with patch('agent_web.requests.get', return_value=page()) as get:
+            agent_web.fetch('https://example.com/')
+        self.assertFalse(get.call_args.kwargs['allow_redirects'])
+        self.assertEqual(get.call_args.kwargs['proxies'], {'http': '', 'https': '', 'all': ''})
+
     def setUp(self):
         # Keep real DNS out of these tests; example.com resolves to a public host.
         self.dns = patch('agent_web.socket.getaddrinfo', return_value=list(PUBLIC))

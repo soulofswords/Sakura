@@ -19,6 +19,10 @@ ID = re.compile(r'^[a-zA-Z0-9_-]{1,100}$')
 LINK_PORT = 8766
 UNREADABLE = 'Sakura could not read the answer from the account service. Try again, and if it keeps happening check the library address with its owner.'
 _install_lock = threading.Lock()
+# Live byte progress for in-flight cloud installs, so the library card can show
+# downloaded / total, speed and an ETA while the download runs on a worker thread.
+_install_progress = {}
+_progress_lock = threading.Lock()
 
 
 class AccountError(ValueError):
@@ -173,26 +177,39 @@ class ModelLibrary:
                 # Updating replaces neither user edits nor an existing character.
                 return {'ok': True, 'models': old['models'], 'already_installed': True,
                         'message': 'Already installed. Your existing character and edits were kept.'}
-            with self._request('/v1/models/' + identifier + '/package') as response:
-                content = bytearray()
-                digest = hashlib.sha256()
-                for chunk in response.iter_content(65536):
-                    content.extend(chunk)
-                    digest.update(chunk)
-                    if len(content) > entry['bytes'] or len(content) > MAX_BYTES:
-                        raise ValueError('The download exceeded its declared size.')
-            if len(content) != entry['bytes'] or digest.hexdigest() != entry['sha256']:
-                raise ValueError('The model download failed its integrity check. Nothing was installed.')
-            from scenery_assets import asset_kind
-            kind=asset_kind(entry['name']) if entry['format']=='pmx' else 'character'
-            result = import_package(self.root, [('library.zip', content)], entry['format'], entry['name'], identifier,kind)
-            record = {**entry, 'models': result['models']}
-            folder = self.root / '.library'
-            folder.mkdir(exist_ok=True)
-            temporary = folder / (identifier + '.tmp')
-            temporary.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
-            temporary.replace(folder / (identifier + '.json'))
-            return {'ok': True, **result}
+            total = entry['bytes']
+
+            def _report(stage, downloaded):
+                with _progress_lock:
+                    _install_progress[identifier] = {'downloaded': max(0, min(downloaded, total)),
+                                                     'total': total, 'stage': stage}
+            try:
+                _report('download', 0)
+                with self._request('/v1/models/' + identifier + '/package') as response:
+                    content = bytearray()
+                    digest = hashlib.sha256()
+                    for chunk in response.iter_content(65536):
+                        content.extend(chunk)
+                        digest.update(chunk)
+                        _report('download', len(content))
+                        if len(content) > entry['bytes'] or len(content) > MAX_BYTES:
+                            raise ValueError('The download exceeded its declared size.')
+                if len(content) != entry['bytes'] or digest.hexdigest() != entry['sha256']:
+                    raise ValueError('The model download failed its integrity check. Nothing was installed.')
+                _report('installing', total)
+                from scenery_assets import asset_kind
+                kind=asset_kind(entry['name']) if entry['format']=='pmx' else 'character'
+                result = import_package(self.root, [('library.zip', content)], entry['format'], entry['name'], identifier,kind)
+                record = {**entry, 'models': result['models']}
+                folder = self.root / '.library'
+                folder.mkdir(exist_ok=True)
+                temporary = folder / (identifier + '.tmp')
+                temporary.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
+                temporary.replace(folder / (identifier + '.json'))
+                return {'ok': True, **result}
+            finally:
+                with _progress_lock:
+                    _install_progress.pop(identifier, None)
 
 
 def router(root, local_check):
@@ -358,6 +375,17 @@ def router(root, local_check):
             return await run_in_threadpool(client.install, identifier)
         except (ValueError, requests.RequestException, OSError):
             return JSONResponse({'error': 'Installation failed. Check access, free space and the model package. Your existing models were kept.'}, 400)
+
+    @routes.get('/models/{identifier}/install-progress')
+    async def install_progress(identifier: str, request: Request):
+        # Read-only peek at the worker thread's in-flight byte count; the card polls
+        # this to render downloaded / total, speed and an ETA during a cloud install.
+        if not local_check(request):
+            return JSONResponse({'error': 'Use Sakura on this computer.'}, 403)
+        with _progress_lock:
+            state = dict(_install_progress.get(str(identifier)) or {})
+        return {'downloaded': int(state.get('downloaded', 0)), 'total': int(state.get('total', 0)),
+                'stage': str(state.get('stage', 'idle'))}
 
     @routes.get('/models/{identifier}/preview')
     async def preview(identifier: str, request: Request):

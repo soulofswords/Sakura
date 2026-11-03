@@ -5,12 +5,13 @@ let requests=0,messages=0;
 const now=100000;
 const context={Date:{now:()=>now},trackingOnly:false,lastDirectReplyAt:now-1000,
  vtuberEnabled:false,lastCoHostSpeech:0,autoGameEnabled:false,gameActive:false,
- reactionsEnabled:true,reactionBusy:false,chatBusy:false,isRecording:false,lastMicActivity:0,
+ reactionsEnabled:true,reactionBusy:false,chatBusy:false,speechRecognitionBusy:0,isRecording:false,lastMicActivity:0,
  lipSync:{isPlaying:false},chatReplyGeneration:1,continuousMic:{enabled:false},viewer:null,
  listeningStatus:{},document:{getElementById:()=>({checked:false})},
  screenShare:{enabled:true,snapshot:async()=>'/9j/image',recentFrames:()=>[]},
  fetch:async()=>{requests++;context.lastDirectReplyAt=now;return{ok:true,json:async()=>({reply:'An unsolicited second reply.'})};},
  addMessage(){messages++;},hideSpeechBubble(){}};
+context.companionSleeping=false;
 vm.createContext(context);vm.runInContext(code,context);
 (async()=>{
  await context.reactToScreen();assert.equal(requests,0,'Direct answer gives the conversation quiet time');
@@ -18,5 +19,7 @@ vm.createContext(context);vm.runInContext(code,context);
  await context.reactToScreen();assert.equal(requests,1);
  assert.equal(messages,0,'A direct reply arriving during background inference cancels the unsolicited message');
  assert.equal(context.reactionBusy,false,'Reaction lock released after cancellation');
+ context.speechRecognitionBusy=1;context.lastDirectReplyAt=0;context.gameActive=true;context.gameReady=true;context.currentSettings={game_play_mode:'multiplayer'};
+ await context.reactToScreen();assert.equal(requests,1,'Multiplayer background reactions cannot interrupt pending transcription');
  console.log('PASS: direct replies pause screen reactions and cancel in-flight unsolicited replies');
 })().catch(error=>{console.error(error);process.exitCode=1;});

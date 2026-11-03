@@ -1,0 +1,20 @@
+const fs=require('fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({headless:true});try{
+ const page=await browser.newPage({viewport:{width:390,height:800}});
+ await page.route('http://browser.test/**',r=>r.fulfill({contentType:'text/html',body:'<main></main>'}));
+ await page.goto('http://browser.test/');await page.addScriptTag({content:fs.readFileSync('static/js/agent-browser-panel.js','utf8')});
+ await page.evaluate(()=>{window.calls=[];window.run={id:'task',steps:[]};window.ui=installAgentBrowserPanel({token:'test',selectedRun:()=>run,api:async(path,body)=>calls.push({path,body}),refresh:async()=>{},perform:fn=>fn().catch(e=>window.error=e.message)});ui.render(run);});
+ assert.equal(await page.locator('#agent-browser-image').isVisible(),false);
+ await page.locator('#agent-browser-url').fill('https://example.com');await page.locator('#agent-browser-open').click();
+ assert.equal(await page.evaluate(()=>calls[0].body.tool),'browser.open');
+ assert.equal(await page.evaluate(()=>calls[0].path),'tasks/task/propose');
+ await page.route('**/api/agent/browser/task/preview',r=>r.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==','base64')}));
+ await page.evaluate(()=>{run.steps=[{id:'step',tool:'browser.open',status:'completed',result:{url:'https://example.com',snapshot:'snapshot',text:'Page content',elements:[{element:0,tag:'A',text:'<script>untrusted</script>'},{element:1,tag:'INPUT',type:'password'}]}}];ui.render(run);});
+ await page.waitForFunction(()=>document.getElementById('agent-browser-image').src.startsWith('blob:'));
+ assert.equal(await page.locator('#agent-browser-elements script').count(),0);
+ assert.equal(await page.locator('#agent-browser-elements button').nth(1).isDisabled(),true);
+ await page.locator('#agent-browser-elements button').first().click();
+ assert.equal(await page.evaluate(()=>calls.at(-1).body.arguments.snapshot),'snapshot');
+ await page.evaluate(()=>{run={id:'other',steps:[]};ui.render(run);});assert.equal(await page.locator('#agent-browser-image').isVisible(),false);
+ console.log('PASS: isolated browser preview, reviewed navigation and clicks, secret field exclusion, safe text and task reset');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

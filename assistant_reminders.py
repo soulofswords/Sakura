@@ -4,7 +4,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -108,6 +108,91 @@ class Reminders:
         except (OSError,ValueError,KeyError,TypeError):
             return 'I could not update the timer/alarm file. Your request was not confirmed; please try again.'
         return None
+
+
+def archaeology_nudge():
+    """Opt-in quiet offer, at most once per two weeks. Never create an alarm."""
+    try:return _archaeology_nudge()
+    except Exception:return None  # Optional memory indexing must never break actual timers/alarms.
+
+def _archaeology_nudge():
+    from memory_archaeology import service
+    from atomic_state import state_lock,atomic_text
+    archive=service()
+    if not archive or not archive.enabled():return None
+    with state_lock(archive.config):
+        config=archive.settings();now=archive.clock()
+        if now-config.get('last_nudge',0)<14*86400:return None
+        if now-config.get('last_nudge_check',0)<86400:return None
+        config['last_nudge_check']=now;atomic_text(archive.config,json.dumps(config))
+        # Revalidate links from current sources before calling anything unconnected.
+        archive.recall('',1)
+        count=archive.unconnected()
+        if count<5:return None
+        config['last_nudge']=now;atomic_text(archive.config,json.dumps(config))
+        return {'count':count,'message':f'You have {count} saved things older than a week with no linked records. Want to revisit what they were for?'}
+
+
+def calendar_context_nudge():
+    """Optional hourly read, with account binding and daily notification cooldown.
+
+    Calendar access is separate from local saved-context opt-in. Failures never
+    interrupt alarms. The MCP read is bounded to 20 upcoming events/72 hours.
+    """
+    try:
+        return _calendar_context_nudge()
+    except Exception:
+        return None
+
+
+def _calendar_context_nudge():
+    from memory_archaeology import service
+    from atomic_state import state_lock,atomic_text
+    from agent_service_mcp import binding, execute
+    import hashlib
+    archive=service()
+    if not archive or not archive.enabled():return None
+    with state_lock(archive.config):
+        config=archive.settings();now=archive.clock()
+        if not config.get('calendar_context_enabled'):return None
+        if now-config.get('last_calendar_check',0)<3600:return None
+        config['last_calendar_check']=now;atomic_text(archive.config,json.dumps(config))
+    account=binding('google-calendar')
+    result=execute('google-calendar','calendar.events.list',{
+        'account_binding':account,'calendar_id':'primary',
+        'time_min':datetime.fromtimestamp(now,timezone.utc).isoformat(),
+        'time_max':datetime.fromtimestamp(now+72*3600,timezone.utc).isoformat(),
+        'max_results':20})
+    if not isinstance(result,dict) or not result.get('ok'):return None
+    events=result.get('events',[])
+    if not isinstance(events,list):return None
+    summaries=[{'summary':str(e.get('summary',''))[:500],'start':_event_start(e),
+                'event_id':str(e.get('id',''))[:1024]} for e in events[:20] if isinstance(e,dict) and e.get('status')!='cancelled']
+    matches=archive.related_to_calendar(summaries)
+    if not matches or not archive.enabled() or binding('google-calendar')!=account:return None
+    match=matches[0]
+    signature=hashlib.sha256(json.dumps([account,match['save']['id'],match['event']['event_id'],match['event']['start']]).encode()).hexdigest()
+    with state_lock(archive.config):
+        config=archive.settings()
+        if not config.get('calendar_context_enabled'):return None
+        if signature==config.get('last_calendar_offer') or now-config.get('last_calendar_nudge',0)<86400:return None
+        config.update(last_calendar_offer=signature,last_calendar_nudge=now)
+        atomic_text(archive.config,json.dumps(config))
+    return {'message':'Your upcoming event “'+match['event']['summary']+'” shares words with saved context “'+
+            (match['save']['topic'] or match['save']['url_or_path'])[:120]+'”. Want to revisit your saves?',
+            'save_id':match['save']['id'],'event_id':match['event']['event_id'],
+            'relationship':'Possible text match; not proof of intent.'}
+
+
+def _event_start(event):
+    """Calendar all-day dates use the PC local timezone; timed events keep their offset."""
+    value=event.get('start')
+    if isinstance(value,dict):value=value.get('dateTime') or value.get('date')
+    if isinstance(value,str):
+        try:return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
+        except (ValueError,OverflowError,OSError):return 0
+    if isinstance(value,(int,float)) and not isinstance(value,bool):return value
+    return 0
 
 
 reminders=Reminders(Path(__file__).parent/'reminders.json')
