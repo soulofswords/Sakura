@@ -69,6 +69,16 @@ def compile_cs(output, files, references=(), resource=None, bootstrap=None):
     if bootstrap: args += [f'/resource:{bootstrap},SakuraBootstrap']
     subprocess.run(args + [str(CS_DIR / file) for file in files], check=True)
 
+def static_files():
+    """Web payload shared by real builds and clean-checkout contract tests."""
+    for name in ('index.html','model-library-preview.html'):
+        yield BASE/'static'/name,'Sakura/static/'+name
+    for folder in ('js','css','assets','vendor','audio'):
+        for file in (BASE/'static'/folder).rglob('*'):
+            if file.is_file() and release_asset_allowed(file):
+                yield file,'Sakura/'+file.relative_to(BASE).as_posix()
+
+
 def app_files():
     from kokoro_speech import ASSETS, _hash
     for name, (size,digest) in ASSETS.items():
@@ -91,17 +101,12 @@ def app_files():
     yield BASE/'personality/sakura.txt', 'Sakura/personality/sakura.txt'
     for name in ('companion.ico','companion-vtuber.ico','vtuber.ico','model-upload.ico'):
         yield BASE/'launcher'/name,'Sakura/launcher/'+name
-    yield BASE/'static/index.html','Sakura/static/index.html'
-    yield BASE/'static/model-library-preview.html','Sakura/static/model-library-preview.html'
+    yield from static_files()
     camera=BASE/'native'/'sakura-camera'
     for name in ('bin/x64/sakura-camera64.dll','bin/x64/sakura-camera-bridge64.dll','install-camera.ps1','README.md','COPYING','source.zip'):
         path=camera/name
         if not path.is_file():raise RuntimeError('Build Sakura Virtual Camera before packaging: tools/build-sakura-camera.py')
         yield path,'Sakura/native/sakura-camera/'+name
-    for folder in ('js','css','assets','vendor','audio'):
-        for file in (BASE/'static'/folder).rglob('*'):
-            if file.is_file() and release_asset_allowed(file):
-                yield file, 'Sakura/' + file.relative_to(BASE).as_posix()
 
 def windows():
     print('Building Windows payload…', flush=True)

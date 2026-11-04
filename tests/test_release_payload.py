@@ -30,10 +30,9 @@ class ReleasePayloadTests(unittest.TestCase):
 
     def test_pages_loaded_by_shipped_scripts_are_packaged(self):
         builder=load('packaged_pages_builder','tools/build-installers.py')
-        # This checks page inclusion in a clean checkout, where optional speech
-        # weights are absent. Actual installer builds still verify every asset.
-        with patch.dict('kokoro_speech.ASSETS',{},clear=True):
-            packaged={name for _,name in builder.app_files()}
+        # Use the actual web payload iterator, without requiring downloaded
+        # speech weights or compiled camera DLLs in a clean source checkout.
+        packaged={name for _,name in builder.static_files()}
         referenced={'Sakura'+match
                     for script in (BASE/'static/js').glob('*.js')
                     for match in re.findall(r'/static/[\w./-]+\.html',script.read_text(encoding='utf-8'))}
