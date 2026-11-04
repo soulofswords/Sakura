@@ -67,6 +67,18 @@ async def check():
     assert (await client.post('/api/companion/speakers/install',json={})).status_code==400
     assert (await client.post('/api/companion/speakers/rename',json={'name':'missing','new_name':''})).status_code==400
     from agent_runtime import runtime
+    from unittest.mock import patch
+    from agent_api import agent_router
+    policy_routes=agent_router(lambda *args:None).routes
+    policy=next(r.endpoint for r in policy_routes if r.path=='/api/agent/approval-policy' and 'POST' in r.methods)
+    decide=next(r.endpoint for r in policy_routes if r.path=='/api/agent/actions/{identifier}/decision')
+    with tempfile.TemporaryDirectory() as workspace,patch('agent_api.native_confirm',side_effect=AssertionError('Duplicate native prompt in Full access')):
+     assert (await policy({'mode':'full'}))['mode']=='full'
+     run=runtime.new_run('Installer Full access verification',workspace,False)
+     action=runtime.propose(run['id'],'files.write',{'path':'proof.md','content':'Full access verified'},'Installation check')['steps'][-1]
+     await decide(action['id'],{'approve':True})
+     assert (Path(workspace)/'proof.md').read_text()=='Full access verified'
+     assert (await policy({'mode':'ask'}))['mode']=='ask'
     from agent_starter_skills import PACK
     assert set(PACK).issubset({skill['name'] for skill in runtime.skills.list()}),'Starter skills missing from clean installation'
     response=await client.post('/api/tracking/mode',json={'enabled':True});assert response.status_code==200,response.text
