@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import re
 import unittest
+from unittest.mock import patch
 
 BASE=Path(__file__).resolve().parents[1]
 def load(name,path):
@@ -29,12 +30,21 @@ class ReleasePayloadTests(unittest.TestCase):
 
     def test_pages_loaded_by_shipped_scripts_are_packaged(self):
         builder=load('packaged_pages_builder','tools/build-installers.py')
-        packaged={name for _,name in builder.app_files()}
+        # This checks page inclusion in a clean checkout, where optional speech
+        # weights are absent. Actual installer builds still verify every asset.
+        with patch.dict('kokoro_speech.ASSETS',{},clear=True):
+            packaged={name for _,name in builder.app_files()}
         referenced={'Sakura'+match
                     for script in (BASE/'static/js').glob('*.js')
                     for match in re.findall(r'/static/[\w./-]+\.html',script.read_text(encoding='utf-8'))}
         self.assertIn('Sakura/static/model-library-preview.html',referenced)
         self.assertEqual(sorted(referenced-packaged),[])
+
+    def test_real_packaging_rejects_missing_voice_assets(self):
+        builder=load('missing_voice_builder','tools/build-installers.py')
+        with patch.dict('kokoro_speech.ASSETS',{'missing-ci-test.bin':(1,'invalid')},clear=True):
+            with self.assertRaisesRegex(RuntimeError,'Kokoro speech assets'):
+                list(builder.app_files())
 
 
     def test_editor_payload_excludes_reference_jobs_and_keeps_distribution(self):

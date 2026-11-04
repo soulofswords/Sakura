@@ -19,7 +19,7 @@ jobs:
       - name: Compile source without launching the app
         run: python -m compileall -q -x '(venv|runtime|private|models|tools/android-cache)' .
       - name: Agent safety, usage, imports and clean-workspace contracts
-        run: python -m pytest tests/test_jarvis_adaptations.py tests/test_agent_backends.py tests/test_agent_observability.py tests/test_agent_learning.py tests/test_release_payload.py tests/test_windows_release_builder.py tests/test_release_version.py -q
+        run: python -m pytest tests/test_jarvis_adaptations.py tests/test_agent_backends.py tests/test_agent_observability.py tests/test_agent_learning.py tests/test_release_payload.py tests/test_windows_release_builder.py tests/test_release_version.py tests/test_agent_approval_policy.py -q
       - name: JavaScript syntax
         shell: pwsh
         run: |
@@ -40,3 +40,5 @@ jobs:
       - run: python -m pip install pip-audit
       - name: Audit explicit Agent dependency profile
         run: python -m pip_audit -r requirements-agent.txt --progress-spinner off
+      - name: Audit core media and document dependencies
+        run: python -m pip_audit -r requirements.txt --progress-spinner off

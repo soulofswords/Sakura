@@ -57,17 +57,22 @@ def test_planner_executes_a_write_only_under_explicit_full_access(tmp_path):
     assert not (tmp_path/'next.md').exists()
 
 
-def test_bearer_alone_cannot_enable_broad_access(tmp_path,monkeypatch):
+def test_full_access_uses_panel_choice_without_duplicate_native_prompts(tmp_path,monkeypatch):
     runtime=AgentRuntime(Connections(tmp_path/'connections.json'));monkeypatch.setattr(agent_api,'runtime',runtime)
     app=FastAPI();app.include_router(agent_api.agent_router(lambda *args:Mock()))
     client=TestClient(app,base_url='http://127.0.0.1:8790',client=('127.0.0.1',3333))
     token=re.search(r"const token='([^']+)'",client.get('/agent').text)[1];headers={'X-Sakura-Agent':token}
-    with patch('agent_api.native_confirm',return_value=False):
-        assert client.post('/api/agent/approval-policy',headers=headers,json={'mode':'full'}).status_code==403
-    assert runtime.approval_policy()['mode']=='ask'
-    with patch('agent_api.native_confirm',return_value=True):
+    with patch('agent_api.native_confirm',return_value=False) as prompt:
+        assert client.post('/api/agent/approval-policy',json={'mode':'full'}).status_code==403
+        assert client.post('/api/agent/approval-policy',headers={**headers,'Origin':'https://outside.example'},json={'mode':'full'}).status_code==403
+        assert runtime.approval_policy()['mode']=='ask'
         assert client.post('/api/agent/approval-policy',headers=headers,json={'mode':'full'}).json()['mode']=='full'
-    with patch('agent_api.native_confirm') as prompt:
-        assert client.post('/api/agent/approval-policy',headers=headers,json={'mode':'ask'}).json()['mode']=='ask'
+        run=runtime.new_run('Write a draft',str(tmp_path),False)
+        step=runtime.propose(run['id'],'files.write',{'path':'draft.md','content':'Draft'},'Requested draft')['steps'][-1]
+        assert client.post('/api/agent/actions/'+step['id']+'/decision',headers=headers,json={'approve':True}).status_code==200
+        assert (tmp_path/'draft.md').read_text()=='Draft'
         prompt.assert_not_called()
-    assert client.post('/api/agent/approval-policy',json={'mode':'full'}).status_code==403
+        assert client.post('/api/agent/approval-policy',headers=headers,json={'mode':'ask'}).json()['mode']=='ask'
+        assert client.post('/api/agent/approval-policy',headers=headers,json={'mode':'balanced'}).status_code==403
+        prompt.assert_called_once()
+    assert AgentRuntime(Connections(tmp_path/'restart.json')).approval_policy()['mode']=='ask'

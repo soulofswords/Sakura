@@ -128,6 +128,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
             'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
 
     async def consent(title,details):
+        if runtime.approval_policy()['mode']=='full':return
         if not await call(native_confirm,title,details):
             raise HTTPException(403,'The native approval was rejected. Nothing was executed.')
 
@@ -202,7 +203,7 @@ def agent_router(model_getter,enabled=lambda:True,provider_status=None,voice_tra
     async def approval_policy_update(payload:dict):
         if set(payload)!={'mode'} or payload.get('mode') not in ('ask','balanced','full'):raise HTTPException(400,'Choose a valid approval mode.')
         mode=payload['mode']
-        if mode!='ask':await consent('Change Agent access',{'mode':mode,'scope':'All Agent tasks in this app session; resets on restart.',
+        if mode=='balanced':await consent('Change Agent access',{'mode':mode,'scope':'All Agent tasks in this app session; resets on restart.',
             'permissions':('Automatically run workspace reads and public web lookups; changes, commands and unknown MCP tools still require review.' if mode=='balanced' else 'Automatically run tools, file edits, commands and connected MCP actions. Commands run with your Windows permissions. Existing workspace validation still applies.'),
             'read_only_steps':'Automatic execution also requires the task’s auto-continue switch.'})
         return runtime.set_approval_mode(mode)
