@@ -1,42 +1,58 @@
 # Sakura
 
-Sakura is a desktop character companion and webcam VTuber application under active development. The source includes separate Companion and VTuber product launchers, a local web interface, and Windows/Apple Silicon packaging tools.
+An open-source character companion, VTuber studio and approval-based desktop agent.
 
-## Features
+[Download Sakura 2.0](https://github.com/soulofswords/Sakura-Downloads/releases/tag/v2.0) · [Website](https://soulofswords.github.io/Sakura-website/) · [Companion guide](docs/user-guides/companion.md) · [VTuber guide](docs/user-guides/vtuber.md)
 
-- PMX, VRM and Live2D model loading, expressions and model settings.
-- Webcam face and optional hand tracking, physics, and streaming controls.
-- Companion conversations through selected cloud providers or an optional local Qwen model, with provider-bound model discovery and small API generation checks.
-- Sakura Mobile: separate PC-controller and phone-local model/chat workflows, with authenticated model transfer and saved phone models.
-- Built-in speech voices and optional RVC voice conversion.
-- Optional NVIDIA Broadcast camera selection and NVIDIA AR SDK setup guidance. Native NVIDIA AR facial inference is not connected yet.
+## Choose your experience
 
-See [15 October 2026 update notes](docs/UPDATE-2026-10-15.md) for mobile setup, cloud diagnostics, animation, rendering and installer changes, including testing limitations. Source stays private; compiled/obfuscated tester builds are published separately in [Sakura Downloads](https://github.com/soulofswords/Sakura-Downloads/releases/tag/windows-beta-2026-10-25).
+- **Companion:** talk or type to your character using a selected local or cloud AI model, with speech, expressions and optional screen/camera context.
+- **VTuber:** animate PMX, VRM or Live2D characters with face and optional hand tracking. The standalone VTuber edition does not run the Companion chat/Agent LLM; chat reading and voice conversion are separate features.
+- **Agent (inside Companion):** plan tasks with workspace file tools, terminal commands, browser tools, skills, automations and connected MCP services. Review actions using the configured access policy.
+- **Sakura Mobile:** pair with your PC for tracking/control and model transfer, or use supported phone-local workflows.
+
+Character controls include model import, materials/textures, expressions, physics and streaming/output settings. Optional integrations need compatible hardware, separately installed runtimes or your own service account. Code presence alone does not guarantee that a particular device or provider works.
 
 ## Run from source on Windows
 
-Install Python 3.12 and Git, clone this repository, and run:
+Use Python 3.12 and Git:
 
 ```powershell
+git clone https://github.com/soulofswords/Sakura.git
+cd Sakura
 python -m venv venv
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
 .\venv\Scripts\python.exe desktop.py
 ```
 
-Use `run_gui.bat` for the web interface. Import your own character models using the application. Character artwork, voice weights, local LLM weights, virtual environments and private configuration are deliberately excluded from this repository. Add a Gemini key in the application or choose the optional local-model download; no LLM download is required for webcam-only tracking.
+The desktop entry point opens a native window. The UI/backend communicate through a local loopback server. `run_gui.bat` opens the browser interface instead.
 
-For Apple Silicon setup, see [docs/MACOS.md](docs/MACOS.md).
+Import your own models in the app. PMX and Live2D need their texture/assets folders; VRM uses a `.vrm` file. Add provider credentials in the app or install an optional local inference runtime/model. Webcam-only tracking does not require an LLM. Optional RVC dependencies are listed in `requirements-rvc.txt`.
 
-## Development and packaging
+Windows is the primary tested desktop target. [macOS notes](docs/MACOS.md) describe the separate Apple Silicon setup; build scripts alone are not a claim of a tested current macOS release.
 
-Application code is in the root Python modules and `static/`. Native launcher and installer sources are in `launcher/`; build scripts and validation tools are in `tools/` and `tests/`.
+## Source and development
 
-`tools/build-split-installers.py` builds the separate product packages. Packaging needs local Python dependencies and packaging prerequisites; generated installers, build caches and reports are not stored in Git. Some model validation scripts require locally imported models.
+This repository now includes **AI Companion/Agent source, VTuber source and Android source**. The public starting point incorporates the existing `release/companion-2.0` source snapshot. Unfinished local workspace changes are not silently included in this publication.
 
-Third-party libraries retain their own licenses and distribution terms. A private repository does not grant redistribution rights to imported models, artwork, voice weights or SDKs.
+- Root Python modules: backend; `static/`: web UI/renderer; `android/`: mobile client.
+- `launcher/`: Windows launchers/installers; `tools/`: packaging/checks; `docs/`: guides.
+- Python checks: install `pytest`, then run `.\venv\Scripts\python.exe -m pytest tests/ -q`.
+- Browser checks need Node.js and Playwright installed locally before running the relevant `tests/*.cjs` files. Some checks need Windows or local test assets.
+- `tools/build-split-installers.py` builds the editions when its native/runtime prerequisites are present. Build output and personal configuration are not committed source dependencies.
 
-## Feedback
+Use [Sakura Downloads](https://github.com/soulofswords/Sakura-Downloads/releases) for current installers/APKs. Older illustrated guide screenshots may still carry their original version labels.
 
-This app is currently under development. Feedback is welcome through [Discord](https://discord.gg/kgxeMRFWDw).
+## Privacy and contributions
 
-Latest release: [25 October 2026 Windows + Android beta](https://github.com/soulofswords/Sakura-Downloads/releases/tag/windows-beta-2026-10-25). See [release notes](docs/UPDATE-2026-10-25.md) and the separate [Companion](docs/user-guides/companion.md) / [VTuber](docs/user-guides/vtuber.md) guides for the current UI.
+API keys, account sessions, MCP credentials, conversations, saved voice profiles, character libraries, RVC weights and LLM weights are **not included**. Configure your own accounts locally. Cloud-model sign-in does not expose the publisher's storage account.
+
+Do not commit private configuration or recordings. See [SECURITY.md](SECURITY.md) for vulnerability reporting and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance.
+
+## Licence
+
+Copyright © 2026 Gaurang Bhogle and Sakura contributors. Sakura's original application source is available under **GNU GPL v3.0**, with the narrow optional Live2D integration permission in [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md). See [LICENSE](LICENSE).
+
+Third-party libraries retain their original licences. Live2D Cubism Core remains proprietary and is **not** relicensed under GPL. Imported artwork, voices, models, SDKs and services retain their own terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Feedback: [GitHub issues](https://github.com/soulofswords/Sakura/issues) or [Discord](https://discord.gg/kgxeMRFWDw).
