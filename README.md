@@ -139,6 +139,26 @@ The renderer and desktop window are moving to **Unity 6 (URP)** for native trans
 - Deepen Agent mode: errand workflows and per-task model memory.
 - Android parity for the Unity client.
 
+## FAQ
+
+**Is Sakura free and open source?**
+Yes. The code is GPL-3.0 and the Windows installers, Android APK and guides are free to download. There is no subscription and no account requirement.
+
+**Does it work offline?**
+Yes. The default path runs a local LLM, on-device speech synthesis and local voice conversion. Cloud AI, cloud speech and phone linking are optional and only used when you configure them.
+
+**Which character formats can I import?**
+Live2D Cubism models, PMX/PMD models from MMD, and VRM 0.x/1.0 avatars. Your models stay on your disk; nothing is uploaded.
+
+**Is there an Android app?**
+Yes. Sakura Mobile is an Android companion client that pairs with the desktop backend over your LAN and can act as a webcam/phone tracking source.
+
+**How is Sakura different from Open-LLM-VTuber or AIRI?**
+Those are excellent projects with different starting points. Sakura is a packaged desktop application first: native transparent windows, one renderer for Live2D/PMX/VRM, a VTuber studio, a phone tracking source and an approval-based desktop agent in the same install. It is local-first by default and built for people who want an app rather than a stack to assemble.
+
+**Does it send my conversations or models anywhere?**
+No, not by default. Conversation, memory, models and voice run locally. Network features are opt-in, and the desktop agent asks for approval before actions.
+
 ## Feedback and contributing
 
 Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately via [SECURITY.md](SECURITY.md). Community chat: [Discord](https://discord.gg/kgxeMRFWDw).
